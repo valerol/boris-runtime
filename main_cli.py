@@ -1,17 +1,22 @@
+from adapters.cli import CLIAdapter
 from kernel.runtime import BORISKernel
 
-kernel = BORISKernel()
 
-print("BORIS CLI READY")
+def main():
+    adapter = CLIAdapter(BORISKernel())
 
-while True:
-    user_input = input("> ")
+    print("BORIS CLI READY")
 
-    if user_input in ["exit", "quit"]:
-        break
+    while True:
+        user_input = input("> ").strip()
 
-    event = {"input": user_input}
+        if user_input.lower() in {"exit", "quit"}:
+            break
 
-    result = kernel.run(event)
+        print(f"QUESTION: {user_input}")
+        result = adapter.handle(user_input)
+        print(f"{result['type']}: {result['content']}")
 
-    print("\n", result)
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,6 @@
 fastapi
 uvicorn
 openai
+python-dotenv
 pydantic
-sqlite3
+pytest

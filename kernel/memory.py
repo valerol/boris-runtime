@@ -4,8 +4,8 @@ import time
 
 class Memory:
 
-    def __init__(self):
-        self.conn = sqlite3.connect("boris.db")
+    def __init__(self, path="boris.db"):
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self._init()
 
     def _init(self):
@@ -21,6 +21,18 @@ class Memory:
         """)
 
         self.conn.commit()
+
+    def read_recent(self, limit=10):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT ts, state, data FROM events ORDER BY id DESC LIMIT ?",
+            (limit,)
+        )
+        rows = cur.fetchall()
+        return [
+            {"ts": ts, "state": state, "data": json.loads(data)}
+            for ts, state, data in rows
+        ]
 
     def write(self, state, data):
         cur = self.conn.cursor()

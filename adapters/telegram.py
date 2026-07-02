@@ -1,26 +1,23 @@
 from uuid import uuid4
 
 
-class CLIAdapter:
+class TelegramAdapter:
 
     def __init__(self, kernel):
         self.kernel = kernel
 
-    def normalize(self, user_input, session_id="cli"):
+    def normalize(self, text, session_id="telegram"):
         return {
             "session_id": session_id,
-            "input": user_input,
+            "input": text,
             "meta": {
-                "source": "cli"
+                "source": "telegram"
             }
         }
 
-    def handle(self, user_input, session_id="cli"):
+    def handle(self, text, session_id="telegram"):
         trace_id = str(uuid4())
-        event = self.normalize(user_input, session_id=session_id)
-        return self.format_response(self.kernel.run(event), trace_id)
-
-    def format_response(self, result, trace_id):
+        result = self.kernel.run(self.normalize(text, session_id=session_id))
         response_type = result.get("type", "ERROR")
         return {
             "type": response_type,
