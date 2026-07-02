@@ -1,0 +1,64 @@
+{
+  "entrypoint": "INGEST",
+
+  "states": {
+    "INGEST": {
+      "type": "input",
+      "next": "LOAD_CONTEXT"
+    },
+
+    "LOAD_CONTEXT": {
+      "type": "memory_read",
+      "next": "SIMA_ANALYZE"
+    },
+
+    "SIMA_ANALYZE": {
+      "type": "analysis",
+      "engine": "SIMA",
+      "next": "BOIS_REASON"
+    },
+
+    "BOIS_REASON": {
+      "type": "reasoning",
+      "engine": "BOIS",
+      "next": "GAP_DETECTION"
+    },
+
+    "GAP_DETECTION": {
+      "type": "decision",
+      "next_true": "ASK_OPERATOR",
+      "next_false": "TOOL_ROUTING"
+    },
+
+    "ASK_OPERATOR": {
+      "type": "interaction",
+      "next": "RETURN"
+    },
+
+    "TOOL_ROUTING": {
+      "type": "routing",
+      "next": "EXECUTION"
+    },
+
+    "EXECUTION": {
+      "type": "action",
+      "next": "RESPONSE_BUILD"
+    },
+
+    "RESPONSE_BUILD": {
+      "type": "generation",
+      "engine": "LLM",
+      "next": "WRITE_MEMORY"
+    },
+
+    "WRITE_MEMORY": {
+      "type": "memory_write",
+      "next": "RETURN"
+    },
+
+    "RETURN": {
+      "type": "output",
+      "final": true
+    }
+  }
+}
