@@ -4,6 +4,7 @@ from core.loader import SchemaLoader
 from kernel.llm import LLM
 from kernel.memory import Memory
 from kernel.runtime import BORISKernel
+import main_cli
 from physiology.domain import DEFAULT_DOMAIN
 
 
@@ -97,6 +98,50 @@ def test_runtime_response_contract_separates_answer_trace_state(monkeypatch):
     assert result["state"]["domain"]["name"] == "default"
 
 
+def test_explanatory_input_returns_single_answer_terminal(monkeypatch):
+    kernel = build_test_kernel(monkeypatch)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "Explain BOIS Runtime v0",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] == "ANSWER"
+    assert result["answer"]
+    assert result["type"] != "CLARIFICATION"
+    assert result["state"]["phase"] == "FINALIZE"
+
+
+def test_empty_input_returns_single_non_answer_terminal(monkeypatch):
+    kernel = build_test_kernel(monkeypatch)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] in {"CLARIFICATION", "ERROR"}
+    assert result["type"] != "ANSWER"
+    assert result["answer"]
+    assert result["state"]["phase"] == "DECIDE"
+
+
+def test_ambiguous_non_empty_input_returns_one_terminal(monkeypatch):
+    kernel = build_test_kernel(monkeypatch)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "Do it",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] in {"CLARIFICATION", "ANSWER"}
+    assert result["type"] in {"ANSWER", "CLARIFICATION", "TOOL_REQUEST", "ERROR"}
+    assert result["answer"]
+
+
 def test_answer_does_not_contain_stringified_internal_json(monkeypatch):
     kernel = build_test_kernel(monkeypatch)
 
@@ -110,6 +155,31 @@ def test_answer_does_not_contain_stringified_internal_json(monkeypatch):
     assert '"sima":' not in result["answer"]
     assert "'bois':" not in result["answer"]
     assert '"bois":' not in result["answer"]
+
+
+def test_cli_skips_empty_prompt_after_answer(monkeypatch, capsys):
+    calls = []
+
+    class FakeAdapter:
+        def __init__(self, kernel):
+            self.kernel = kernel
+
+        def handle(self, user_input):
+            calls.append(user_input)
+            return {"type": "ANSWER", "answer": "ok"}
+
+    inputs = iter(["Explain BOIS Runtime v0", "", "quit"])
+
+    monkeypatch.setattr(main_cli, "BORISKernel", lambda: object())
+    monkeypatch.setattr(main_cli, "CLIAdapter", FakeAdapter)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    main_cli.main()
+
+    output = capsys.readouterr().out
+    assert calls == ["Explain BOIS Runtime v0"]
+    assert "ANSWER: ok" in output
+    assert "CLARIFICATION: need_more_input" not in output
 
 
 def test_default_domain_loads_correctly():

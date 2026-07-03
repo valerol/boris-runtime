@@ -1,6 +1,12 @@
 from runtime.contracts import runtime_response
 
 
+PHASE_INPUT = "INPUT"
+PHASE_ANALYZE = "ANALYZE"
+PHASE_DECIDE = "DECIDE"
+PHASE_FINALIZE = "FINALIZE"
+
+
 class BORISRuntimeEngine:
 
     def __init__(self, kernel, schema, max_steps=32):
@@ -46,6 +52,7 @@ class BORISRuntimeEngine:
 
         # 1. INPUT
         if t == "input":
+            event["phase"] = PHASE_INPUT
             self.state = node["next"]
             return event
 
@@ -57,6 +64,7 @@ class BORISRuntimeEngine:
 
         # 3. SIMA
         if t == "analysis":
+            event["phase"] = PHASE_ANALYZE
             out = self.kernel.sima.analyze(event)
             event["sima"] = out
             self.state = node["next"]
@@ -71,13 +79,14 @@ class BORISRuntimeEngine:
 
         # 5. GAP DETECTION
         if t == "decision":
-            gap = self.kernel.gap.detect(event["bois"])
+            event["phase"] = PHASE_DECIDE
+            decision = self.decide_next_state(event)
 
-            if gap:
-                self.state = node["next_true"]
-            else:
-                self.state = node["next_false"]
+            if self._is_terminal(decision):
+                self.state = self.schema["entrypoint"]
+                return decision
 
+            self.state = node["next_false"]
             return event
 
         # 6. INTERACTION
@@ -108,6 +117,7 @@ class BORISRuntimeEngine:
 
         # 9. LLM RESPONSE
         if t == "generation":
+            event["phase"] = PHASE_FINALIZE
             event["response"] = self.kernel.llm.generate({
                 "input": event.get("input", ""),
                 "domain": event.get("domain", {}),
@@ -135,6 +145,7 @@ class BORISRuntimeEngine:
                 trace=self._trace(event),
                 state={
                     "runtime_state": state,
+                    "phase": event.get("phase"),
                     "domain": self._domain_state(event)
                 },
                 actions=[event["action"]] if "action" in event else []
@@ -147,6 +158,35 @@ class BORISRuntimeEngine:
             answer=f"Unsupported runtime node type: {bad_type}",
             state={"runtime_state": self.state}
         )
+
+    def decide_next_state(self, event):
+        user_input = event.get("input", "").strip()
+
+        if not user_input:
+            return runtime_response(
+                "CLARIFICATION",
+                answer="Please provide a request.",
+                trace=self._trace(event),
+                state={
+                    "runtime_state": "GAP_DETECTION",
+                    "phase": PHASE_DECIDE,
+                    "domain": self._domain_state(event)
+                }
+            )
+
+        if self.kernel.gap.detect(event["bois"]):
+            return runtime_response(
+                "CLARIFICATION",
+                answer=", ".join(event["bois"].get("required_information", [])),
+                trace=self._trace(event),
+                state={
+                    "runtime_state": "GAP_DETECTION",
+                    "phase": PHASE_DECIDE,
+                    "domain": self._domain_state(event)
+                }
+            )
+
+        return {"type": "CONTINUE"}
 
     @staticmethod
     def _is_terminal(result):
@@ -170,6 +210,7 @@ class BORISRuntimeEngine:
         return {
             "session_id": event.get("session_id"),
             "source": event.get("meta", {}).get("source"),
+            "phase": event.get("phase"),
             "domain": event.get("domain", {}),
             "sima": event.get("sima", {}),
             "bois": event.get("bois", {}),

@@ -13,6 +13,9 @@ def main():
         if user_input.lower() in {"exit", "quit"}:
             break
 
+        if not user_input:
+            continue
+
         print(f"QUESTION: {user_input}")
         result = adapter.handle(user_input)
         print(f"{result['type']}: {result['answer']}")
