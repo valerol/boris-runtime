@@ -1,6 +1,5 @@
 # BOIS / SIMA / BORIS Middleware SDK — FULL EXECUTION ROADMAP v1
 
-## 0. Цель системы
 BOIS Middleware SDK — protocol execution layer + deterministic reasoning loop + adapter abstraction layer.
 
 ## GLOBAL ARCHITECTURE
