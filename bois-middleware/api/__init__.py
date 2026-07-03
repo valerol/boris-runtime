@@ -1,0 +1,2 @@
+"""Optional API adapter boundary."""
+

@@ -1,6 +1,12 @@
+# Core CLI has no required third-party dependencies.
+
+# Optional API adapter:
 fastapi
 uvicorn
-openai
-python-dotenv
 pydantic
+
+# Optional real LLM adapter:
+openai
+
+# Development:
 pytest
