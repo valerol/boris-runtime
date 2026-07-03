@@ -79,14 +79,12 @@ Legacy / archive:
 
 ## CLI Validation
 
-Run from the SDK directory:
+Run from the repository root:
 
 ```bash
-cd bois-middleware
 python cli/run.py
 ```
 
 The default CLI uses `MockLLMAdapter`, so it works without network access or API
 keys. Set `BOIS_LLM=openai` and `OPENAI_API_KEY` only when validating against a
 real OpenAI model.
-
