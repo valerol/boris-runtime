@@ -1,5 +1,11 @@
 # BOIS / SIMA / BORIS Middleware SDK
 
+## Documentation
+
+- [Roadmap](ROADMAP.md)
+- [Changelog](CHANGELOG.md)
+- [Architecture Reset](docs/architecture_reset.md)
+
 This repository has been reset from a runtime/platform MVP into a lightweight
 protocol middleware SDK.
 
@@ -30,5 +36,5 @@ database, vector store, Telegram, or Open WebUI dependency.
 
 ## Architecture
 
-Read `docs/architecture_reset.md` for the reset model, artifact
-reclassification, and execution pipeline.
+Read [docs/architecture_reset.md](docs/architecture_reset.md) for the reset
+model, artifact reclassification, and execution pipeline.
