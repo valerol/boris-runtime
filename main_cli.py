@@ -15,7 +15,7 @@ def main():
 
         print(f"QUESTION: {user_input}")
         result = adapter.handle(user_input)
-        print(f"{result['type']}: {result['content']}")
+        print(f"{result['type']}: {result['answer']}")
 
 
 if __name__ == "__main__":

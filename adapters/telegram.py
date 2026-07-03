@@ -19,12 +19,16 @@ class TelegramAdapter:
         trace_id = str(uuid4())
         result = self.kernel.run(self.normalize(text, session_id=session_id))
         response_type = result.get("type", "ERROR")
+        answer = result.get("answer", result.get("content", ""))
         return {
             "type": response_type,
-            "content": result.get("content", ""),
-            "state": result.get("state", ""),
+            "answer": answer,
+            "content": answer,
+            "trace": result.get("trace", {}),
+            "state": result.get("state", {}),
+            "actions": result.get("actions", []),
             "trace_id": trace_id,
             "meta": {
-                "requires_user_input": response_type == "QUESTION"
+                "requires_user_input": response_type == "CLARIFICATION"
             }
         }

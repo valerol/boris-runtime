@@ -4,6 +4,7 @@ from kernel.memory import Memory
 from kernel.llm import LLM
 from kernel.gap import GapDetector
 from core.loader import SchemaLoader
+from physiology.domain import DEFAULT_DOMAIN
 from runtime.engine import BORISRuntimeEngine
 
 class BORISKernel:
@@ -15,6 +16,7 @@ class BORISKernel:
         bois=None,
         gap=None,
         llm=None,
+        domain=None,
         schema_loader=None,
         engine=None
     ):
@@ -23,6 +25,7 @@ class BORISKernel:
         self.bois = bois or BOIS()
         self.gap = gap or GapDetector()
         self.llm = llm or LLM()
+        self.domain = domain or DEFAULT_DOMAIN
         self.schema_loader = schema_loader or SchemaLoader()
         self.engine = engine or BORISRuntimeEngine(self, self.schema_loader.schema)
 
