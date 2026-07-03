@@ -10,10 +10,17 @@ def main():
     while True:
         user_input = input("> ").strip()
 
-        if user_input.lower() in {"exit", "quit"}:
+        command = user_input.lower()
+
+        if command in {"exit", "quit", "q"}:
             break
 
         if not user_input:
+            print('Please enter a question or type "quit" to exit.')
+            continue
+
+        if command == "quite":
+            print('Did you mean "quit"? Type "quit" to exit.')
             continue
 
         print(f"QUESTION: {user_input}")

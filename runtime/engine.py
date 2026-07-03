@@ -175,13 +175,18 @@ class BORISRuntimeEngine:
             )
 
         if self.kernel.gap.detect(event["bois"]):
+            required_information = event["bois"].get("required_information", [])
             return runtime_response(
                 "CLARIFICATION",
-                answer=", ".join(event["bois"].get("required_information", [])),
-                trace=self._trace(event),
+                answer=self._clarification_answer(event),
+                trace={
+                    **self._trace(event),
+                    "clarification_reason": required_information
+                },
                 state={
                     "runtime_state": "GAP_DETECTION",
                     "phase": PHASE_DECIDE,
+                    "clarification_reason": required_information,
                     "domain": self._domain_state(event)
                 }
             )
@@ -217,3 +222,12 @@ class BORISRuntimeEngine:
             "route": event.get("route"),
             "action": event.get("action")
         }
+
+    @staticmethod
+    def _clarification_answer(event):
+        user_input = event.get("input", "").strip()
+
+        if user_input:
+            return f'Please clarify what you want me to do with: "{user_input}".'
+
+        return "Please clarify what you want to do."

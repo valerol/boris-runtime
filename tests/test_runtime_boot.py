@@ -219,6 +219,123 @@ def test_cli_skips_empty_prompt_after_answer(monkeypatch, capsys):
     assert "CLARIFICATION: need_more_input" not in output
 
 
+def test_cli_answer_is_terminal_and_quit_is_local(monkeypatch, capsys):
+    calls = []
+
+    class FakeAdapter:
+        def __init__(self, kernel):
+            self.kernel = kernel
+
+        def handle(self, user_input):
+            calls.append(user_input)
+            return {"type": "ANSWER", "answer": "Napoleon did not have an elephant."}
+
+    inputs = iter(["What color is Napoleon's elephant?", "quit"])
+
+    monkeypatch.setattr(main_cli, "BORISKernel", lambda: object())
+    monkeypatch.setattr(main_cli, "CLIAdapter", FakeAdapter)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    main_cli.main()
+
+    output = capsys.readouterr().out
+    assert calls == ["What color is Napoleon's elephant?"]
+    assert output.count("QUESTION: What color is Napoleon's elephant?") == 1
+    assert output.count("ANSWER:") == 1
+    assert "CLARIFICATION:" not in output
+
+
+def test_cli_quite_typo_is_local(monkeypatch, capsys):
+    calls = []
+
+    class FakeAdapter:
+        def __init__(self, kernel):
+            self.kernel = kernel
+
+        def handle(self, user_input):
+            calls.append(user_input)
+            return {"type": "CLARIFICATION", "answer": "should not happen"}
+
+    inputs = iter(["quite", "quit"])
+
+    monkeypatch.setattr(main_cli, "BORISKernel", lambda: object())
+    monkeypatch.setattr(main_cli, "CLIAdapter", FakeAdapter)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    main_cli.main()
+
+    output = capsys.readouterr().out
+    assert calls == []
+    assert 'Did you mean "quit"? Type "quit" to exit.' in output
+    assert "QUESTION: quite" not in output
+    assert "CLARIFICATION: need_more_input" not in output
+
+
+def test_cli_empty_input_is_local(monkeypatch, capsys):
+    calls = []
+
+    class FakeAdapter:
+        def __init__(self, kernel):
+            self.kernel = kernel
+
+        def handle(self, user_input):
+            calls.append(user_input)
+            return {"type": "CLARIFICATION", "answer": "should not happen"}
+
+    inputs = iter(["", "quit"])
+
+    monkeypatch.setattr(main_cli, "BORISKernel", lambda: object())
+    monkeypatch.setattr(main_cli, "CLIAdapter", FakeAdapter)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    main_cli.main()
+
+    output = capsys.readouterr().out
+    assert calls == []
+    assert 'Please enter a question or type "quit" to exit.' in output
+    assert "QUESTION:" not in output
+    assert "CLARIFICATION: need_more_input" not in output
+
+
+def test_cli_q_exits_locally(monkeypatch, capsys):
+    calls = []
+
+    class FakeAdapter:
+        def __init__(self, kernel):
+            self.kernel = kernel
+
+        def handle(self, user_input):
+            calls.append(user_input)
+            return {"type": "ANSWER", "answer": "should not happen"}
+
+    inputs = iter(["q"])
+
+    monkeypatch.setattr(main_cli, "BORISKernel", lambda: object())
+    monkeypatch.setattr(main_cli, "CLIAdapter", FakeAdapter)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    main_cli.main()
+
+    output = capsys.readouterr().out
+    assert calls == []
+    assert "QUESTION:" not in output
+
+
+def test_clarification_answer_is_user_facing(monkeypatch):
+    kernel = build_test_kernel(monkeypatch)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "Do it",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] == "CLARIFICATION"
+    assert result["answer"] != "need_more_input"
+    assert "Please clarify" in result["answer"]
+    assert "need_more_input" in result["trace"]["clarification_reason"]
+
+
 def test_runtime_engine_is_state_machine_owner():
     engine_source = inspect.getsource(runtime_engine.BORISRuntimeEngine)
     kernel_source = inspect.getsource(kernel_runtime)
