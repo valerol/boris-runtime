@@ -3,7 +3,7 @@ import inspect
 
 from adapters.cli import CLIAdapter
 from adapters.web import WebAdapter
-from core.loader import SchemaLoader
+from core.loader import EpistemicHierarchyLoader, SchemaLoader
 import kernel.runtime as kernel_runtime
 from kernel.llm import LLM
 from kernel.memory import Memory
@@ -19,11 +19,34 @@ def build_test_kernel(monkeypatch):
     return BORISKernel(memory=Memory(":memory:"), llm=LLM(api_key="", load_environment=False))
 
 
+class CountingLLM:
+
+    def __init__(self):
+        self.calls = 0
+
+    def generate(self, context):
+        self.calls += 1
+        return "counting llm answer"
+
+
 def test_schema_loads_from_core_package():
     schema = SchemaLoader().schema
 
     assert schema["entrypoint"] == "INGEST"
     assert "RETURN" in schema["states"]
+
+
+def test_epistemic_hierarchy_loads_priority_order():
+    hierarchy = EpistemicHierarchyLoader().hierarchy
+
+    assert hierarchy["priority_order"] == [
+        "DOMAIN",
+        "MEMORY",
+        "RUNTIME_STATE",
+        "LLM"
+    ]
+    assert hierarchy["question_memory"]["max_clarifications_per_session_topic"] == 2
+    assert "sima_uncertainty_clarification" in hierarchy["thresholds"]
 
 
 def test_kernel_initializes(monkeypatch):
@@ -235,6 +258,33 @@ def test_explanatory_input_returns_single_answer_terminal(monkeypatch):
     assert result["state"]["phase"] == "FINALIZE"
 
 
+def test_answer_decision_uses_epistemic_priority_order(monkeypatch):
+    kernel = build_test_kernel(monkeypatch)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "Explain BOIS Runtime v0",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] == "ANSWER"
+    assert result["trace"]["epistemic"]["priority_order"] == [
+        "DOMAIN",
+        "MEMORY",
+        "RUNTIME_STATE",
+        "LLM"
+    ]
+    assert [
+        item["source"] for item in result["trace"]["epistemic"]["decisions"]
+    ] == [
+        "DOMAIN",
+        "MEMORY",
+        "RUNTIME_STATE",
+        "LLM"
+    ]
+    assert result["trace"]["llm_allowed"] is True
+
+
 def test_empty_input_returns_single_non_answer_terminal(monkeypatch):
     kernel = build_test_kernel(monkeypatch)
 
@@ -248,6 +298,7 @@ def test_empty_input_returns_single_non_answer_terminal(monkeypatch):
     assert result["type"] != "ANSWER"
     assert result["answer"]
     assert result["state"]["phase"] == "DECIDE"
+    assert result["trace"]["epistemic"]["decisions"][0]["source"] == "DOMAIN"
 
 
 def test_ambiguous_non_empty_input_returns_one_terminal(monkeypatch):
@@ -419,6 +470,66 @@ def test_clarification_answer_is_user_facing(monkeypatch):
     assert result["answer"] != "need_more_input"
     assert "Please clarify" in result["answer"]
     assert "need_more_input" in result["trace"]["clarification_reason"]
+
+
+def test_llm_is_not_called_for_gap_clarification(monkeypatch):
+    llm = CountingLLM()
+    kernel = BORISKernel(memory=Memory(":memory:"), llm=llm)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "Do it",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] == "CLARIFICATION"
+    assert llm.calls == 0
+    assert [
+        item["source"] for item in result["trace"]["epistemic"]["decisions"]
+    ] == [
+        "DOMAIN",
+        "MEMORY",
+        "RUNTIME_STATE"
+    ]
+
+
+def test_question_memory_prevents_repeated_clarification(monkeypatch):
+    llm = CountingLLM()
+    kernel = BORISKernel(memory=Memory(":memory:"), llm=llm)
+    event = {
+        "session_id": "test",
+        "input": "Do it",
+        "meta": {"source": "test"}
+    }
+
+    first = kernel.run(event)
+    second = kernel.run(event)
+
+    assert first["type"] == "CLARIFICATION"
+    assert second["type"] == "ANSWER"
+    assert "best available answer" in second["answer"]
+    assert llm.calls == 0
+    assert kernel.memory.clarification_count("test", "do it") == 1
+
+
+def test_question_memory_limit_forces_answer_from_json_config(monkeypatch):
+    llm = CountingLLM()
+    memory = Memory(":memory:")
+    memory.remember_clarification("test", "do it", "first question")
+    memory.remember_clarification("test", "do it", "second question")
+    kernel = BORISKernel(memory=memory, llm=llm)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "Do it",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] == "ANSWER"
+    assert "best available answer" in result["answer"]
+    assert llm.calls == 0
+    assert result["trace"]["epistemic"]["decisions"][1]["source"] == "MEMORY"
+    assert result["trace"]["epistemic"]["decisions"][1]["max_clarifications"] == 2
 
 
 def test_runtime_engine_is_state_machine_owner():

@@ -13,3 +13,13 @@ class SchemaLoader:
 
     def get_state(self, state_name):
         return self.schema["states"][state_name]
+
+
+class EpistemicHierarchyLoader:
+
+    def __init__(self, path=None):
+        hierarchy_path = (
+            Path(path) if path else Path(__file__).with_name("epistemic_hierarchy.json")
+        )
+        with hierarchy_path.open("r", encoding="utf-8") as f:
+            self.hierarchy = json.load(f)

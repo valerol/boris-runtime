@@ -9,10 +9,11 @@ PHASE_FINALIZE = "FINALIZE"
 
 class BORISRuntimeEngine:
 
-    def __init__(self, kernel, schema, max_steps=32):
+    def __init__(self, kernel, schema, max_steps=32, epistemic_hierarchy=None):
         self.kernel = kernel
         self.schema = schema
         self.max_steps = max_steps
+        self.epistemic_hierarchy = epistemic_hierarchy or {}
         self.state = schema["entrypoint"]
 
     def run(self, event):
@@ -59,6 +60,10 @@ class BORISRuntimeEngine:
         # 2. MEMORY READ
         if t == "memory_read":
             event["memory"] = self.kernel.memory.read_recent()
+            self.kernel.memory.remember_input(
+                event.get("session_id", "default"),
+                event.get("input", "")
+            )
             self.state = node["next"]
             return event
 
@@ -118,14 +123,19 @@ class BORISRuntimeEngine:
         # 9. LLM RESPONSE
         if t == "generation":
             event["phase"] = PHASE_FINALIZE
-            event["response"] = self.kernel.llm.generate({
-                "input": event.get("input", ""),
-                "domain": event.get("domain", {}),
-                "sima": event.get("sima", {}),
-                "bois": event.get("bois", {}),
-                "route": event.get("route"),
-                "action": event.get("action")
-            })
+            if "force_answer" in event:
+                event["response"] = event["force_answer"]["answer"]
+            elif event.get("llm_allowed", True):
+                event["response"] = self.kernel.llm.generate({
+                    "input": event.get("input", ""),
+                    "domain": event.get("domain", {}),
+                    "sima": event.get("sima", {}),
+                    "bois": event.get("bois", {}),
+                    "route": event.get("route"),
+                    "action": event.get("action")
+                })
+            else:
+                event["response"] = self._llm_fallback_answer()
             self.state = node["next"]
             return event
 
@@ -160,38 +170,144 @@ class BORISRuntimeEngine:
         )
 
     def decide_next_state(self, event):
+        event["epistemic"] = {
+            "priority_order": self.epistemic_hierarchy["priority_order"],
+            "decisions": []
+        }
+
+        for source in self.epistemic_hierarchy["priority_order"]:
+            decision = self._apply_epistemic_source(source, event)
+            event["epistemic"]["decisions"].append(decision)
+
+            if decision["decision"] == "CLARIFICATION":
+                return self._clarification_response(event, decision)
+
+            if decision["decision"] == "ANSWER":
+                event["force_answer"] = decision
+                event["llm_allowed"] = False
+                return {"type": "CONTINUE"}
+
+        return {"type": "CONTINUE"}
+
+    def _apply_epistemic_source(self, source, event):
+        handlers = {
+            "DOMAIN": self._apply_domain_source,
+            "MEMORY": self._apply_memory_source,
+            "RUNTIME_STATE": self._apply_runtime_state_source,
+            "LLM": self._apply_llm_source
+        }
+        handler = handlers[source]
+        return handler(event)
+
+    def _apply_domain_source(self, event):
         user_input = event.get("input", "").strip()
 
         if not user_input:
-            return runtime_response(
-                "CLARIFICATION",
-                answer="Please provide a request.",
-                trace=self._trace(event),
-                state={
-                    "runtime_state": "GAP_DETECTION",
-                    "phase": PHASE_DECIDE,
-                    "domain": self._domain_state(event)
-                }
-            )
+            rule = self.epistemic_hierarchy["rules"]["DOMAIN"]["empty_input"]
+            return {
+                "source": "DOMAIN",
+                "decision": rule["decision"],
+                "answer": rule["answer"],
+                "reason": "empty_input"
+            }
 
-        if self.kernel.gap.detect(event["bois"]):
-            required_information = event["bois"].get("required_information", [])
-            return runtime_response(
-                "CLARIFICATION",
-                answer=self._clarification_answer(event),
-                trace={
-                    **self._trace(event),
-                    "clarification_reason": required_information
-                },
-                state={
-                    "runtime_state": "GAP_DETECTION",
-                    "phase": PHASE_DECIDE,
-                    "clarification_reason": required_information,
-                    "domain": self._domain_state(event)
-                }
-            )
+        return {"source": "DOMAIN", "decision": "CONTINUE"}
 
-        return {"type": "CONTINUE"}
+    def _apply_memory_source(self, event):
+        question = self._clarification_answer(event)
+        session_id = event.get("session_id", "default")
+        topic = self._topic(event)
+        limit = self.epistemic_hierarchy["question_memory"][
+            "max_clarifications_per_session_topic"
+        ]
+        count = self.kernel.memory.clarification_count(session_id, topic)
+        duplicate = self.kernel.memory.has_asked_clarification(
+            session_id,
+            topic,
+            question
+        )
+
+        if duplicate or count >= limit:
+            rule = self.epistemic_hierarchy["rules"]["MEMORY"]["duplicate_clarification"]
+            return {
+                "source": "MEMORY",
+                "decision": rule["decision"],
+                "answer": rule["answer"],
+                "reason": "duplicate_or_limit",
+                "clarification_count": count,
+                "max_clarifications": limit
+            }
+
+        return {
+            "source": "MEMORY",
+            "decision": "CONTINUE",
+            "clarification_count": count,
+            "max_clarifications": limit
+        }
+
+    def _apply_runtime_state_source(self, event):
+        uncertainty = event.get("sima", {}).get("uncertainty", 0)
+        threshold = self.epistemic_hierarchy["thresholds"][
+            "sima_uncertainty_clarification"
+        ]
+        required_information = event.get("bois", {}).get("required_information", [])
+
+        if uncertainty > threshold and required_information:
+            rule = self.epistemic_hierarchy["rules"]["RUNTIME_STATE"]["uncertainty_gap"]
+            return {
+                "source": "RUNTIME_STATE",
+                "decision": rule["decision"],
+                "answer": rule["answer_template"].format(
+                    input=event.get("input", "").strip()
+                ),
+                "reason": required_information,
+                "uncertainty": uncertainty,
+                "threshold": threshold
+            }
+
+        return {
+            "source": "RUNTIME_STATE",
+            "decision": "CONTINUE",
+            "uncertainty": uncertainty,
+            "threshold": threshold
+        }
+
+    def _apply_llm_source(self, event):
+        uncertainty = event.get("sima", {}).get("uncertainty", 0)
+        threshold = self.epistemic_hierarchy["thresholds"]["llm_uncertainty_threshold"]
+        event["llm_allowed"] = uncertainty > threshold
+
+        return {
+            "source": "LLM",
+            "decision": "CONTINUE",
+            "llm_allowed": event["llm_allowed"],
+            "uncertainty": uncertainty,
+            "threshold": threshold
+        }
+
+    def _clarification_response(self, event, decision):
+        session_id = event.get("session_id", "default")
+        topic = self._topic(event)
+        self.kernel.memory.remember_clarification(
+            session_id,
+            topic,
+            decision["answer"]
+        )
+        return runtime_response(
+            "CLARIFICATION",
+            answer=decision["answer"],
+            trace={
+                **self._trace(event),
+                "clarification_reason": decision.get("reason"),
+                "epistemic": event.get("epistemic", {})
+            },
+            state={
+                "runtime_state": "GAP_DETECTION",
+                "phase": PHASE_DECIDE,
+                "clarification_reason": decision.get("reason"),
+                "domain": self._domain_state(event)
+            }
+        )
 
     @staticmethod
     def _is_terminal(result):
@@ -220,7 +336,9 @@ class BORISRuntimeEngine:
             "sima": event.get("sima", {}),
             "bois": event.get("bois", {}),
             "route": event.get("route"),
-            "action": event.get("action")
+            "action": event.get("action"),
+            "epistemic": event.get("epistemic", {}),
+            "llm_allowed": event.get("llm_allowed")
         }
 
     @staticmethod
@@ -231,3 +349,10 @@ class BORISRuntimeEngine:
             return f'Please clarify what you want me to do with: "{user_input}".'
 
         return "Please clarify what you want to do."
+
+    def _llm_fallback_answer(self):
+        return self.epistemic_hierarchy["rules"]["LLM"]["fallback_answer"]
+
+    @staticmethod
+    def _topic(event):
+        return event.get("input", "").strip().lower()

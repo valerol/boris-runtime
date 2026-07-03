@@ -1,0 +1,46 @@
+{
+  "version": "v1-step2",
+  "priority_order": [
+    "DOMAIN",
+    "MEMORY",
+    "RUNTIME_STATE",
+    "LLM"
+  ],
+  "decision_precedence": {
+    "DOMAIN": "overrides all other sources",
+    "MEMORY": "cannot override DOMAIN",
+    "RUNTIME_STATE": "uses runtime completeness and uncertainty after DOMAIN and MEMORY",
+    "LLM": "last resort only and cannot decide gap existence"
+  },
+  "rules": {
+    "DOMAIN": {
+      "empty_input": {
+        "decision": "CLARIFICATION",
+        "answer": "Please provide a request."
+      }
+    },
+    "MEMORY": {
+      "duplicate_clarification": {
+        "decision": "ANSWER",
+        "answer": "I do not have enough new information yet, so I will proceed with the best available answer."
+      }
+    },
+    "RUNTIME_STATE": {
+      "uncertainty_gap": {
+        "decision": "CLARIFICATION",
+        "answer_template": "Please clarify what you want me to do with: \"{input}\"."
+      }
+    },
+    "LLM": {
+      "last_resort_only": true,
+      "fallback_answer": "I will answer from the available runtime context without requesting more clarification."
+    }
+  },
+  "thresholds": {
+    "sima_uncertainty_clarification": 0.6,
+    "llm_uncertainty_threshold": 0.2
+  },
+  "question_memory": {
+    "max_clarifications_per_session_topic": 2
+  }
+}

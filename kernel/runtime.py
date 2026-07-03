@@ -11,7 +11,7 @@ from kernel.memory import Memory
 from kernel.llm import LLM
 from kernel.gap import GapDetector
 from kernel.self_introspection import explain_system, is_introspection_query
-from core.loader import SchemaLoader
+from core.loader import EpistemicHierarchyLoader, SchemaLoader
 from physiology.domain import DEFAULT_DOMAIN
 from runtime.engine import BORISRuntimeEngine
 
@@ -26,6 +26,7 @@ class BORISKernel:
         llm=None,
         domain=None,
         schema_loader=None,
+        epistemic_loader=None,
         engine=None
     ):
         self.memory = memory or Memory()
@@ -35,7 +36,12 @@ class BORISKernel:
         self.llm = llm or LLM()
         self.domain = domain or DEFAULT_DOMAIN
         self.schema_loader = schema_loader or SchemaLoader()
-        self.engine = engine or BORISRuntimeEngine(self, self.schema_loader.schema)
+        self.epistemic_loader = epistemic_loader or EpistemicHierarchyLoader()
+        self.engine = engine or BORISRuntimeEngine(
+            self,
+            self.schema_loader.schema,
+            epistemic_hierarchy=self.epistemic_loader.hierarchy
+        )
 
     def run(self, event: dict):
         user_input = event.get("input", "")

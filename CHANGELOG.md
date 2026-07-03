@@ -7,7 +7,13 @@ before each commit.
 
 ## Unreleased
 
-- No unreleased changes yet.
+- Added Step 2 Gap Loop foundation driven by `core/epistemic_hierarchy.json`.
+- Added minimal question memory for asked clarifications, per-topic counts, and
+  recent inputs.
+- Enforced DOMAIN -> MEMORY -> RUNTIME_STATE -> LLM priority order from JSON.
+- Prevented LLM calls during gap clarification decisions.
+- Added tests for hierarchy loading, LLM-last behavior, and repeated
+  clarification prevention.
 
 ## 2026-07-03 - Static domain introspection layer
 
