@@ -9,7 +9,7 @@ from physiology.domain import DEFAULT_DOMAIN
 
 def build_test_kernel(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    return BORISKernel(memory=Memory(":memory:"))
+    return BORISKernel(memory=Memory(":memory:"), llm=LLM(api_key="", load_environment=False))
 
 
 def test_schema_loads_from_core_package():
@@ -62,12 +62,20 @@ def test_web_adapter_normalizes_input(monkeypatch):
 
 def test_missing_openai_key_does_not_crash(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    llm = LLM()
+    llm = LLM(api_key="", load_environment=False)
 
     result = llm.generate({"input": "hello"})
 
     assert result.startswith("LOCAL_STUB_RESPONSE")
     assert "hello" in result
+
+
+def test_llm_extracts_plain_answer_from_json_content():
+    llm = LLM(api_key="", load_environment=False)
+
+    result = llm._to_user_answer('{"response":{"message":"Hello from BORIS."},"sima":{}}')
+
+    assert result == "Hello from BORIS."
 
 
 def test_runtime_response_contract_separates_answer_trace_state(monkeypatch):
