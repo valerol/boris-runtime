@@ -8,6 +8,7 @@ import kernel.runtime as kernel_runtime
 from kernel.llm import LLM
 from kernel.memory import Memory
 from kernel.runtime import BORISKernel
+from kernel.self_introspection import explain_system
 import main_cli
 import runtime.engine as runtime_engine
 from physiology.domain import DEFAULT_DOMAIN
@@ -37,7 +38,13 @@ def test_cli_style_event_returns_valid_response(monkeypatch):
 
     result = adapter.handle("Explain BOIS Runtime v0", session_id="test")
 
-    assert result["type"] in {"ANSWER", "CLARIFICATION", "TOOL_REQUEST", "ERROR"}
+    assert result["type"] in {
+        "ANSWER",
+        "CLARIFICATION",
+        "TOOL_REQUEST",
+        "ERROR",
+        "SELF_DESCRIPTION"
+    }
     assert isinstance(result["answer"], str)
     assert isinstance(result["content"], str)
     assert result["answer"] == result["content"]
@@ -133,6 +140,84 @@ def test_runtime_response_contract_separates_answer_trace_state(monkeypatch):
     assert "sima" in result["trace"]
     assert "bois" in result["trace"]
     assert result["state"]["domain"]["name"] == "default"
+
+
+def test_domain_contains_v1_static_descriptor_fields():
+    domain = DEFAULT_DOMAIN.snapshot()
+
+    assert isinstance(domain["name"], str)
+    assert isinstance(domain["capabilities"], list)
+    assert isinstance(domain["limitations"], list)
+    assert isinstance(domain["success_criteria"], list)
+    assert isinstance(domain["version"], str)
+    assert "text reasoning" in domain["capabilities"]
+    assert "runtime state machine execution" in domain["capabilities"]
+    assert "no autonomous self-modification" in domain["limitations"]
+    assert "ensure single terminal state per input" in domain["success_criteria"]
+
+
+def test_introspection_response_for_capabilities_query(monkeypatch):
+    kernel = build_test_kernel(monkeypatch)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "what can you do",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] == "SELF_DESCRIPTION"
+    assert isinstance(result["answer"], str)
+    assert result["answer"]
+    assert "text reasoning" in result["answer"]
+    assert result["trace"]["source"] == ["domain", "memory"]
+    assert result["state"]["read_only"] is True
+
+
+def test_normal_input_does_not_use_introspection(monkeypatch):
+    kernel = build_test_kernel(monkeypatch)
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "Explain BOIS Runtime v0",
+        "meta": {"source": "test"}
+    })
+
+    assert result["type"] != "SELF_DESCRIPTION"
+    assert "sima" in result["trace"]
+    assert "bois" in result["trace"]
+
+
+def test_introspection_is_read_only_for_memory_and_engine(monkeypatch):
+    memory = Memory(":memory:")
+    kernel = BORISKernel(
+        memory=memory,
+        llm=LLM(api_key="", load_environment=False)
+    )
+    before_memory = memory.read_recent()
+    before_state = kernel.engine.state
+
+    result = kernel.run({
+        "session_id": "test",
+        "input": "limitations",
+        "meta": {"source": "test"}
+    })
+
+    after_memory = memory.read_recent()
+    after_state = kernel.engine.state
+
+    assert result["type"] == "SELF_DESCRIPTION"
+    assert after_memory == before_memory
+    assert after_state == before_state
+
+
+def test_explain_system_direct_entry_shape():
+    result = explain_system("who are you", DEFAULT_DOMAIN)
+
+    assert result["type"] == "SELF_DESCRIPTION"
+    assert result["answer"]
+    assert result["trace"]["source"] == ["domain"]
+    assert result["state"]["mode"] == "self_introspection"
+    assert result["actions"] == []
 
 
 def test_explanatory_input_returns_single_answer_terminal(monkeypatch):

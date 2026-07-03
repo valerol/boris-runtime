@@ -10,6 +10,7 @@ from kernel.bois import BOIS
 from kernel.memory import Memory
 from kernel.llm import LLM
 from kernel.gap import GapDetector
+from kernel.self_introspection import explain_system, is_introspection_query
 from core.loader import SchemaLoader
 from physiology.domain import DEFAULT_DOMAIN
 from runtime.engine import BORISRuntimeEngine
@@ -37,4 +38,9 @@ class BORISKernel:
         self.engine = engine or BORISRuntimeEngine(self, self.schema_loader.schema)
 
     def run(self, event: dict):
+        user_input = event.get("input", "")
+
+        if is_introspection_query(user_input):
+            return explain_system(user_input, self.domain, memory=self.memory)
+
         return self.engine.run(event)

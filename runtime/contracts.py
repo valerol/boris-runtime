@@ -3,7 +3,13 @@ TYPE_ALIASES = {
     "FINAL": "ANSWER"
 }
 
-VALID_TYPES = {"ANSWER", "CLARIFICATION", "TOOL_REQUEST", "ERROR"}
+VALID_TYPES = {
+    "ANSWER",
+    "CLARIFICATION",
+    "TOOL_REQUEST",
+    "ERROR",
+    "SELF_DESCRIPTION"
+}
 
 
 def normalize_response_type(response_type):
