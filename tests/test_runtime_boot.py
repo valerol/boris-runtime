@@ -1,9 +1,11 @@
 import builtins
 import inspect
+from copy import deepcopy
 
 from adapters.cli import CLIAdapter
 from adapters.web import WebAdapter
 from core.loader import EpistemicHierarchyLoader, SchemaLoader
+from core.roadmap import complete_step, load_roadmap
 import kernel.runtime as kernel_runtime
 from kernel.llm import LLM
 from kernel.memory import Memory
@@ -47,6 +49,78 @@ def test_epistemic_hierarchy_loads_priority_order():
     ]
     assert hierarchy["question_memory"]["max_clarifications_per_session_topic"] == 2
     assert "sima_uncertainty_clarification" in hierarchy["thresholds"]
+
+
+def test_roadmap_loads_with_expected_step_statuses():
+    roadmap = load_roadmap()
+    steps = {step["id"]: step for step in roadmap["steps"]}
+
+    assert roadmap["version"] == "1.0"
+    assert steps[1]["status"] == "COMPLETED"
+    assert steps[2]["status"] == "COMPLETED"
+    assert steps[3]["status"] == "PENDING"
+    assert steps[4]["status"] == "PENDING"
+    assert steps[5]["status"] == "PENDING"
+    assert steps[6]["status"] == "PENDING"
+
+
+def test_completed_roadmap_steps_have_governance_fields():
+    roadmap = load_roadmap()
+
+    for step in roadmap["steps"]:
+        if step["status"] == "COMPLETED":
+            assert step["completion_timestamp"]
+            assert step["evidence"]
+            assert step["validation_source"]
+            assert step["change_reason"]
+
+
+def test_roadmap_completion_requires_governance_evidence():
+    roadmap = load_roadmap()
+
+    try:
+        complete_step(
+            roadmap,
+            step_id=3,
+            evidence="",
+            validation_source="tests",
+            change_reason="implemented and verified"
+        )
+    except ValueError as exc:
+        assert "evidence" in str(exc)
+    else:
+        raise AssertionError("expected roadmap governance validation error")
+
+
+def test_roadmap_complete_step_updates_only_target_step():
+    roadmap = load_roadmap()
+    before = deepcopy(roadmap)
+
+    updated = complete_step(
+        roadmap,
+        step_id=3,
+        evidence="structured BOIS payload tests passed",
+        validation_source="tests",
+        change_reason="Step 3 implementation completed and verified",
+        completion_timestamp="2026-07-03T12:00:00Z"
+    )
+
+    changed_steps = [
+        step["id"]
+        for step, previous in zip(updated["steps"], before["steps"])
+        if step != previous
+    ]
+    assert changed_steps == [3]
+    assert updated["steps"][2]["status"] == "COMPLETED"
+    assert updated["steps"][2]["completion_timestamp"] == "2026-07-03T12:00:00Z"
+
+
+def test_roadmap_is_not_runtime_decision_input():
+    runtime_source = inspect.getsource(runtime_engine)
+    kernel_source = inspect.getsource(kernel_runtime)
+
+    assert "roadmap" not in runtime_source.lower()
+    assert "roadmap" not in kernel_source.lower()
 
 
 def test_kernel_initializes(monkeypatch):

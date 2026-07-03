@@ -7,6 +7,14 @@ before each commit.
 
 ## Unreleased
 
+- Added audit-only roadmap governance layer via `core/roadmap.json`.
+- Added controlled roadmap loading/saving/completion helpers.
+- Added tests that roadmap is not imported by runtime decision code.
+
+## 2026-07-03 - Epistemic gap loop and question memory
+
+Commit: `7972838 Add epistemic gap loop question memory`
+
 - Added Step 2 Gap Loop foundation driven by `core/epistemic_hierarchy.json`.
 - Added minimal question memory for asked clarifications, per-topic counts, and
   recent inputs.
