@@ -1,10 +1,15 @@
+import builtins
+import inspect
+
 from adapters.cli import CLIAdapter
 from adapters.web import WebAdapter
 from core.loader import SchemaLoader
+import kernel.runtime as kernel_runtime
 from kernel.llm import LLM
 from kernel.memory import Memory
 from kernel.runtime import BORISKernel
 import main_cli
+import runtime.engine as runtime_engine
 from physiology.domain import DEFAULT_DOMAIN
 
 
@@ -69,6 +74,38 @@ def test_missing_openai_key_does_not_crash(monkeypatch):
 
     assert result.startswith("LOCAL_STUB_RESPONSE")
     assert "hello" in result
+
+
+def test_local_stub_does_not_require_openai_sdk(monkeypatch):
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "openai":
+            raise ModuleNotFoundError("No module named 'openai'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    llm = LLM(api_key="", load_environment=False)
+    result = llm.generate({"input": "hello"})
+
+    assert result.startswith("LOCAL_STUB_RESPONSE")
+
+
+def test_configured_key_without_openai_sdk_returns_clear_message(monkeypatch):
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "openai":
+            raise ModuleNotFoundError("No module named 'openai'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    llm = LLM(api_key="test-key", load_environment=False)
+    result = llm.generate({"input": "hello"})
+
+    assert result.startswith("OPENAI_SDK_NOT_INSTALLED")
 
 
 def test_llm_extracts_plain_answer_from_json_content():
@@ -180,6 +217,30 @@ def test_cli_skips_empty_prompt_after_answer(monkeypatch, capsys):
     assert calls == ["Explain BOIS Runtime v0"]
     assert "ANSWER: ok" in output
     assert "CLARIFICATION: need_more_input" not in output
+
+
+def test_runtime_engine_is_state_machine_owner():
+    engine_source = inspect.getsource(runtime_engine.BORISRuntimeEngine)
+    kernel_source = inspect.getsource(kernel_runtime)
+
+    assert "def step(" in engine_source
+    assert "def decide_next_state(" in engine_source
+    assert "def step(" not in kernel_source
+    assert "def decide_next_state(" not in kernel_source
+    assert "composition root" in (kernel_runtime.__doc__ or "")
+
+
+def test_schema_does_not_advertise_unused_gap_transition():
+    schema = SchemaLoader().schema
+    gap_state = schema["states"]["GAP_DETECTION"]
+
+    assert gap_state == {
+        "type": "decision",
+        "next": "TOOL_ROUTING"
+    }
+    assert "ASK_OPERATOR" not in schema["states"]
+    assert "next_true" not in gap_state
+    assert "next_false" not in gap_state
 
 
 def test_default_domain_loads_correctly():

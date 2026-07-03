@@ -26,13 +26,7 @@
 
     "GAP_DETECTION": {
       "type": "decision",
-      "next_true": "ASK_OPERATOR",
-      "next_false": "TOOL_ROUTING"
-    },
-
-    "ASK_OPERATOR": {
-      "type": "interaction",
-      "next": "RETURN"
+      "next": "TOOL_ROUTING"
     },
 
     "TOOL_ROUTING": {

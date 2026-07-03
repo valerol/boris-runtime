@@ -86,7 +86,7 @@ class BORISRuntimeEngine:
                 self.state = self.schema["entrypoint"]
                 return decision
 
-            self.state = node["next_false"]
+            self.state = node["next"]
             return event
 
         # 6. INTERACTION

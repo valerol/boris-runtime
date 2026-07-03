@@ -2,7 +2,6 @@ import json
 import os
 
 from dotenv import load_dotenv
-from openai import OpenAI
 
 class LLM:
 
@@ -11,10 +10,26 @@ class LLM:
             load_dotenv()
         self.api_key = os.getenv("OPENAI_API_KEY") if api_key is None else api_key
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        self.client = OpenAI(api_key=self.api_key) if self.api_key else None
+        self.import_error = None
+        self.client = self._build_client() if self.api_key else None
+
+    def _build_client(self):
+        try:
+            from openai import OpenAI
+        except ModuleNotFoundError as exc:
+            self.import_error = exc
+            return None
+
+        return OpenAI(api_key=self.api_key)
 
     def generate(self, context: dict):
         if not self.client:
+            if self.api_key and self.import_error:
+                return (
+                    "OPENAI_SDK_NOT_INSTALLED: OPENAI_API_KEY is configured, "
+                    "but the openai package is not installed."
+                )
+
             user_input = context.get("input", "")
             return (
                 "LOCAL_STUB_RESPONSE: OpenAI API key is not configured. "

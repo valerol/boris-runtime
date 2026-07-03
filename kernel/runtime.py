@@ -1,3 +1,10 @@
+"""
+Kernel composition root.
+
+This module wires BOIS, SIMA, GAP, Memory, LLM, Domain, and the runtime engine.
+The state machine itself lives in runtime/engine.py.
+"""
+
 from kernel.sima import SIMA
 from kernel.bois import BOIS
 from kernel.memory import Memory
