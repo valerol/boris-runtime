@@ -1,57 +1,113 @@
-# BOIS Middleware SDK Roadmap
+# BOIS / SIMA / BORIS Middleware SDK — FULL EXECUTION ROADMAP v1
 
-## Purpose
+## 0. Цель системы
+BOIS Middleware SDK — protocol execution layer + deterministic reasoning loop + adapter abstraction layer.
 
-BOIS / SIMA / BORIS Middleware SDK is a protocol execution layer for applying
-declarative BOIS, SIMA, and BORIS definitions on top of existing LLM platforms.
+## GLOBAL ARCHITECTURE
+User/UI → Middleware → LLM → Tools → Memory
 
-The roadmap tracks SDK evolution only. It does not turn the project into an AI
-platform, agent runtime, UI, memory system, or storage layer.
+## GLOBAL PRINCIPLES
+- BOIS declarative
+- SIMA analytical
+- BORIS contextual specialization
+- Middleware = execution engine only
+- Platform = external
 
-## Current Focus
+---
 
-- Keep BOIS, SIMA, and BORIS definitions declarative.
-- Keep runtime execution stateless and deterministic.
-- Maintain adapter boundaries for LLM, memory, tools, and platforms.
-- Validate the protocol pipeline through the CLI.
+# PHASE 0 — ARCHITECTURE RESET
+- define SDK boundaries
+- create repo structure
+- lock BOIS as declarative core
+- create ARCHITECTURE.md, SDK_SPEC.md
 
-## Milestones
+---
 
-### Phase 1: Middleware SDK Foundation
+# PHASE 1 — CLI MVP (RUNTIME CORE v0.1)
+- runtime loop
+- protocol parser
+- prompt builder
+- LLM adapter stub
+- CLI execution only
+- detect GAP + clarify loop
 
-- Root-level SDK structure established.
-- Legacy runtime v0 archived under `archive/v0-runtime`.
-- Declarative definitions placed under `core/definitions`.
-- Minimal runtime pipeline implemented.
-- Mock LLM CLI validation available.
+---
 
-### Phase 2: Protocol Contract Stabilization
+# PHASE 2 — CORE LOADER SYSTEM
+- load BOIS from .md/.json/.yaml
+- folder-based core support
+- GitHub release support
+- immutable core per session
 
-- Define stable request and response envelopes.
-- Tighten response parser contract.
-- Document clarification and tool-call semantics.
-- Add compatibility notes for chat-based host platforms.
+---
 
-### Phase 3: Adapter Expansion
+# PHASE 3 — PROTOCOL ENGINE
+- full execution cycle:
+  INPUT → SIMA → BOIS → BORIS → LLM → PARSER → LOOP
+- gap detection engine
+- question memory
+- validation layer
 
-- Add optional real LLM adapters.
-- Define memory adapter examples without built-in persistence.
-- Define tool adapter examples without runtime-owned tool execution.
-- Document platform integration patterns.
+---
 
-### Phase 4: Specification Hardening
+# PHASE 4 — API LAYER (FASTAPI)
+- /chat
+- /session
+- /reset
+- stateless API wrapper over middleware
 
-- Version BOIS, SIMA, and BORIS definition files.
-- Add protocol conformance examples.
-- Add lightweight validation checks for SDK boundaries.
-- Maintain changelog entries for breaking protocol changes.
+---
 
-## Non-Goals
+# PHASE 5 — PLATFORM ADAPTERS
+- Telegram adapter
+- Web adapter
+- Open WebUI adapter
+- Dify adapter
+- LangGraph adapter
 
-- No built-in UI.
-- No built-in database.
-- No vector database.
-- No autonomous agent system.
-- No platform-specific coupling.
-- No executable BOIS, SIMA, or BORIS reasoning engines.
+---
 
+# PHASE 6 — MEMORY ABSTRACTION LAYER
+- interface: load/save/search
+- backend agnostic
+- SQLite/Postgres/Redis/Chroma/Supabase support
+
+---
+
+# PHASE 7 — TOOL ABSTRACTION LAYER
+- search / call_api / run_code / read_file
+- tool execution externalized
+- middleware does not own tools
+
+---
+
+# PHASE 8 — PACKAGING (SDK)
+- pip install bois-runtime
+- BORIS(core).chat()
+
+---
+
+# PHASE 9 — REFERENCE INTEGRATIONS
+- CLI
+- Telegram
+- Web API
+- Open WebUI
+- Dify
+- LangGraph
+- validate single middleware across all
+
+---
+
+# PHASE 10 — STABLE v1.0
+- stable API contract
+- documentation freeze
+- versioned BOIS/SIMA/BORIS specs
+- migration guide
+
+---
+
+# NON-GOALS
+- no UI
+- no database engine
+- no agent autonomy system
+- no platform lock-in

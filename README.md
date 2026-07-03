@@ -2,9 +2,9 @@
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md)
-- [Changelog](CHANGELOG.md)
-- [Architecture Reset](docs/architecture_reset.md)
+- Roadmap → [ROADMAP.md](ROADMAP.md)
+- Changelog → [CHANGELOG.md](CHANGELOG.md)
+- Architecture → [ARCHITECTURE.md](ARCHITECTURE.md)
 
 This repository has been reset from a runtime/platform MVP into a lightweight
 protocol middleware SDK.
