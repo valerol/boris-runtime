@@ -10,7 +10,8 @@ from kernel.bois import BOIS
 from kernel.memory import Memory
 from kernel.llm import LLM
 from kernel.gap import GapDetector
-from kernel.self_introspection import explain_system, is_introspection_query
+from kernel.self_introspection import explain_system
+from kernel.semantic import llm_semantic_interpretation_with
 from core.loader import EpistemicHierarchyLoader, SchemaLoader
 from physiology.domain import DEFAULT_DOMAIN
 from runtime.contracts import runtime_response
@@ -26,11 +27,34 @@ def decision_gate(input, sima, bois, memory, domain, epistemic_rules):
         "priority_order": epistemic_rules["priority_order"],
         "decisions": []
     }
+    semantic = event.get("semantic_interpretation", {})
 
-    if is_introspection_query(user_input):
-        result = explain_system(user_input, domain, memory=memory)
-        result["trace"]["epistemic"] = epistemic
-        return result
+    if _semantic_indicates_self_description(semantic):
+        if _domain_allows_introspection(domain_snapshot):
+            result = explain_system(user_input, domain, memory=memory)
+            result["trace"]["epistemic"] = epistemic
+            result["trace"]["semantic_interpretation"] = semantic
+            return result
+
+        return runtime_response(
+            "CLARIFICATION",
+            answer="Please clarify what system information you want.",
+            trace={
+                "session_id": session_id,
+                "source": event.get("meta", {}).get("source"),
+                "phase": "DECIDE",
+                "domain": domain_snapshot,
+                "semantic_interpretation": semantic,
+                "epistemic": epistemic,
+                "clarification_reason": "domain_disallows_introspection"
+            },
+            state={
+                "runtime_state": "GAP_DETECTION",
+                "phase": "DECIDE",
+                "clarification_reason": "domain_disallows_introspection",
+                "domain": _domain_state(domain_snapshot)
+            }
+        )
 
     for source in epistemic_rules["priority_order"]:
         decision = _apply_gate_source(
@@ -58,6 +82,7 @@ def decision_gate(input, sima, bois, memory, domain, epistemic_rules):
                     "source": event.get("meta", {}).get("source"),
                     "phase": "DECIDE",
                     "domain": domain_snapshot,
+                    "semantic_interpretation": semantic,
                     "sima": sima,
                     "bois": bois,
                     "epistemic": epistemic,
@@ -84,7 +109,13 @@ def decision_gate(input, sima, bois, memory, domain, epistemic_rules):
                 llm_allowed=llm_allowed
             )
 
-    llm_decision = epistemic["decisions"][-1]
+    llm_decision = {
+        "source": "GAP_LOOP",
+        "decision": "ANSWER",
+        "answer": "",
+        "llm_allowed": _llm_allowed(sima, epistemic_rules),
+        "fallback_answer": epistemic_rules["rules"]["LLM"]["fallback_answer"]
+    }
     return _answer_response(
         event,
         sima,
@@ -174,10 +205,8 @@ def _llm_decision(user_input, session_id, sima, bois, memory, rules):
     threshold = rules["thresholds"]["llm_uncertainty_threshold"]
     return {
         "source": "LLM",
-        "decision": "ANSWER",
-        "answer": "",
+        "decision": "FORMAT_ONLY",
         "llm_allowed": uncertainty > threshold,
-        "fallback_answer": rules["rules"]["LLM"]["fallback_answer"],
         "uncertainty": uncertainty,
         "threshold": threshold
     }
@@ -195,6 +224,7 @@ def _answer_response(event, sima, bois, domain, epistemic, decision, llm_allowed
             "source": event.get("meta", {}).get("source"),
             "phase": "FINALIZE",
             "domain": domain,
+            "semantic_interpretation": event.get("semantic_interpretation", {}),
             "sima": sima,
             "bois": bois,
             "route": "local",
@@ -230,6 +260,38 @@ def _clarification_answer(user_input):
     return "Please clarify what you want to do."
 
 
+def _llm_allowed(sima, rules):
+    uncertainty = sima.get("uncertainty", 0)
+    threshold = rules["thresholds"]["llm_uncertainty_threshold"]
+    return uncertainty > threshold
+
+
+def _semantic_indicates_self_description(semantic):
+    if not isinstance(semantic, dict):
+        return False
+
+    text = " ".join([
+        semantic.get("semantic_summary", ""),
+        semantic.get("user_intent_hypothesis", "")
+    ]).lower()
+    return (
+        "boris runtime itself" in text
+        or "about the system" in text
+        or "system information" in text
+        or "capabilities" in text
+        or "limitations" in text
+    )
+
+
+def _domain_allows_introspection(domain_snapshot):
+    capabilities = domain_snapshot.get("capabilities", [])
+    return (
+        "self-introspection" in capabilities
+        or "runtime state machine execution" in capabilities
+        or "text reasoning" in capabilities
+    )
+
+
 class BORISKernel:
 
     def __init__(
@@ -260,22 +322,16 @@ class BORISKernel:
 
     def run(self, event: dict):
         user_input = event.get("input", "")
+        semantic = llm_semantic_interpretation_with(self.llm, user_input)
+        runtime_event = dict(event)
+        runtime_event["semantic_interpretation"] = semantic
+        bois_out = self.bois.reason(runtime_event, self.memory)
+        runtime_event["bois"] = bois_out
+        sima_out = self.sima.analyze(runtime_event)
+        runtime_event["sima"] = sima_out
 
-        if is_introspection_query(user_input):
-            return decision_gate(
-                event,
-                {},
-                {},
-                self.memory,
-                self.domain,
-                self.epistemic_loader.hierarchy
-            )
-
-        self.memory.remember_input(event.get("session_id", "default"), user_input)
-        sima_out = self.sima.analyze(event)
-        bois_out = self.bois.reason(sima_out, self.memory)
         result = decision_gate(
-            event,
+            runtime_event,
             sima_out,
             bois_out,
             self.memory,
@@ -290,6 +346,7 @@ class BORISKernel:
         ):
             answer = self.llm.generate({
                 "input": user_input,
+                "semantic_interpretation": semantic,
                 "domain": self.domain.snapshot(),
                 "sima": sima_out,
                 "bois": bois_out,
@@ -300,6 +357,7 @@ class BORISKernel:
             result["content"] = answer
 
         if result["type"] == "ANSWER":
+            self.memory.remember_input(event.get("session_id", "default"), user_input)
             self.memory.write("WRITE_MEMORY", result)
 
         return result

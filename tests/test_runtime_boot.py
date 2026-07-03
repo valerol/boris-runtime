@@ -7,9 +7,11 @@ from adapters.web import WebAdapter
 from core.loader import EpistemicHierarchyLoader, SchemaLoader
 from core.roadmap import complete_step, load_roadmap
 import kernel.runtime as kernel_runtime
+import kernel.self_introspection as self_introspection
 from kernel.llm import LLM
 from kernel.memory import Memory
 from kernel.runtime import BORISKernel
+from kernel.semantic import llm_semantic_interpretation
 from kernel.self_introspection import explain_system
 import main_cli
 import runtime.engine as runtime_engine
@@ -24,11 +26,43 @@ def build_test_kernel(monkeypatch):
 class CountingLLM:
 
     def __init__(self):
-        self.calls = 0
+        self.generate_calls = 0
+        self.interpret_calls = 0
 
     def generate(self, context):
-        self.calls += 1
+        self.generate_calls += 1
         return "counting llm answer"
+
+    def interpret_semantics(self, user_input):
+        self.interpret_calls += 1
+        if user_input.strip().lower() == "do it":
+            return {
+                "semantic_summary": "The request lacks a concrete object.",
+                "user_intent_hypothesis": "The user wants an action but did not specify the target.",
+                "context_entities": [],
+                "ambiguity_score": 0.9,
+                "risk_flags": ["underspecified_request"],
+                "requires_clarification_hint": True
+            }
+
+        if "what can" in user_input.strip().lower():
+            return {
+                "semantic_summary": "The user is asking about BORIS Runtime itself.",
+                "user_intent_hypothesis": "The user is asking about system capabilities.",
+                "context_entities": [],
+                "ambiguity_score": 0.1,
+                "risk_flags": [],
+                "requires_clarification_hint": False
+            }
+
+        return {
+            "semantic_summary": user_input,
+            "user_intent_hypothesis": "The user wants an explanation.",
+            "context_entities": [],
+            "ambiguity_score": 0.25,
+            "risk_flags": [],
+            "requires_clarification_hint": False
+        }
 
 
 def test_schema_loads_from_core_package():
@@ -180,6 +214,23 @@ def test_missing_openai_key_does_not_crash(monkeypatch):
     assert "hello" in result
 
 
+def test_llm_semantic_interpretation_shape_without_openai_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    result = llm_semantic_interpretation("Explain BOIS Runtime v0")
+
+    assert set(result) == {
+        "semantic_summary",
+        "user_intent_hypothesis",
+        "context_entities",
+        "ambiguity_score",
+        "risk_flags",
+        "requires_clarification_hint"
+    }
+    assert 0 <= result["ambiguity_score"] <= 1
+    assert isinstance(result["requires_clarification_hint"], bool)
+
+
 def test_local_stub_does_not_require_openai_sdk(monkeypatch):
     real_import = builtins.__import__
 
@@ -236,6 +287,7 @@ def test_runtime_response_contract_separates_answer_trace_state(monkeypatch):
     assert isinstance(result["actions"], list)
     assert "sima" in result["trace"]
     assert "bois" in result["trace"]
+    assert "semantic_interpretation" in result["trace"]
     assert result["state"]["domain"]["name"] == "default"
 
 
@@ -254,7 +306,7 @@ def test_domain_contains_v1_static_descriptor_fields():
 
 
 def test_introspection_response_for_capabilities_query(monkeypatch):
-    kernel = build_test_kernel(monkeypatch)
+    kernel = BORISKernel(memory=Memory(":memory:"), llm=CountingLLM())
 
     result = kernel.run({
         "session_id": "test",
@@ -288,7 +340,7 @@ def test_introspection_is_read_only_for_memory_and_engine(monkeypatch):
     memory = Memory(":memory:")
     kernel = BORISKernel(
         memory=memory,
-        llm=LLM(api_key="", load_environment=False)
+        llm=CountingLLM()
     )
     before_memory = memory.read_recent()
     before_state = kernel.engine.state
@@ -357,6 +409,7 @@ def test_answer_decision_uses_epistemic_priority_order(monkeypatch):
         "LLM"
     ]
     assert result["trace"]["llm_allowed"] is True
+    assert result["trace"]["answer_decision_source"] == "GAP_LOOP"
 
 
 def test_empty_input_returns_single_non_answer_terminal(monkeypatch):
@@ -557,7 +610,8 @@ def test_llm_is_not_called_for_gap_clarification(monkeypatch):
     })
 
     assert result["type"] == "CLARIFICATION"
-    assert llm.calls == 0
+    assert llm.interpret_calls == 1
+    assert llm.generate_calls == 0
     assert [
         item["source"] for item in result["trace"]["epistemic"]["decisions"]
     ] == [
@@ -582,7 +636,8 @@ def test_question_memory_prevents_repeated_clarification(monkeypatch):
     assert first["type"] == "CLARIFICATION"
     assert second["type"] == "ANSWER"
     assert "best available answer" in second["answer"]
-    assert llm.calls == 0
+    assert llm.interpret_calls == 2
+    assert llm.generate_calls == 0
     assert kernel.memory.clarification_count("test", "do it") == 1
 
 
@@ -601,7 +656,8 @@ def test_question_memory_limit_forces_answer_from_json_config(monkeypatch):
 
     assert result["type"] == "ANSWER"
     assert "best available answer" in result["answer"]
-    assert llm.calls == 0
+    assert llm.interpret_calls == 1
+    assert llm.generate_calls == 0
     assert result["trace"]["epistemic"]["decisions"][1]["source"] == "MEMORY"
     assert result["trace"]["epistemic"]["decisions"][1]["max_clarifications"] == 2
 
@@ -611,10 +667,31 @@ def test_runtime_engine_is_state_machine_owner():
     kernel_source = inspect.getsource(kernel_runtime)
 
     assert "def step(" in engine_source
-    assert "def decide_next_state(" in engine_source
+    assert "def decision_gate(" in engine_source
+    assert "def decide_next_state(" not in engine_source
     assert "def step(" not in kernel_source
     assert "def decide_next_state(" not in kernel_source
     assert "composition root" in (kernel_runtime.__doc__ or "")
+
+
+def test_schema_runs_semantic_interpretation_before_bois_and_sima():
+    schema = SchemaLoader().schema
+    states = schema["states"]
+
+    assert states["LOAD_CONTEXT"]["next"] == "SEMANTIC_INTERPRETATION"
+    assert states["SEMANTIC_INTERPRETATION"]["type"] == "semantic_interpretation"
+    assert states["SEMANTIC_INTERPRETATION"]["next"] == "BOIS_REASON"
+    assert states["BOIS_REASON"]["next"] == "SIMA_ANALYZE"
+    assert states["SIMA_ANALYZE"]["next"] == "GAP_DETECTION"
+
+
+def test_runtime_no_longer_uses_predefined_introspection_trigger_map():
+    self_source = inspect.getsource(kernel_runtime)
+    engine_source = inspect.getsource(runtime_engine)
+
+    assert "is_introspection_query" not in self_source
+    assert "is_introspection_query" not in engine_source
+    assert not hasattr(self_introspection, "INTROSPECTION_TRIGGERS")
 
 
 def test_schema_does_not_advertise_unused_gap_transition():

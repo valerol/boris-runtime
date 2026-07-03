@@ -1,20 +1,6 @@
 from runtime.contracts import runtime_response
 
 
-INTROSPECTION_TRIGGERS = {
-    "what can you do",
-    "who are you",
-    "explain yourself",
-    "capabilities",
-    "limitations"
-}
-
-
-def is_introspection_query(query):
-    normalized = query.strip().lower().rstrip("?.!")
-    return normalized in INTROSPECTION_TRIGGERS
-
-
 def explain_system(query: str, domain, memory=None) -> dict:
     domain_snapshot = domain.snapshot()
     trace_sources = ["domain"]

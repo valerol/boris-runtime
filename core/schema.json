@@ -9,18 +9,24 @@
 
     "LOAD_CONTEXT": {
       "type": "memory_read",
-      "next": "SIMA_ANALYZE"
+      "next": "SEMANTIC_INTERPRETATION"
     },
 
-    "SIMA_ANALYZE": {
-      "type": "analysis",
-      "engine": "SIMA",
+    "SEMANTIC_INTERPRETATION": {
+      "type": "semantic_interpretation",
+      "engine": "LLM",
       "next": "BOIS_REASON"
     },
 
     "BOIS_REASON": {
       "type": "reasoning",
       "engine": "BOIS",
+      "next": "SIMA_ANALYZE"
+    },
+
+    "SIMA_ANALYZE": {
+      "type": "analysis",
+      "engine": "SIMA",
       "next": "GAP_DETECTION"
     },
 

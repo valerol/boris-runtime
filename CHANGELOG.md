@@ -7,6 +7,37 @@ before each commit.
 
 ## Unreleased
 
+- Added LLM-first semantic interpretation before BOIS/SIMA/Gap Loop.
+- Added structured semantic interpretation output for LLM-backed and local
+  no-key operation.
+- Updated the schema-driven flow to run semantic interpretation, then BOIS,
+  then SIMA, then Gap Loop decision.
+- Removed hardcoded self-introspection trigger maps from runtime routing.
+- Added tests for semantic interpretation shape, schema ordering, and LLM
+  interpretation vs final-answer call boundaries.
+
+## 2026-07-03 - Runtime decision gate enforcement
+
+Commit: `359fbfd Enforce runtime decision gate`
+
+- Renamed the runtime engine decision method to `decision_gate`.
+- Ensured engine decision/output routing respects the gate result only.
+- Kept BOIS/SIMA/GAP modules as signal providers rather than final response
+  authorities.
+
+## 2026-07-03 - Kernel decision gate consolidation
+
+Commit: `1550635 Unify kernel decision gate`
+
+- Added a single kernel-level decision gate for Epistemic Hierarchy, Gap Loop,
+  question memory, and self-description routing.
+- Preserved the runtime response contract while centralizing final type
+  selection.
+
+## 2026-07-03 - Roadmap governance layer
+
+Commit: `ac93269 Add roadmap governance ledger`
+
 - Added audit-only roadmap governance layer via `core/roadmap.json`.
 - Added controlled roadmap loading/saving/completion helpers.
 - Added tests that roadmap is not imported by runtime decision code.

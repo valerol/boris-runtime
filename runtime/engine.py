@@ -1,5 +1,6 @@
 from runtime.contracts import runtime_response
-from kernel.self_introspection import explain_system, is_introspection_query
+from kernel.self_introspection import explain_system
+from kernel.semantic import llm_semantic_interpretation_with
 
 
 PHASE_INPUT = "INPUT"
@@ -9,9 +10,7 @@ PHASE_FINALIZE = "FINALIZE"
 
 
 class BORISRuntimeEngine:
-    """
-    decision_gate is the enforced successor to def decide_next_state(.
-    """
+    """Schema-driven state machine engine."""
 
     def __init__(self, kernel, schema, max_steps=32, epistemic_hierarchy=None):
         self.kernel = kernel
@@ -71,7 +70,23 @@ class BORISRuntimeEngine:
             self.state = node["next"]
             return event
 
-        # 3. SIMA
+        # 3. LLM SEMANTIC INTERPRETATION
+        if t == "semantic_interpretation":
+            event["semantic_interpretation"] = llm_semantic_interpretation_with(
+                self.kernel.llm,
+                event.get("input", "")
+            )
+            self.state = node["next"]
+            return event
+
+        # 4. BOIS
+        if t == "reasoning":
+            out = self.kernel.bois.reason(event, self.kernel.memory)
+            event["bois"] = out
+            self.state = node["next"]
+            return event
+
+        # 5. SIMA
         if t == "analysis":
             event["phase"] = PHASE_ANALYZE
             out = self.kernel.sima.analyze(event)
@@ -79,14 +94,7 @@ class BORISRuntimeEngine:
             self.state = node["next"]
             return event
 
-        # 4. BOIS
-        if t == "reasoning":
-            out = self.kernel.bois.reason(event["sima"], self.kernel.memory)
-            event["bois"] = out
-            self.state = node["next"]
-            return event
-
-        # 5. GAP DETECTION
+        # 6. GAP DETECTION
         if t == "decision":
             event["phase"] = PHASE_DECIDE
             decision = self.decision_gate(event)
@@ -98,7 +106,7 @@ class BORISRuntimeEngine:
             self.state = node["next"]
             return event
 
-        # 6. INTERACTION
+        # 7. INTERACTION
         if t == "interaction":
             self.state = self.schema["entrypoint"]
             return runtime_response(
@@ -111,19 +119,19 @@ class BORISRuntimeEngine:
                 }
             )
 
-        # 7. TOOL ROUTING (stub)
+        # 8. TOOL ROUTING (stub)
         if t == "routing":
             event["route"] = "local"
             self.state = node["next"]
             return event
 
-        # 8. EXECUTION (stub)
+        # 9. EXECUTION (stub)
         if t == "action":
             event["action"] = {"status": "no_external_action_required"}
             self.state = node["next"]
             return event
 
-        # 9. LLM RESPONSE
+        # 10. LLM RESPONSE
         if t == "generation":
             event["phase"] = PHASE_FINALIZE
             gate = event.get("decision_gate", {})
@@ -141,6 +149,7 @@ class BORISRuntimeEngine:
             elif gate.get("llm_allowed", False):
                 event["response"] = self.kernel.llm.generate({
                     "input": event.get("input", ""),
+                    "semantic_interpretation": event.get("semantic_interpretation", {}),
                     "domain": event.get("domain", {}),
                     "sima": event.get("sima", {}),
                     "bois": event.get("bois", {}),
@@ -152,13 +161,13 @@ class BORISRuntimeEngine:
             self.state = node["next"]
             return event
 
-        # 10. MEMORY WRITE
+        # 11. MEMORY WRITE
         if t == "memory_write":
             self.kernel.memory.write(self.state, event)
             self.state = node["next"]
             return event
 
-        # 11. RETURN
+        # 12. RETURN
         if t == "output":
             gate = event.get("decision_gate", {})
 
@@ -373,6 +382,7 @@ class BORISRuntimeEngine:
             "source": event.get("meta", {}).get("source"),
             "phase": event.get("phase"),
             "domain": event.get("domain", {}),
+            "semantic_interpretation": event.get("semantic_interpretation", {}),
             "sima": event.get("sima", {}),
             "bois": event.get("bois", {}),
             "route": event.get("route"),
@@ -398,18 +408,20 @@ class BORISRuntimeEngine:
         return event.get("input", "").strip().lower()
 
     def _self_description_response(self, event):
-        user_input = event.get("input", "")
-
-        if not is_introspection_query(user_input):
+        if not self._semantic_indicates_self_description(event):
             return None
 
         if self._domain_allows_introspection(event):
             result = explain_system(
-                user_input,
+                event.get("input", ""),
                 self.kernel.domain,
                 memory=self.kernel.memory
             )
             result["trace"]["epistemic"] = event.get("epistemic", {})
+            result["trace"]["semantic_interpretation"] = event.get(
+                "semantic_interpretation",
+                {}
+            )
             return result
 
         return runtime_response(
@@ -436,4 +448,22 @@ class BORISRuntimeEngine:
             "self-introspection" in capabilities
             or "runtime state machine execution" in capabilities
             or "text reasoning" in capabilities
+        )
+
+    @staticmethod
+    def _semantic_indicates_self_description(event):
+        semantic = event.get("semantic_interpretation", {})
+        if not isinstance(semantic, dict):
+            return False
+
+        text = " ".join([
+            semantic.get("semantic_summary", ""),
+            semantic.get("user_intent_hypothesis", "")
+        ]).lower()
+        return (
+            "boris runtime itself" in text
+            or "about the system" in text
+            or "system information" in text
+            or "capabilities" in text
+            or "limitations" in text
         )
