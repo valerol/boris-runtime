@@ -1,4 +1,5 @@
 from runtime.contracts import runtime_response
+from kernel.self_introspection import explain_system, is_introspection_query
 
 
 PHASE_INPUT = "INPUT"
@@ -8,6 +9,9 @@ PHASE_FINALIZE = "FINALIZE"
 
 
 class BORISRuntimeEngine:
+    """
+    decision_gate is the enforced successor to def decide_next_state(.
+    """
 
     def __init__(self, kernel, schema, max_steps=32, epistemic_hierarchy=None):
         self.kernel = kernel
@@ -85,7 +89,7 @@ class BORISRuntimeEngine:
         # 5. GAP DETECTION
         if t == "decision":
             event["phase"] = PHASE_DECIDE
-            decision = self.decide_next_state(event)
+            decision = self.decision_gate(event)
 
             if self._is_terminal(decision):
                 self.state = self.schema["entrypoint"]
@@ -96,14 +100,13 @@ class BORISRuntimeEngine:
 
         # 6. INTERACTION
         if t == "interaction":
-            state = self.state
-            self.state = node["next"]
+            self.state = self.schema["entrypoint"]
             return runtime_response(
-                "CLARIFICATION",
-                answer=", ".join(event["bois"].get("required_information", [])),
+                "ERROR",
+                answer="Interaction state is disabled; decisions must pass through decision_gate.",
                 trace=self._trace(event),
                 state={
-                    "runtime_state": state,
+                    "runtime_state": "INTERACTION_DISABLED",
                     "domain": self._domain_state(event)
                 }
             )
@@ -123,9 +126,19 @@ class BORISRuntimeEngine:
         # 9. LLM RESPONSE
         if t == "generation":
             event["phase"] = PHASE_FINALIZE
-            if "force_answer" in event:
-                event["response"] = event["force_answer"]["answer"]
-            elif event.get("llm_allowed", True):
+            gate = event.get("decision_gate", {})
+
+            if gate.get("type") != "ANSWER":
+                return runtime_response(
+                    "ERROR",
+                    answer="Runtime reached generation without an ANSWER decision.",
+                    trace=self._trace(event),
+                    state={"runtime_state": "DECISION_GATE_REQUIRED"}
+                )
+
+            if gate.get("answer"):
+                event["response"] = gate["answer"]
+            elif gate.get("llm_allowed", False):
                 event["response"] = self.kernel.llm.generate({
                     "input": event.get("input", ""),
                     "domain": event.get("domain", {}),
@@ -147,6 +160,17 @@ class BORISRuntimeEngine:
 
         # 11. RETURN
         if t == "output":
+            gate = event.get("decision_gate", {})
+
+            if gate.get("type") != "ANSWER":
+                self.state = self.schema["entrypoint"]
+                return runtime_response(
+                    "ERROR",
+                    answer="Runtime reached output without an ANSWER decision.",
+                    trace=self._trace(event),
+                    state={"runtime_state": "DECISION_GATE_REQUIRED"}
+                )
+
             state = self.state
             self.state = self.schema["entrypoint"]
             return runtime_response(
@@ -169,11 +193,16 @@ class BORISRuntimeEngine:
             state={"runtime_state": self.state}
         )
 
-    def decide_next_state(self, event):
+    def decision_gate(self, event):
         event["epistemic"] = {
             "priority_order": self.epistemic_hierarchy["priority_order"],
             "decisions": []
         }
+
+        self_description = self._self_description_response(event)
+
+        if self_description:
+            return self_description
 
         for source in self.epistemic_hierarchy["priority_order"]:
             decision = self._apply_epistemic_source(source, event)
@@ -183,10 +212,20 @@ class BORISRuntimeEngine:
                 return self._clarification_response(event, decision)
 
             if decision["decision"] == "ANSWER":
-                event["force_answer"] = decision
-                event["llm_allowed"] = False
+                event["decision_gate"] = {
+                    "type": "ANSWER",
+                    "answer": decision.get("answer", ""),
+                    "source": decision["source"],
+                    "llm_allowed": False
+                }
                 return {"type": "CONTINUE"}
 
+        event["decision_gate"] = {
+            "type": "ANSWER",
+            "answer": "",
+            "source": "DECISION_GATE",
+            "llm_allowed": event.get("llm_allowed", False)
+        }
         return {"type": "CONTINUE"}
 
     def _apply_epistemic_source(self, source, event):
@@ -279,7 +318,7 @@ class BORISRuntimeEngine:
 
         return {
             "source": "LLM",
-            "decision": "CONTINUE",
+            "decision": "FORMAT_ONLY",
             "llm_allowed": event["llm_allowed"],
             "uncertainty": uncertainty,
             "threshold": threshold
@@ -314,6 +353,7 @@ class BORISRuntimeEngine:
         return isinstance(result, dict) and result.get("type") in {
             "ANSWER",
             "CLARIFICATION",
+            "SELF_DESCRIPTION",
             "TOOL_REQUEST",
             "ERROR"
         }
@@ -356,3 +396,44 @@ class BORISRuntimeEngine:
     @staticmethod
     def _topic(event):
         return event.get("input", "").strip().lower()
+
+    def _self_description_response(self, event):
+        user_input = event.get("input", "")
+
+        if not is_introspection_query(user_input):
+            return None
+
+        if self._domain_allows_introspection(event):
+            result = explain_system(
+                user_input,
+                self.kernel.domain,
+                memory=self.kernel.memory
+            )
+            result["trace"]["epistemic"] = event.get("epistemic", {})
+            return result
+
+        return runtime_response(
+            "CLARIFICATION",
+            answer="Please clarify what system information you want.",
+            trace={
+                **self._trace(event),
+                "epistemic": event.get("epistemic", {}),
+                "clarification_reason": "domain_disallows_introspection"
+            },
+            state={
+                "runtime_state": "GAP_DETECTION",
+                "phase": PHASE_DECIDE,
+                "clarification_reason": "domain_disallows_introspection",
+                "domain": self._domain_state(event)
+            }
+        )
+
+    @staticmethod
+    def _domain_allows_introspection(event):
+        domain = event.get("domain", {})
+        capabilities = domain.get("capabilities", [])
+        return (
+            "self-introspection" in capabilities
+            or "runtime state machine execution" in capabilities
+            or "text reasoning" in capabilities
+        )
