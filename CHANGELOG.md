@@ -4,6 +4,11 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added Phase 3 LLM invocation tracing in protocol metadata
+- Ensured new non-exit inputs call the configured LLM adapter
+- Marked duplicate cached responses with `llm_called: false`
+- Made mock adapter return `ANSWER` by default instead of echoing `QUESTION`
+- Made `BOIS_LLM=openai` fail loudly when OpenAI configuration is missing
 - Removed pre-LLM semantic decision logic from Protocol Engine
 - Implemented Phase 3 Protocol Engine with RuntimeSession-bound immutable Core
 - Implemented Phase 1 CLI MVP v0.1 strict protocol runtime
