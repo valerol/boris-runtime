@@ -4,6 +4,7 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Implemented Phase 1 CLI MVP v0.1 strict protocol runtime
 - Initial structure created
 - BOIS Middleware SDK roadmap introduced
 - Documentation normalized under `/docs`

@@ -8,6 +8,9 @@ The repository is a root-level SDK. There is no nested wrapper directory such as
 ```text
 core/       declarative definitions and loaders
 runtime/    active protocol execution pipeline
+protocol/   BOIS, SIMA, and BORIS protocol layers
+prompt/     deterministic prompt construction
+llm/        Phase 1 LLM adapter interface
 adapters/   LLM, memory, tool, and platform boundaries
 cli/        local validation entrypoint
 api/        optional FastAPI boundary
@@ -20,6 +23,9 @@ Active code lives in:
 
 - `core/`
 - `runtime/`
+- `protocol/`
+- `prompt/`
+- `llm/`
 - `adapters/`
 - `cli/`
 - `api/`
@@ -54,4 +60,3 @@ LLM inference to an adapter.
 The historical reset rationale is retained in
 [architecture_reset.md](architecture_reset.md) as Phase 0 context. It is not the
 main architecture document.
-

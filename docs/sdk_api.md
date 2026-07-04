@@ -3,6 +3,37 @@
 This document describes the current public API implemented in the repository.
 It does not list planned APIs.
 
+## BOISRuntime
+
+Location: `runtime/runtime.py`
+
+`BOISRuntime` is the Phase 1 CLI MVP composition root. It wires the explicit
+runtime loop with:
+
+- `CoreLoader`
+- `BOIParser`
+- `SIMAAnalyzer`
+- `BORISContext`
+- `PromptBuilder`
+- `LLMAdapter`
+- `ProtocolResponseParser`
+- `DecisionExecutor`
+
+```python
+from runtime.runtime import BOISRuntime
+
+runtime = BOISRuntime()
+output = runtime.run("Explain BOIS Runtime")
+print(output["type"])
+print(output["content"])
+```
+
+The returned object is a dictionary with:
+
+- `type`: `ANSWER`, `QUESTION`, `TOOL_CALL`, or `GAP`
+- `content`: string
+- `metadata`: object
+
 ## MiddlewareEngine
 
 Location: `runtime/engine.py`
@@ -89,4 +120,3 @@ Dataclass containing:
 - `content`
 - `tool_name`
 - `tool_args`
-

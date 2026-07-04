@@ -5,27 +5,32 @@ implementations.
 
 ## LLMAdapter
 
-Location: `adapters/llm.py`
+Location: `llm/llm_adapter.py`
 
 Base interface for LLM completions. Implementations provide:
 
 ```python
-complete(prompt, context=None)
+call(prompt: str) -> str
 ```
 
 ## MockLLMAdapter
 
-Location: `adapters/llm.py`
+Location: `llm/llm_adapter.py`
 
 Deterministic local adapter for CLI validation and smoke tests. It does not call
 an external model.
 
-## OpenAIChatAdapter
+## OpenAIAdapter
 
-Location: `adapters/llm.py`
+Location: `llm/llm_adapter.py`
 
 Optional adapter for OpenAI chat completions. It is loaded only when used and
 depends on `OPENAI_API_KEY` and optional `OPENAI_MODEL`.
+
+## Legacy Adapter Boundary Examples
+
+The `adapters/` package retains lightweight boundary examples for memory, tool,
+and platform integration. These are not platform implementations.
 
 ## MemoryAdapter
 
@@ -64,4 +69,3 @@ and memory remain external responsibilities.
 Open WebUI, Telegram, Dify, and LangGraph are future integration targets. They
 should not become core dependencies of `core/`, `runtime/`, or the active SDK
 execution path.
-

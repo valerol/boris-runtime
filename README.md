@@ -22,6 +22,9 @@ BOIS / SIMA / BORIS protocol definitions on top of existing LLM platforms.
 ```text
 core/          declarative protocol definitions and loader
 runtime/       minimal stateless protocol execution
+protocol/      BOIS, SIMA, and BORIS protocol layers
+prompt/        deterministic prompt construction
+llm/           Phase 1 LLM adapter interface
 adapters/      LLM, memory, tool, and platform boundaries
 cli/           validation CLI
 api/           optional API boundary
@@ -33,7 +36,7 @@ archive/       v0 runtime artifacts
 ## Run CLI
 
 ```bash
-python cli/run.py
+python cli/main.py
 ```
 
 ## Server Smoke Test
@@ -42,7 +45,7 @@ python cli/run.py
 git pull
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python cli/run.py
+python cli/main.py
 ```
 
 The CLI loads `.env` from the repository root automatically. Use
