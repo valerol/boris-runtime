@@ -1,75 +1,14 @@
-from runtime.state import ProtocolOutput
 from protocol.question_memory import QuestionMemory
+from runtime.state import ProtocolOutput
 
 
-class DecisionEngine:
-    def decide(self, session, sima_signals, bois_frame, boris_context, parsed_output):
-        state = session.state
-        question_memory = QuestionMemory(state)
-        missing_fields = sima_signals["missing_fields"]
+class PostLLMController:
+    """Post-LLM protocol controller. It never decides whether to call LLM."""
 
-        if missing_fields:
-            question = self._clarification_question(sima_signals)
-            gap_key = ",".join(missing_fields)
-            self._register_gap(state, gap_key, question, sima_signals)
-
-            if state.can_clarify() and not question_memory.has_asked(question):
-                question_memory.remember(question, gap_key)
-                return self._output(
-                    session,
-                    "QUESTION",
-                    question,
-                    sima_signals,
-                    {"gap_key": gap_key, "decision_reason": "clarification_available"},
-                )
-
-            if state.can_clarify():
-                return self._output(
-                    session,
-                    "ANSWER",
-                    "I do not have the missing context, so I will answer with explicit uncertainty.",
-                    sima_signals,
-                    {"gap_key": gap_key, "decision_reason": "repeated_question_prevented"},
-                )
-
-            return self._output(
-                session,
-                "GAP",
-                "Clarification limit reached before the missing information was resolved.",
-                sima_signals,
-                {"gap_key": gap_key, "decision_reason": "clarification_limit_reached"},
-            )
-
+    def control(self, session, sima_signals, bois_frame, boris_context, parsed_output):
         output = parsed_output
         metadata = {
             **output.metadata,
-            "bois_frame": {"framework": bois_frame.get("framework")},
-            "boris_context": {"role": boris_context.get("role")},
-        }
-        return self._output(session, output.type, output.content, sima_signals, metadata)
-
-    @staticmethod
-    def record_clarification(session, clarification):
-        session.state.record_clarification(clarification)
-
-    @staticmethod
-    def _register_gap(state, gap_key, question, sima_signals):
-        state.gap_registry[gap_key] = {
-            "question": question,
-            "missing_fields": list(sima_signals["missing_fields"]),
-            "resolved": False,
-        }
-
-    @staticmethod
-    def _clarification_question(sima_signals):
-        if "observable_context" in sima_signals["missing_fields"]:
-            return "I cannot determine that without visual context. Please provide an image or describe the pants."
-        if "request" in sima_signals["missing_fields"]:
-            return "What request should the middleware process?"
-        return "Please provide the missing information."
-
-    def _output(self, session, output_type, content, sima_signals, metadata):
-        merged_metadata = {
             "risk": sima_signals["risk"],
             "uncertainty": sima_signals["uncertainty"],
             "missing_fields": list(sima_signals["missing_fields"]),
@@ -77,12 +16,71 @@ class DecisionEngine:
             "max_clarification_cycles": session.state.max_clarification_cycles,
             "core_version": session.core["meta"]["version"],
             "session_id": session.session_id,
-            **metadata,
+            "bois_frame": {"framework": bois_frame.get("framework")},
+            "boris_context": {"role": boris_context.get("role")},
         }
-        session.state.last_output_type = output_type
-        session.state.last_decision = {
-            "type": output_type,
-            "content": content,
-            "metadata": merged_metadata,
-        }
-        return ProtocolOutput(output_type, content, merged_metadata)
+
+        if output.type in {"QUESTION", "GAP"}:
+            controlled = self._control_loop_output(session, output, metadata)
+        else:
+            controlled = ProtocolOutput(output.type, output.content, metadata)
+
+        session.state.last_output_type = controlled.type
+        session.state.last_decision = controlled.to_dict()
+        return controlled
+
+    @staticmethod
+    def record_clarification(session, clarification):
+        session.state.record_clarification(clarification)
+
+    def _control_loop_output(self, session, output, metadata):
+        memory = QuestionMemory(session.state)
+        question = output.content
+        gap_key = self._gap_key(output)
+
+        if output.type == "QUESTION":
+            if memory.has_asked(question):
+                return ProtocolOutput(
+                    "GAP",
+                    "Repeated clarification question rejected by protocol controller.",
+                    {
+                        **metadata,
+                        "repeated_question": True,
+                        "gap_key": gap_key,
+                    },
+                )
+
+            if not session.state.can_clarify():
+                return ProtocolOutput(
+                    "GAP",
+                    "Clarification limit reached.",
+                    {
+                        **metadata,
+                        "clarification_limit_reached": True,
+                        "gap_key": gap_key,
+                    },
+                )
+
+            memory.remember(question, gap_key)
+
+        if output.type == "GAP":
+            session.state.gap_registry[gap_key] = {
+                "question": question,
+                "resolved": False,
+            }
+
+        return ProtocolOutput(
+            output.type,
+            output.content,
+            {
+                **metadata,
+                "gap_key": gap_key,
+            },
+        )
+
+    @staticmethod
+    def _gap_key(output):
+        return str(output.metadata.get("gap_key") or output.content or "gap")
+
+
+DecisionEngine = PostLLMController

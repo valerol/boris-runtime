@@ -41,7 +41,7 @@ INPUT
 -> LLM Adapter
 -> Parser
 -> Validation Layer
--> Decision / Loop Control
+-> Post-LLM Control
 -> OUTPUT or Clarification Loop
 ```
 
@@ -57,8 +57,8 @@ SIMA produces signals only:
 - ambiguity score
 - observable context requirement
 
-SIMA does not make final output decisions and does not directly return terminal
-GAP.
+SIMA does not make final output decisions, does not block LLM invocation, and
+does not directly return terminal GAP.
 
 ## BOIS Frame
 
@@ -89,34 +89,38 @@ Allowed output types:
 - `TOOL_CALL`
 - `GAP`
 
-## Decision Engine
+## Post-LLM Controller
 
-`protocol/decision.py` defines `DecisionEngine`.
+`protocol/decision.py` defines `PostLLMController`.
 
-DecisionEngine arbitrates between:
+PostLLMController operates only after the LLM response has been parsed and
+validated. It may:
 
-- SIMA signals
-- BOIS frame
-- BORIS context
-- parser result
-- runtime state
+- attach session metadata
+- reject repeated identical clarification questions
+- cache exact input/output pairs through runtime state
+- stop clarification loops when the configured limit is reached
 
-DecisionEngine decides:
+PostLLMController must not:
 
-- output type
-- whether to ask a clarification question
-- whether GAP is terminal, clarifying, or non-blocking
-- how runtime state is updated
+- decide whether the initial LLM call is needed
+- classify user intent semantically
+- generate domain-specific clarification questions
+- generate domain-specific answers
 
 ## GAP Semantics
 
-GAP is a managed uncertainty signal, not an automatic hard stop.
+GAP is a managed post-LLM protocol signal, not an automatic pre-LLM hard stop.
 
-GAP may lead to:
+GAP may lead to loop continuation only when the LLM returned `GAP` and the CLI
+provides clarification. Runtime does not create domain-specific GAP questions
+before calling the LLM.
 
-- `QUESTION`, when clarification is possible and useful
-- `ANSWER`, when safe partial answer is possible
-- `GAP`, when execution cannot continue and clarification is impossible or exhausted
+## Duplicate Input Cache
+
+Exact duplicate input is detected after trimming. If the exact same string was
+already processed in the same session, ProtocolEngine returns the cached output
+with `metadata.duplicate = true` and does not call the LLM again.
 
 ## QuestionMemory
 
@@ -125,4 +129,3 @@ GAP may lead to:
 Question memory stores asked questions, detects repeated questions, tracks
 unresolved gaps, and prevents repeated clarification prompts. It uses
 `RuntimeState` only and does not implement database persistence.
-

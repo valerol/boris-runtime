@@ -58,7 +58,7 @@ def main():
         except EOFError:
             break
 
-        if user_input.lower() in {"exit", "quit"}:
+        if runtime.engine.is_exit(user_input):
             break
 
         output = runtime.run(user_input, input_provider=ask_for_clarification)

@@ -24,6 +24,7 @@ class RuntimeState:
     session_id: str = ""
     gap_registry: dict = field(default_factory=dict)
     asked_questions: list = field(default_factory=list)
+    processed_inputs: dict = field(default_factory=dict)
     clarification_cycles: int = 0
     max_clarification_cycles: int = 3
     current_input: str = ""
@@ -63,6 +64,7 @@ class RuntimeState:
         return {
             "gap_registry": dict(self.gap_registry),
             "asked_questions": list(self.asked_questions),
+            "processed_inputs": list(self.processed_inputs.keys()),
             "clarification_cycles": self.clarification_cycles,
             "max_clarification_cycles": self.max_clarification_cycles,
             "last_decision": dict(self.last_decision),

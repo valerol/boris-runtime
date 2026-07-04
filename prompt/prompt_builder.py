@@ -5,8 +5,10 @@ class PromptBuilder:
         return "\n".join(
             [
                 "BOIS/SIMA/BORIS MIDDLEWARE PROTOCOL",
-                "Allowed response types: ANSWER, QUESTION, TOOL_CALL, GAP.",
-                "Return exactly one line as '<TYPE>: <content>'.",
+                "Return ONLY one structured response object.",
+                "Required schema:",
+                "{'type': 'ANSWER|QUESTION|TOOL_CALL|GAP', 'content': 'string', 'metadata': {}}",
+                "Do not return plain text outside schema.",
                 "",
                 "IMMUTABLE_CORE:",
                 str({
@@ -27,6 +29,9 @@ class PromptBuilder:
                 "",
                 "CURRENT_STATE:",
                 str(state.snapshot()),
+                "",
+                "PREVIOUS_TURN:",
+                str(state.last_decision),
                 "",
                 "USER_INPUT:",
                 user_input,

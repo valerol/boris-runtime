@@ -31,8 +31,20 @@ class ProtocolRuntimeLoop:
         while True:
             output = self.protocol_engine.run_turn(session, user_input)
 
-            if output["type"] == "QUESTION" and input_provider and session.state.can_clarify():
+            if output["metadata"].get("exit"):
+                return output
+
+            if output["type"] in {"QUESTION", "GAP"} and input_provider and session.state.can_clarify():
                 clarification = input_provider(output)
+                if self.protocol_engine.is_exit(clarification):
+                    return {
+                        "type": "ANSWER",
+                        "content": "Session terminated.",
+                        "metadata": {
+                            "exit": True,
+                            "session_id": session.session_id,
+                        },
+                    }
                 if clarification:
                     self.protocol_engine.record_clarification(session, clarification)
                     user_input = clarification

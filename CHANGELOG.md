@@ -4,6 +4,7 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Removed pre-LLM semantic decision logic from Protocol Engine
 - Implemented Phase 3 Protocol Engine with RuntimeSession-bound immutable Core
 - Implemented Phase 1 CLI MVP v0.1 strict protocol runtime
 - Initial structure created

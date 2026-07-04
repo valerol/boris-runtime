@@ -49,7 +49,9 @@ the Phase 2 Core Loader.
 Location: `protocol/engine.py`
 
 `ProtocolEngine` runs one protocol turn against an existing `RuntimeSession`.
-It does not load files or parse raw core definitions.
+It does not load files, parse raw core definitions, or classify user questions
+before calling the LLM. Every new non-exit, non-duplicate input calls the LLM
+adapter.
 
 ```python
 from llm.llm_adapter import MockLLMAdapter

@@ -6,6 +6,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from llm.llm_adapter import MockLLMAdapter
+from llm.llm_adapter import LLMAdapter
 from protocol.engine import ProtocolEngine
 from runtime.session import create_runtime_session
 
@@ -26,22 +27,48 @@ except TypeError:
 else:
     raise AssertionError("core must be immutable")
 
-question = engine.run_turn(session, "what color are my pants?")
+answer = engine.run_turn(session, "describe a hidden object")
+assert_schema(answer)
+assert answer["type"] == "ANSWER"
+
+repeated = engine.run_turn(session, "describe a hidden object")
+assert_schema(repeated)
+assert repeated["metadata"]["duplicate"] is True
+
+
+class RepeatingQuestionLLM(LLMAdapter):
+    def call(self, prompt: str) -> str:
+        return '{"type": "QUESTION", "content": "provide target", "metadata": {}}'
+
+
+question_session = create_runtime_session("core/definitions", session_id="phase3-question")
+question_engine = ProtocolEngine(llm_adapter=RepeatingQuestionLLM())
+question = question_engine.run_turn(question_session, "first prompt")
 assert_schema(question)
 assert question["type"] == "QUESTION"
 
-repeated = engine.run_turn(session, "what color are my pants?")
-assert_schema(repeated)
-assert repeated["type"] != "QUESTION"
+repeated_question = question_engine.run_turn(question_session, "second prompt")
+assert_schema(repeated_question)
+assert repeated_question["type"] == "GAP"
 
-limited = create_runtime_session("core/definitions", session_id="phase3-limit")
-limited.state.clarification_cycles = limited.state.max_clarification_cycles
-limited_out = engine.run_turn(limited, "what color are my pants?")
-assert_schema(limited_out)
-assert limited_out["type"] == "GAP"
 
-answer = engine.run_turn(session, "Explain BOIS Runtime v0.")
-assert_schema(answer)
-assert answer["type"] == "ANSWER"
+class CountingLLM(LLMAdapter):
+    def __init__(self):
+        self.calls = 0
+
+    def call(self, prompt: str) -> str:
+        self.calls += 1
+        return '{"type": "ANSWER", "content": "ok", "metadata": {}}'
+
+
+counting = CountingLLM()
+counting_session = create_runtime_session("core/definitions", session_id="phase3-counting")
+counting_engine = ProtocolEngine(llm_adapter=counting)
+first = counting_engine.run_turn(counting_session, "same")
+second = counting_engine.run_turn(counting_session, "same")
+assert_schema(first)
+assert_schema(second)
+assert counting.calls == 1
+assert second["metadata"]["duplicate"] is True
 
 print("phase3 smoke ok")

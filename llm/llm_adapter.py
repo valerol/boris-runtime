@@ -1,4 +1,5 @@
 import os
+import json
 
 
 class LLMAdapter:
@@ -14,15 +15,15 @@ class MockLLMAdapter(LLMAdapter):
         lowered = user_input.lower()
 
         if "clarification:" in lowered:
-            return f"ANSWER: Protocol answer for: {user_input}"
+            return self._response("ANSWER", f"Protocol answer for: {user_input}")
 
         if lowered.startswith("tool "):
-            return f"TOOL_CALL: {user_input[5:].strip()}"
+            return self._response("TOOL_CALL", user_input[5:].strip())
 
         if lowered.startswith("question "):
-            return f"QUESTION: {user_input[9:].strip()}"
+            return self._response("QUESTION", user_input[9:].strip())
 
-        return f"ANSWER: Protocol answer for: {user_input}"
+        return self._response("ANSWER", f"Protocol answer for: {user_input}")
 
     @staticmethod
     def _extract_user_input(prompt):
@@ -30,6 +31,14 @@ class MockLLMAdapter(LLMAdapter):
         if marker not in prompt:
             return ""
         return prompt.rsplit(marker, 1)[-1].strip()
+
+    @staticmethod
+    def _response(output_type, content, metadata=None):
+        return json.dumps({
+            "type": output_type,
+            "content": content,
+            "metadata": metadata or {},
+        })
 
 
 class OpenAIAdapter(LLMAdapter):
@@ -47,7 +56,7 @@ class OpenAIAdapter(LLMAdapter):
             messages=[
                 {
                     "role": "system",
-                    "content": "Return exactly one line as 'ANSWER:', 'QUESTION:', 'TOOL_CALL:', or 'GAP:'.",
+                    "content": "Return only one JSON object with type, content, and metadata.",
                 },
                 {"role": "user", "content": prompt},
             ],
