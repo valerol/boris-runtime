@@ -2,9 +2,14 @@
 
 ## Documentation
 
-- Roadmap → [ROADMAP.md](ROADMAP.md)
-- Changelog → [CHANGELOG.md](CHANGELOG.md)
-- Architecture → [ARCHITECTURE.md](ARCHITECTURE.md)
+- Vision -> [docs/vision.md](docs/vision.md)
+- Architecture -> [docs/architecture.md](docs/architecture.md)
+- Protocol -> [docs/protocol.md](docs/protocol.md)
+- SDK API -> [docs/sdk_api.md](docs/sdk_api.md)
+- Adapters -> [docs/adapters.md](docs/adapters.md)
+- Roadmap -> [docs/roadmap.md](docs/roadmap.md)
+- Archive -> [docs/archive.md](docs/archive.md)
+- Changelog -> [CHANGELOG.md](CHANGELOG.md)
 
 This repository has been reset from a runtime/platform MVP into a lightweight
 protocol middleware SDK.
@@ -21,7 +26,7 @@ adapters/      LLM, memory, tool, and platform boundaries
 cli/           validation CLI
 api/           optional API boundary
 examples/      usage examples
-docs/          architecture reset notes
+docs/          current documentation set
 archive/       v0 runtime artifacts
 ```
 
@@ -47,5 +52,5 @@ database, vector store, Telegram, or Open WebUI dependency.
 
 ## Architecture
 
-Read [docs/architecture_reset.md](docs/architecture_reset.md) for the reset
-model, artifact reclassification, and execution pipeline.
+Read [docs/architecture.md](docs/architecture.md) for the current SDK
+architecture.

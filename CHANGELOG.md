@@ -6,6 +6,10 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 - Initial structure created
 - BOIS Middleware SDK roadmap introduced
+- Documentation normalized under `/docs`
+- Broken `ARCHITECTURE.md` / `SDK_SPEC.md` references removed
+- Middleware SDK docs split into vision, architecture, protocol, sdk_api,
+  adapters, roadmap, and archive
 
 Future entries will track:
 - protocol changes
