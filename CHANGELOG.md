@@ -4,26 +4,37 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-- Added Phase 3 LLM invocation tracing in protocol metadata
-- Ensured new non-exit inputs call the configured LLM adapter
-- Marked duplicate cached responses with `llm_called: false`
-- Made mock adapter return `ANSWER` by default instead of echoing `QUESTION`
-- Made `BOIS_LLM=openai` fail loudly when OpenAI configuration is missing
-- Removed pre-LLM semantic decision logic from Protocol Engine
-- Implemented Phase 3 Protocol Engine with RuntimeSession-bound immutable Core
-- Implemented Phase 1 CLI MVP v0.1 strict protocol runtime
-- Initial structure created
-- BOIS Middleware SDK roadmap introduced
-- Documentation normalized under `/docs`
-- Broken `ARCHITECTURE.md` / `SDK_SPEC.md` references removed
-- Middleware SDK docs split into vision, architecture, protocol, sdk_api,
-  adapters, roadmap, and archive
-
 Future entries will track:
 - protocol changes
 - middleware updates
 - adapter additions
 - breaking changes
+
+## 2026-07-04 - Phase 3 protocol engine
+
+Commits: `55d5409 Implement phase 3 protocol engine`, `7df755a Remove pre-LLM semantic decisions`, `9464e20 Fix Phase 3 LLM invocation tracing`
+
+- Implemented Phase 3 Protocol Engine with RuntimeSession-bound immutable Core.
+- Removed pre-LLM semantic decision logic from Protocol Engine.
+- Added Phase 3 LLM invocation tracing in protocol metadata
+- Ensured new non-exit inputs call the configured LLM adapter
+- Marked duplicate cached responses with `llm_called: false`
+- Made mock adapter return `ANSWER` by default instead of echoing `QUESTION`
+- Made `BOIS_LLM=openai` fail loudly when OpenAI configuration is missing
+
+## 2026-07-04 - Middleware SDK foundation
+
+Commits: `1fd0c23 Implement phase 1 strict CLI runtime`, `0918633 Implement phase 2 core loader system`, `bbc431e Document runtime session lifecycle`, `5beacf8 Normalize middleware SDK documentation`
+
+- Implemented Phase 1 CLI MVP v0.1 strict protocol runtime.
+- Implemented Phase 2 deterministic Core Loader System.
+- Documented RuntimeSession lifecycle and immutable Core ownership.
+- Initial structure created.
+- BOIS Middleware SDK roadmap introduced.
+- Documentation normalized under `/docs`.
+- Broken `ARCHITECTURE.md` / `SDK_SPEC.md` references removed.
+- Middleware SDK docs split into vision, architecture, protocol, sdk_api,
+  adapters, roadmap, and archive.
 
 ## 2026-07-03 - Epistemic gap loop and question memory
 
