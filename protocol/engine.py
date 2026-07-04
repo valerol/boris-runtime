@@ -33,7 +33,16 @@ class ProtocolEngine:
     def run_turn(self, session, user_input):
         text = (user_input or "").strip()
         if self.is_exit(text):
-            return ProtocolOutput("ANSWER", "Session terminated.", {"exit": True}).to_dict()
+            return ProtocolOutput(
+                "ANSWER",
+                "Session terminated.",
+                {
+                    "exit": True,
+                    "llm_called": False,
+                    "llm_adapter": self.adapter_name,
+                    "session_id": session.session_id,
+                },
+            ).to_dict()
 
         cached = session.state.processed_inputs.get(text)
         if cached:
@@ -42,6 +51,8 @@ class ProtocolEngine:
                 "content": cached["content"],
                 "metadata": {
                     **cached["metadata"],
+                    "llm_called": False,
+                    "llm_adapter": self.adapter_name,
                     "duplicate": True,
                 },
             }
@@ -61,6 +72,11 @@ class ProtocolEngine:
         )
         raw_output = self.llm_adapter.call(prompt)
         parsed = self.parser.parse(raw_output)
+        parsed.metadata = {
+            **parsed.metadata,
+            "llm_called": True,
+            "llm_adapter": self.adapter_name,
+        }
 
         try:
             self.validator.validate(parsed)
@@ -68,7 +84,11 @@ class ProtocolEngine:
             parsed = ProtocolOutput(
                 "GAP",
                 "Parsed output failed protocol validation.",
-                {"validation_error": str(exc)},
+                {
+                    "validation_error": str(exc),
+                    "llm_called": True,
+                    "llm_adapter": self.adapter_name,
+                },
             )
 
         decision = self.controller.control(session, signals, frame, boris, parsed)
@@ -85,6 +105,10 @@ class ProtocolEngine:
     @staticmethod
     def is_exit(user_input):
         return (user_input or "").strip().lower() in {"exit", "quit", "/exit", "/quit"}
+
+    @property
+    def adapter_name(self):
+        return getattr(self.llm_adapter, "adapter_name", "mock")
 
     @staticmethod
     def _combined_input(session, user_input):

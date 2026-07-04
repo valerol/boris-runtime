@@ -10,7 +10,15 @@ class LLMAdapter:
 class MockLLMAdapter(LLMAdapter):
     """Strict mock adapter. It returns schema-compatible protocol text only."""
 
+    adapter_name = "mock"
+
+    def __init__(self, forced_outputs=None):
+        self.forced_outputs = list(forced_outputs or [])
+
     def call(self, prompt: str) -> str:
+        if self.forced_outputs:
+            return self.forced_outputs.pop(0)
+
         user_input = self._extract_user_input(prompt)
         lowered = user_input.lower()
 
@@ -19,9 +27,6 @@ class MockLLMAdapter(LLMAdapter):
 
         if lowered.startswith("tool "):
             return self._response("TOOL_CALL", user_input[5:].strip())
-
-        if lowered.startswith("question "):
-            return self._response("QUESTION", user_input[9:].strip())
 
         return self._response("ANSWER", f"Protocol answer for: {user_input}")
 
@@ -44,10 +49,16 @@ class MockLLMAdapter(LLMAdapter):
 class OpenAIAdapter(LLMAdapter):
     """Optional OpenAI adapter. It only performs inference through call()."""
 
+    adapter_name = "openai"
+
     def __init__(self, model=None, api_key=None):
+        resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
+        if not resolved_api_key:
+            raise RuntimeError("BOIS_LLM=openai requires OPENAI_API_KEY")
+
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self.client = OpenAI(api_key=resolved_api_key)
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     def call(self, prompt: str) -> str:

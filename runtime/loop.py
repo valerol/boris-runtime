@@ -42,6 +42,8 @@ class ProtocolRuntimeLoop:
                         "content": "Session terminated.",
                         "metadata": {
                             "exit": True,
+                            "llm_called": False,
+                            "llm_adapter": self.protocol_engine.adapter_name,
                             "session_id": session.session_id,
                         },
                     }

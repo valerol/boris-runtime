@@ -5,10 +5,14 @@ class PromptBuilder:
         return "\n".join(
             [
                 "BOIS/SIMA/BORIS MIDDLEWARE PROTOCOL",
-                "Return ONLY one structured response object.",
-                "Required schema:",
-                "{'type': 'ANSWER|QUESTION|TOOL_CALL|GAP', 'content': 'string', 'metadata': {}}",
-                "Do not return plain text outside schema.",
+                "Return exactly one JSON object:",
+                '{',
+                '  "type": "ANSWER" | "QUESTION" | "TOOL_CALL" | "GAP",',
+                '  "content": "string",',
+                '  "metadata": {}',
+                '}',
+                "Do not return plain text outside this schema.",
+                "Do not echo the user question as QUESTION unless you genuinely need clarification according to the BOIS/SIMA/BORIS protocol.",
                 "",
                 "IMMUTABLE_CORE:",
                 str({
