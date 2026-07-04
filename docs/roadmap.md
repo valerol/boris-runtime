@@ -17,6 +17,20 @@ User/UI -> Middleware -> LLM -> Tools -> Memory
 - Middleware = execution engine only
 - Platform = external
 
+## Current Execution Status
+
+- PHASE 0: completed
+- PHASE 1: completed
+- PHASE 2: completed
+- PHASE 3: completed
+- PHASE 4: pending
+- PHASE 5: pending
+- PHASE 6: pending
+- PHASE 7: pending
+- PHASE 8: pending
+- PHASE 9: pending
+- PHASE 10: pending
+
 ---
 
 # PHASE 0 - ARCHITECTURE RESET
@@ -37,6 +51,11 @@ Status: completed/current foundation.
 
 # PHASE 1 - CLI MVP (RUNTIME CORE v0.1)
 
+Status: completed.
+
+Evidence:
+- `1fd0c23 Implement phase 1 strict CLI runtime`
+
 - runtime loop
 - protocol parser
 - prompt builder
@@ -48,6 +67,12 @@ Status: completed/current foundation.
 
 # PHASE 2 - CORE LOADER SYSTEM
 
+Status: completed.
+
+Evidence:
+- `0918633 Implement phase 2 core loader system`
+- `bbc431e Document runtime session lifecycle`
+
 - load BOIS from .md/.json/.yaml
 - folder-based core support
 - GitHub release support
@@ -56,6 +81,13 @@ Status: completed/current foundation.
 ---
 
 # PHASE 3 - PROTOCOL ENGINE
+
+Status: completed.
+
+Evidence:
+- `55d5409 Implement phase 3 protocol engine`
+- `7df755a Remove pre-LLM semantic decisions`
+- `9464e20 Fix Phase 3 LLM invocation tracing`
 
 - full execution cycle:
   INPUT -> SIMA -> BOIS -> BORIS -> LLM -> PARSER -> LOOP
@@ -67,6 +99,8 @@ Status: completed/current foundation.
 
 # PHASE 4 - API LAYER (FASTAPI)
 
+Status: pending.
+
 - /chat
 - /session
 - /reset
@@ -75,6 +109,8 @@ Status: completed/current foundation.
 ---
 
 # PHASE 5 - PLATFORM ADAPTERS
+
+Status: pending.
 
 - Telegram adapter
 - Web adapter
@@ -86,6 +122,8 @@ Status: completed/current foundation.
 
 # PHASE 6 - MEMORY ABSTRACTION LAYER
 
+Status: pending.
+
 - interface: load/save/search
 - backend agnostic
 - SQLite/Postgres/Redis/Chroma/Supabase support
@@ -93,6 +131,8 @@ Status: completed/current foundation.
 ---
 
 # PHASE 7 - TOOL ABSTRACTION LAYER
+
+Status: pending.
 
 - search / call_api / run_code / read_file
 - tool execution externalized
@@ -102,12 +142,16 @@ Status: completed/current foundation.
 
 # PHASE 8 - PACKAGING (SDK)
 
+Status: pending.
+
 - pip install bois-runtime
 - stable package entrypoints matching implemented SDK APIs
 
 ---
 
 # PHASE 9 - REFERENCE INTEGRATIONS
+
+Status: pending.
 
 - CLI
 - Telegram
@@ -120,6 +164,8 @@ Status: completed/current foundation.
 ---
 
 # PHASE 10 - STABLE v1.0
+
+Status: pending.
 
 - stable API contract
 - documentation freeze
@@ -134,4 +180,3 @@ Status: completed/current foundation.
 - no database engine
 - no agent autonomy system
 - no platform lock-in
-
