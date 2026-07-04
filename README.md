@@ -31,6 +31,15 @@ archive/       v0 runtime artifacts
 python cli/run.py
 ```
 
+## Server Smoke Test
+
+```bash
+git pull
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python cli/run.py
+```
+
 The CLI loads `.env` from the repository root automatically. Use
 `BOIS_LLM=openai` and `OPENAI_API_KEY=...` in `.env` to use the OpenAI adapter;
 otherwise it falls back to the deterministic mock adapter. It has no UI,
