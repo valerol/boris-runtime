@@ -21,15 +21,21 @@ class ProtocolOutput:
 
 @dataclass
 class RuntimeState:
+    session_id: str = ""
     gap_registry: dict = field(default_factory=dict)
-    question_memory: list = field(default_factory=list)
+    asked_questions: list = field(default_factory=list)
     clarification_cycles: int = 0
     max_clarification_cycles: int = 3
     current_input: str = ""
+    last_decision: dict = field(default_factory=dict)
     last_output_type: str | None = None
 
+    @property
+    def question_memory(self):
+        return self.asked_questions
+
     def has_asked_about(self, field_name):
-        return any(item["field"] == field_name for item in self.question_memory)
+        return any(item.get("field") == field_name for item in self.asked_questions)
 
     def register_gap(self, missing_fields, question):
         for field_name in missing_fields:
@@ -40,8 +46,9 @@ class RuntimeState:
 
     def remember_question(self, field_name, question):
         if not self.has_asked_about(field_name):
-            self.question_memory.append({
+            self.asked_questions.append({
                 "field": field_name,
+                "gap_key": field_name,
                 "question": question,
             })
 
@@ -55,9 +62,10 @@ class RuntimeState:
     def snapshot(self):
         return {
             "gap_registry": dict(self.gap_registry),
-            "question_memory": list(self.question_memory),
+            "asked_questions": list(self.asked_questions),
             "clarification_cycles": self.clarification_cycles,
             "max_clarification_cycles": self.max_clarification_cycles,
+            "last_decision": dict(self.last_decision),
             "last_output_type": self.last_output_type,
+            "session_id": self.session_id,
         }
-

@@ -34,6 +34,35 @@ The returned object is a dictionary with:
 - `content`: string
 - `metadata`: object
 
+## RuntimeSession
+
+Location: `runtime/session.py`
+
+`RuntimeSession` holds exactly one immutable canonical Core, runtime state,
+session id, and creation timestamp.
+
+Use `create_runtime_session(core_ref, session_id=None)` to create a session from
+the Phase 2 Core Loader.
+
+## ProtocolEngine
+
+Location: `protocol/engine.py`
+
+`ProtocolEngine` runs one protocol turn against an existing `RuntimeSession`.
+It does not load files or parse raw core definitions.
+
+```python
+from llm.llm_adapter import MockLLMAdapter
+from protocol.engine import ProtocolEngine
+from runtime.session import create_runtime_session
+
+session = create_runtime_session("core/definitions")
+engine = ProtocolEngine(llm_adapter=MockLLMAdapter())
+output = engine.run_turn(session, "Explain BOIS Runtime")
+print(output["type"])
+print(output["content"])
+```
+
 ## MiddlewareEngine
 
 Location: `runtime/engine.py`

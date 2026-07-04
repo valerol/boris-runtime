@@ -5,6 +5,8 @@
 - Vision -> [docs/vision.md](docs/vision.md)
 - Architecture -> [docs/architecture.md](docs/architecture.md)
 - Protocol -> [docs/protocol.md](docs/protocol.md)
+- Protocol Engine -> [docs/PROTOCOL_ENGINE.md](docs/PROTOCOL_ENGINE.md)
+- Runtime Session -> [docs/RUNTIME_SESSION.md](docs/RUNTIME_SESSION.md)
 - SDK API -> [docs/sdk_api.md](docs/sdk_api.md)
 - Adapters -> [docs/adapters.md](docs/adapters.md)
 - Roadmap -> [docs/roadmap.md](docs/roadmap.md)

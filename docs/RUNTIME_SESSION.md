@@ -143,6 +143,12 @@ Runtime Session owns execution state.
 
 Runtime Session does NOT own BOIS definitions.
 
+Implementation names:
+
+- `runtime.session.RuntimeSession`
+- `runtime.session.create_runtime_session(core_ref, session_id=None)`
+- `runtime.state.RuntimeState`
+
 ---
 
 ## Protocol Engine
@@ -159,6 +165,10 @@ It does not read raw files.
 It does not parse Markdown.
 
 It operates only on immutable canonical Core.
+
+Implementation name:
+
+- `protocol.engine.ProtocolEngine`
 
 ---
 
