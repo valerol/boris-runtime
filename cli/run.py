@@ -11,6 +11,29 @@ from adapters.tools import EchoToolAdapter
 from runtime.engine import MiddlewareEngine
 
 
+def load_env_file(path=None):
+    env_path = Path(path) if path else PROJECT_ROOT / ".env"
+
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def build_llm_adapter():
     if os.getenv("BOIS_LLM", "").lower() == "openai":
         return OpenAIChatAdapter()
@@ -26,6 +49,8 @@ def format_response(response):
 
 
 def main():
+    load_env_file()
+
     engine = MiddlewareEngine(
         llm_adapter=build_llm_adapter(),
         tool_adapter=EchoToolAdapter(),
@@ -49,4 +74,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

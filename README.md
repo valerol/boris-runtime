@@ -31,7 +31,9 @@ archive/       v0 runtime artifacts
 python cli/run.py
 ```
 
-The CLI uses a deterministic mock LLM adapter by default and has no UI,
+The CLI loads `.env` from the repository root automatically. Use
+`BOIS_LLM=openai` and `OPENAI_API_KEY=...` in `.env` to use the OpenAI adapter;
+otherwise it falls back to the deterministic mock adapter. It has no UI,
 database, vector store, Telegram, or Open WebUI dependency.
 
 ## Architecture
