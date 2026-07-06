@@ -14,7 +14,7 @@ class PostLLMController:
             "missing_fields": list(sima_signals["missing_fields"]),
             "clarification_cycles": session.state.clarification_cycles,
             "max_clarification_cycles": session.state.max_clarification_cycles,
-            "core_version": session.core["meta"]["version"],
+            "core_version": output.metadata.get("core_version", session.core["meta"]["version"]),
             "session_id": session.session_id,
             "bois_frame": {"framework": bois_frame.get("framework")},
             "boris_context": {"role": boris_context.get("role")},
@@ -40,12 +40,15 @@ class PostLLMController:
 
         if output.type == "QUESTION":
             if memory.has_asked(question):
+                previous = self._previous_question(session, question)
                 return ProtocolOutput(
                     "GAP",
                     "Repeated clarification question rejected by protocol controller.",
                     {
                         **metadata,
                         "repeated_question": True,
+                        "repeated_after_clarification": session.state.clarification_cycles > 0,
+                        "previous_question": previous.get("question", ""),
                         "gap_key": gap_key,
                     },
                 )
@@ -81,6 +84,13 @@ class PostLLMController:
     @staticmethod
     def _gap_key(output):
         return str(output.metadata.get("gap_key") or output.content or "gap")
+
+    @staticmethod
+    def _previous_question(session, question):
+        for item in reversed(session.state.asked_questions):
+            if item.get("question") == question:
+                return item
+        return session.state.asked_questions[-1] if session.state.asked_questions else {}
 
 
 DecisionEngine = PostLLMController

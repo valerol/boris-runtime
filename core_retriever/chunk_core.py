@@ -21,16 +21,29 @@ PREFERRED_ID_FIELDS = (
     "title",
 )
 
-MANDATORY_PATTERNS = {
-    "BOIS definition": ("bois",),
-    "SIMA definition": ("sima",),
-    "BORIS definition": ("boris",),
-    "D/V/S": ("d/v/s", "dvs", "d-v-s"),
-    "evidence boundary": ("evidence_boundary", "evidence boundary"),
-    "priorities P0-P7": ("p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7"),
-    "ORG-OUTPUT": ("org-output",),
-    "ORG-SIMA": ("org-sima",),
-    "ORG-PHIL-MACHINE": ("org-phil-machine",),
+MANDATORY_CHUNK_IDS = {
+    "core:metadata",
+    "terms:bois",
+    "terms:sima",
+    "terms:boris",
+    "terms:d-v-s",
+    "terms:dvs",
+    "priorities:p0",
+    "priorities:p1",
+    "priorities:p2",
+    "organs:org-output",
+}
+
+MANDATORY_TITLE_KEYS = {
+    "bois": "BOIS definition",
+    "sima": "SIMA definition",
+    "boris": "BORIS definition",
+    "d/v/s": "D/V/S",
+    "dvs": "D/V/S",
+    "p0": "P0 priority",
+    "p1": "P1 priority",
+    "p2": "P2 priority",
+    "org-output": "ORG-OUTPUT",
 }
 
 
@@ -215,20 +228,19 @@ def _slug(value):
 
 
 def _with_mandatory_metadata(chunk):
-    haystack = " ".join((
-        chunk["id"],
-        chunk["section"],
-        chunk["title"],
-        chunk["text"],
-    )).lower()
     keys = []
-    for mandatory_key, patterns in MANDATORY_PATTERNS.items():
-        if mandatory_key == "priorities P0-P7":
-            if chunk["section"] == "priorities" or any(pattern in haystack for pattern in patterns):
-                keys.append(mandatory_key)
-            continue
-        if any(pattern in haystack for pattern in patterns):
-            keys.append(mandatory_key)
+
+    chunk_id = chunk["id"].lower()
+    if chunk_id in MANDATORY_CHUNK_IDS:
+        keys.append(chunk_id)
+
+    title_key = _slug(chunk["title"])
+    if title_key in MANDATORY_TITLE_KEYS:
+        keys.append(MANDATORY_TITLE_KEYS[title_key])
+
+    if chunk["section"] == "metadata" and "evidence_boundary" in chunk["text"]:
+        keys.append("evidence boundary")
+
     chunk["mandatory"] = bool(keys)
     chunk["mandatory_keys"] = keys
     return chunk

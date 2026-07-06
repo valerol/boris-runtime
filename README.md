@@ -92,6 +92,8 @@ BORIS_CORE_PATH=/opt/boris-core/core/BOIS_Core_v3_2_4_Sokrat.machine.json
 BORIS_CORE_INDEX_DIR=/opt/boris-runtime/data/core_index
 BORIS_CORE_RETRIEVER_ENABLED=true
 BORIS_CORE_RETRIEVER_TOP_K=12
+BORIS_CORE_RETRIEVER_MIN_SCORE=0.0
+BORIS_CORE_RETRIEVER_MAX_CHARS=12000
 HF_HOME=/opt/boris-runtime/.cache/huggingface
 ```
 

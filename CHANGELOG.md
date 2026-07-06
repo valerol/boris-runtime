@@ -23,6 +23,13 @@ Future entries will track:
 - Added runtime-side setup documentation and retriever `.env` settings.
 - Added tests for chunking, index build, retrieval, deduplication, and prompt injection.
 
+## 2026-07-06 - Active core prompt precedence
+
+- Made external BOIS Core retrieval take precedence over local fallback definitions in the active prompt.
+- Added bounded retrieval controls for top-k, minimum score, and rendered core character budget.
+- Narrowed mandatory chunk selection to a small explicit allowlist.
+- Added clarification-aware prompt sections and repeated-question metadata.
+
 ## 2026-07-04 - Phase 3 protocol engine
 
 Commits: `55d5409 Implement phase 3 protocol engine`, `7df755a Remove pre-LLM semantic decisions`, `9464e20 Fix Phase 3 LLM invocation tracing`

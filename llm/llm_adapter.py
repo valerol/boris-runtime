@@ -83,7 +83,14 @@ class OpenAIAdapter(LLMAdapter):
             },
             {"role": "user", "content": prompt},
         ]
-        self.debug_prompt(json.dumps({"messages": messages}, ensure_ascii=False, indent=2))
+        if self.debug_prompt_enabled:
+            print("========== BOIS PROMPT (DEV MODE) ==========")
+            print("SYSTEM_MESSAGE:")
+            print(messages[0]["content"])
+            print("")
+            print("USER_MESSAGE:")
+            print(prompt)
+            print("============================================")
 
         response = self.client.chat.completions.create(
             model=self.model,

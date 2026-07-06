@@ -70,12 +70,15 @@ class ProtocolEngine:
             session.state.current_input,
             session.state,
         )
+        prompt_context = getattr(self.prompt_builder, "last_context", {})
+        core_metadata = dict(prompt_context.get("core", {}))
         raw_output = self.llm_adapter.call(prompt)
         parsed = self.parser.parse(raw_output)
         parsed.metadata = {
             **parsed.metadata,
             "llm_called": True,
             "llm_adapter": self.adapter_name,
+            **core_metadata,
         }
 
         try:
@@ -88,6 +91,7 @@ class ProtocolEngine:
                     "validation_error": str(exc),
                     "llm_called": True,
                     "llm_adapter": self.adapter_name,
+                    **core_metadata,
                 },
             )
 

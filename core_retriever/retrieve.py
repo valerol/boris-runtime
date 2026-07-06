@@ -9,7 +9,26 @@ from core_retriever.build_index import DEFAULT_MODEL, build_core_index
 
 DEFAULT_CORE_PATH = "/opt/boris-core/core/BOIS_Core_v3_2_4_Sokrat.machine.json"
 DEFAULT_TOP_K = 12
+DEFAULT_MIN_SCORE = 0.0
+DEFAULT_MAX_CHARS = 12000
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+GENERIC_BOOSTS = {
+    "bois": ("bois",),
+    "sima": ("sima", "risk"),
+    "boris": ("boris",),
+    "d/v/s": ("d/v/s", "dvs"),
+    "m7": ("m7",),
+    "m@s": ("m@s",),
+    "oper": ("oper", "operome"),
+    "operome": ("operome", "oper"),
+    "philosophical machine": ("philosophical machine", "философ"),
+    "comparison": ("comparison", "analysis", "сравн"),
+    "analysis": ("analysis", "анализ"),
+    "risk": ("risk", "sima"),
+    "evidence": ("evidence", "доказ"),
+    "substrate": ("substrate", "субстрат"),
+}
 
 
 class CoreRetrieverError(RuntimeError):
@@ -28,6 +47,7 @@ def retrieve_core_chunks(
         top_k if top_k is not None else os.getenv("BORIS_CORE_RETRIEVER_TOP_K"),
         DEFAULT_TOP_K,
     )
+    min_score = safe_float(os.getenv("BORIS_CORE_RETRIEVER_MIN_SCORE"), DEFAULT_MIN_SCORE)
 
     _ensure_index(index_path, model_loader=model_loader)
     chunks, embeddings, manifest = _load_index(index_path)
@@ -41,8 +61,19 @@ def retrieve_core_chunks(
         dtype=np.float32,
     )[0]
 
-    scores = embeddings @ query_embedding
-    ranked_indexes = np.argsort(scores)[::-1][:max(top_k_value, 0)]
+    scores = _apply_generic_boosts(
+        query=query or "",
+        chunks=chunks,
+        scores=embeddings @ query_embedding,
+    )
+    ranked_indexes = []
+    for index in np.argsort(scores)[::-1]:
+        score = float(scores[index])
+        if score < min_score or score < 0:
+            continue
+        ranked_indexes.append(index)
+        if len(ranked_indexes) >= max(top_k_value, 0):
+            break
 
     selected = []
     if include_mandatory:
@@ -56,27 +87,58 @@ def retrieve_core_chunks(
     return sorted(_dedupe_by_id(selected), key=lambda item: item.get("score", 0), reverse=True)
 
 
-def render_retrieved_chunks(chunks):
+def retrieve_core_context(
+    query: str,
+    index_dir: str | Path | None = None,
+    top_k: int | None = None,
+    include_mandatory: bool = True,
+    model_loader=None,
+):
+    index_path = resolve_index_dir(index_dir)
+    chunks = retrieve_core_chunks(
+        query=query,
+        index_dir=index_path,
+        top_k=top_k,
+        include_mandatory=include_mandatory,
+        model_loader=model_loader,
+    )
+    manifest = load_manifest(index_path)
+    return {
+        "mode": "external",
+        "chunks": chunks,
+        "manifest": manifest,
+        "rendered": render_retrieved_chunks(chunks),
+    }
+
+
+def render_retrieved_chunks(chunks, max_chars=None):
     if not chunks:
         return "No BOIS Core chunks retrieved."
 
+    char_budget = safe_positive_int(
+        max_chars if max_chars is not None else os.getenv("BORIS_CORE_RETRIEVER_MAX_CHARS"),
+        DEFAULT_MAX_CHARS,
+    )
     rendered = []
+    used_chars = 0
     for chunk in chunks:
         score = chunk.get("score")
         score_text = "n/a" if score is None else f"{score:.4f}"
-        rendered.append("\n".join((
+        block = "\n".join((
             f"[{chunk['id']}] section={chunk['section']} title={chunk['title']} score={score_text}",
             chunk["text"],
-        )))
+        ))
+        projected = used_chars + len(block) + (5 if rendered else 0)
+        if char_budget > 0 and projected > char_budget and not chunk.get("mandatory"):
+            break
+        rendered.append(block)
+        used_chars = projected
     return "\n\n---\n\n".join(rendered)
 
 
 def index_debug_summary(chunks, index_dir: str | Path | None = None):
     index_path = resolve_index_dir(index_dir)
-    manifest_path = index_path / "manifest.json"
-    manifest = {}
-    if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = load_manifest(index_path)
 
     return {
         "source_path": manifest.get("source_path", ""),
@@ -88,6 +150,13 @@ def index_debug_summary(chunks, index_dir: str | Path | None = None):
             for chunk in chunks
         },
     }
+
+
+def load_manifest(index_dir: str | Path | None = None):
+    manifest_path = resolve_index_dir(index_dir) / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
 def resolve_index_dir(index_dir=None):
@@ -117,6 +186,18 @@ def safe_int(value, default):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def safe_float(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_positive_int(value, default):
+    parsed = safe_int(value, default)
+    return parsed if parsed > 0 else default
 
 
 def _ensure_index(index_path, model_loader=None):
@@ -166,6 +247,33 @@ def _with_score(chunk, score):
     item = dict(chunk)
     item["score"] = score
     return item
+
+
+def _apply_generic_boosts(query, chunks, scores):
+    boosted = np.asarray(scores, dtype=np.float32).copy()
+    query_lower = query.lower()
+    active_terms = [
+        term
+        for term in GENERIC_BOOSTS
+        if term in query_lower or any(trigger in query_lower for trigger in GENERIC_BOOSTS[term])
+    ]
+    if not active_terms:
+        return boosted
+
+    for index, chunk in enumerate(chunks):
+        haystack = " ".join((
+            str(chunk.get("id", "")),
+            str(chunk.get("section", "")),
+            str(chunk.get("title", "")),
+            str(chunk.get("text", "")),
+        )).lower()
+        matches = 0
+        for term in active_terms:
+            if term in haystack or any(trigger in haystack for trigger in GENERIC_BOOSTS[term]):
+                matches += 1
+        if matches:
+            boosted[index] += min(0.15, 0.03 * matches)
+    return boosted
 
 
 def _dedupe_by_id(chunks):

@@ -1,10 +1,18 @@
 import json
+import sys
+from contextlib import contextmanager
+from pathlib import Path
 
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) in sys.path:
+    sys.path.remove(str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from core_retriever.build_index import build_core_index
 from core_retriever.chunk_core import chunk_core
-from core_retriever.retrieve import retrieve_core_chunks
+from core_retriever.retrieve import render_retrieved_chunks, retrieve_core_chunks
 from prompt.prompt_builder import PromptBuilder
 
 
@@ -92,7 +100,8 @@ def test_chunker_returns_multiple_chunks_and_mandatory(tmp_path):
     assert len(chunks) > 5
     assert any(chunk["id"] == "organs:org-sima" for chunk in chunks)
     assert any("SIMA definition" in chunk.get("mandatory_keys", []) for chunk in chunks)
-    assert any("ORG-PHIL-MACHINE" in chunk.get("mandatory_keys", []) for chunk in chunks)
+    phil_machine = next(chunk for chunk in chunks if chunk["id"] == "organs:org-phil-machine")
+    assert phil_machine["mandatory"] is False
 
 
 def test_build_index_writes_expected_files(tmp_path):
@@ -127,26 +136,78 @@ def test_retrieve_returns_relevant_and_deduped_chunks(tmp_path):
 
     ids = [item["id"] for item in items]
     assert len(ids) == len(set(ids))
-    assert "organs:org-phil-machine" in ids
+    assert any(not item.get("mandatory") for item in items)
     assert any(item["score"] >= 0 for item in items)
+
+
+def test_retrieve_respects_top_k_min_score_and_mandatory_allowlist(tmp_path, monkeypatch):
+    core_path = write_sample_core(tmp_path)
+    index_dir = tmp_path / "index"
+    build_core_index(core_path, index_dir, model_name="fake-model", model_loader=fake_model_loader)
+    monkeypatch.setenv("BORIS_CORE_RETRIEVER_MIN_SCORE", "0.95")
+
+    items = retrieve_core_chunks(
+        "analysis",
+        index_dir=index_dir,
+        top_k=1,
+        model_loader=fake_model_loader,
+    )
+
+    semantic_items = [item for item in items if not item.get("mandatory")]
+    assert len(semantic_items) <= 1
+    assert all(item["score"] >= 0 for item in items)
+    assert all(
+        item.get("mandatory") or item["score"] >= 0.95
+        for item in items
+    )
+    assert all(
+        item["id"] in {
+            "core:metadata",
+            "terms:d-v-s",
+            "terms:sima",
+            "priorities:p0",
+            "organs:org-output",
+        }
+        or not item.get("mandatory")
+        for item in items
+    )
+
+
+def test_render_respects_max_chars_for_non_mandatory_chunks():
+    chunks = [
+        {
+            "id": "core:metadata",
+            "section": "metadata",
+            "title": "metadata",
+            "score": 0.1,
+            "mandatory": True,
+            "text": "mandatory grounding",
+        },
+        {
+            "id": "organs:large",
+            "section": "organs",
+            "title": "large",
+            "score": 0.9,
+            "mandatory": False,
+            "text": "x" * 500,
+        },
+    ]
+
+    rendered = render_retrieved_chunks(chunks, max_chars=120)
+
+    assert "mandatory grounding" in rendered
+    assert "organs:large" not in rendered
 
 
 def test_prompt_builder_includes_retrieved_active_core_when_enabled(monkeypatch):
     monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "true")
     monkeypatch.setattr(
-        "prompt.prompt_builder.retrieve_core_chunks",
-        lambda query: [
-            {
-                "id": "organs:org-sima",
-                "section": "organs",
-                "title": "ORG-SIMA",
-                "score": 0.9,
-                "text": "SIMA mechanism chunk",
-            }
-        ],
+        "prompt.prompt_builder.retrieve_core_context",
+        lambda query: _external_context(),
     )
 
-    prompt = PromptBuilder().build(
+    builder = PromptBuilder()
+    prompt = builder.build(
         core=_core_stub(),
         sima_signals={},
         bois_frame={},
@@ -157,6 +218,10 @@ def test_prompt_builder_includes_retrieved_active_core_when_enabled(monkeypatch)
 
     assert "RETRIEVED_ACTIVE_CORE:" in prompt
     assert "SIMA mechanism chunk" in prompt
+    assert "EXTERNAL_CORE_SOURCE:" in prompt
+    assert "IMMUTABLE_CORE:" not in prompt
+    assert "LOCAL_FALLBACK_CORE:" not in prompt
+    assert builder.last_context["core"]["core_source"] == "external"
 
 
 def test_prompt_builder_omits_retrieved_active_core_when_disabled(monkeypatch):
@@ -172,6 +237,86 @@ def test_prompt_builder_omits_retrieved_active_core_when_disabled(monkeypatch):
     )
 
     assert "RETRIEVED_ACTIVE_CORE:" not in prompt
+    assert "LOCAL_FALLBACK_CORE:" in prompt
+    assert "IMMUTABLE_CORE:" not in prompt
+
+
+def test_protocol_engine_metadata_uses_external_core_when_retrieved(monkeypatch):
+    with active_runtime_imports():
+        from llm.llm_adapter import LLMAdapter
+        from protocol.engine import ProtocolEngine
+        from runtime.session import create_runtime_session
+
+        class AnswerLLM(LLMAdapter):
+            adapter_name = "mock"
+
+            def call(self, prompt: str) -> str:
+                return '{"type": "ANSWER", "content": "ok", "metadata": {}}'
+
+        monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "true")
+        monkeypatch.setattr(
+            "prompt.prompt_builder.retrieve_core_context",
+            lambda query: _external_context(),
+        )
+        session = create_runtime_session("core/definitions", session_id="external-core-test")
+        engine = ProtocolEngine(llm_adapter=AnswerLLM())
+
+        output = engine.run_turn(session, "analysis")
+
+    assert output["metadata"]["core_source"] == "external"
+    assert output["metadata"]["core_version"] != "local"
+    assert output["metadata"]["retrieved_chunk_count"] == 1
+
+
+def test_clarification_turn_adds_structured_context(monkeypatch):
+    monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
+    state = _StateStub()
+    state.clarification_cycles = 1
+    state.last_output_type = "CLARIFIED"
+    state.current_input = "original\nClarification: supplied detail"
+    state.asked_questions = [{"question": "What detail?", "gap_key": "detail"}]
+
+    prompt = PromptBuilder().build(
+        core=_core_stub(),
+        sima_signals={},
+        bois_frame={},
+        boris_context={},
+        user_input=state.current_input,
+        state=state,
+    )
+
+    assert "CLARIFICATION_CONTEXT:" in prompt
+    assert "ORIGINAL_REQUEST:" in prompt
+    assert "USER_CLARIFICATIONS:" in prompt
+    assert "Do not repeat the previous clarification question" in prompt
+    assert "supplied detail" in prompt
+
+
+def test_repeated_question_metadata_after_clarification():
+    with active_runtime_imports():
+        from protocol.decision import PostLLMController
+        from runtime.session import create_runtime_session
+        from runtime.state import ProtocolOutput
+
+        session = create_runtime_session("core/definitions", session_id="repeat-test")
+        session.state.clarification_cycles = 1
+        session.state.asked_questions.append({
+            "question": "What detail?",
+            "gap_key": "detail",
+        })
+
+        output = PostLLMController().control(
+            session,
+            {"risk": 0, "uncertainty": 0, "missing_fields": []},
+            {},
+            {},
+            ProtocolOutput("QUESTION", "What detail?", {}),
+        ).to_dict()
+
+    assert output["type"] == "GAP"
+    assert output["metadata"]["repeated_question"] is True
+    assert output["metadata"]["repeated_after_clarification"] is True
+    assert output["metadata"]["previous_question"] == "What detail?"
 
 
 def _core_stub():
@@ -185,6 +330,56 @@ def _core_stub():
 
 class _StateStub:
     last_decision = {}
+    clarification_cycles = 0
+    max_clarification_cycles = 3
+    last_output_type = None
+    current_input = ""
+    asked_questions = []
 
     def snapshot(self):
         return {}
+
+
+def _external_context():
+    return {
+        "mode": "external",
+        "manifest": {
+            "source_path": "/opt/boris-core/core/BOIS_Core_v3_2_4_Sokrat.machine.json",
+            "source_sha256": "abc123",
+            "model_name": "fake-model",
+            "chunks_count": 10,
+        },
+        "chunks": [
+            {
+                "id": "organs:org-sima",
+                "section": "organs",
+                "title": "ORG-SIMA",
+                "score": 0.9,
+                "text": "SIMA mechanism chunk",
+            }
+        ],
+        "rendered": "[organs:org-sima] section=organs title=ORG-SIMA score=0.9000\nSIMA mechanism chunk",
+    }
+
+
+@contextmanager
+def active_runtime_imports():
+    prefixes = ("core", "runtime", "protocol", "prompt", "llm")
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if _matches_prefix(name, prefixes)
+    }
+    for name in list(saved):
+        sys.modules.pop(name, None)
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if _matches_prefix(name, prefixes):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+
+def _matches_prefix(name, prefixes):
+    return name in prefixes or name.startswith(tuple(f"{prefix}." for prefix in prefixes))
