@@ -36,14 +36,15 @@ def load_env_file(path=None):
 
 def build_llm_adapter():
     mode = os.getenv("BOIS_LLM", "").strip().lower()
+    debug_prompt_enabled = os.getenv("BOIS_DEBUG_PROMPT", "").strip().lower() == "true"
 
     if mode == "openai":
         if not os.getenv("OPENAI_API_KEY"):
             raise RuntimeError("BOIS_LLM=openai requires OPENAI_API_KEY")
-        return OpenAIAdapter()
+        return OpenAIAdapter(debug_prompt_enabled=debug_prompt_enabled)
 
     if mode in {"", "mock"}:
-        return MockLLMAdapter()
+        return MockLLMAdapter(debug_prompt_enabled=debug_prompt_enabled)
 
     raise RuntimeError(f"Unsupported BOIS_LLM mode: {mode}")
 
