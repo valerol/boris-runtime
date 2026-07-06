@@ -13,6 +13,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core_retriever.build_index import build_core_index
 from core_retriever.chunk_core import chunk_core
 from core_retriever.retrieve import render_retrieved_chunks, retrieve_core_chunks
+from protocol.normalization import (
+    is_clarification_request_content,
+    normalize_protocol_output_type,
+)
 from prompt.prompt_builder import PromptBuilder
 
 
@@ -319,6 +323,116 @@ def test_repeated_question_metadata_after_clarification():
     assert output["metadata"]["previous_question"] == "What detail?"
 
 
+def test_answer_clarification_request_is_normalized():
+    output = _ProtocolOutputStub(
+        "ANSWER",
+        "Please clarify which item should be analyzed?",
+        {},
+    )
+
+    normalized = normalize_protocol_output_type(output)
+
+    assert normalized.type == "QUESTION"
+    assert normalized.metadata["normalized_output_type"] is True
+    assert normalized.metadata["original_output_type"] == "ANSWER"
+    assert normalized.metadata["normalized_to_type"] == "QUESTION"
+
+
+def test_genuine_answer_is_not_normalized():
+    output = _ProtocolOutputStub(
+        "ANSWER",
+        "The request can be completed with the available information.",
+        {},
+    )
+
+    normalized = normalize_protocol_output_type(output)
+
+    assert normalized.type == "ANSWER"
+    assert "normalized_output_type" not in normalized.metadata
+
+
+def test_metadata_missing_fields_trigger_normalization():
+    assert is_clarification_request_content(
+        "Additional information is required.",
+        {"missing_fields": ["target"]},
+    )
+
+
+def test_normalized_question_enters_loop_and_records_clarification(monkeypatch):
+    with active_runtime_imports():
+        from protocol.engine import ProtocolEngine
+        from runtime.loop import ProtocolRuntimeLoop
+        from runtime.session import create_runtime_session
+
+        monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
+        llm = _ClarifyingAnswerLLM()
+        session = create_runtime_session("core/definitions", session_id="normalized-loop")
+        engine = ProtocolEngine(llm_adapter=llm)
+        loop = ProtocolRuntimeLoop(engine)
+        provided = []
+
+        def input_provider(output):
+            provided.append(output)
+            return "supplied field value"
+
+        output = loop.run(session, "initial request", input_provider=input_provider)
+
+        assert output["type"] == "ANSWER"
+        assert len(provided) == 1
+        assert provided[0]["type"] == "QUESTION"
+        assert provided[0]["metadata"]["normalized_output_type"] is True
+        assert session.state.clarification_cycles == 1
+        assert "Clarification: supplied field value" in session.state.current_input
+        assert session.state.asked_questions
+        assert "CLARIFICATION_CONTEXT:" in llm.prompts[-1]
+        assert "ORIGINAL_REQUEST:" in llm.prompts[-1]
+        assert "USER_CLARIFICATIONS:" in llm.prompts[-1]
+        assert set(output) == {"type", "content", "metadata"}
+
+
+def test_missing_fields_merge_preserves_llm_fields():
+    with active_runtime_imports():
+        from protocol.decision import PostLLMController
+        from runtime.session import create_runtime_session
+        from runtime.state import ProtocolOutput
+
+        session = create_runtime_session("core/definitions", session_id="missing-fields")
+        output = PostLLMController().control(
+            session,
+            {"risk": 0, "uncertainty": 0, "missing_fields": []},
+            {},
+            {},
+            ProtocolOutput("QUESTION", "Please specify the target?", {"missing_fields": ["target"]}),
+        ).to_dict()
+
+        assert output["metadata"]["missing_fields"] == ["target"]
+
+
+def test_previous_answer_like_clarification_fallback_records_next_input(monkeypatch):
+    with active_runtime_imports():
+        from protocol.engine import ProtocolEngine
+        from runtime.session import create_runtime_session
+
+        monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
+        llm = _FinalAnswerLLM()
+        session = create_runtime_session("core/definitions", session_id="fallback")
+        session.state.current_input = "original request"
+        session.state.last_output_type = "ANSWER"
+        session.state.last_decision = {
+            "type": "ANSWER",
+            "content": "Please clarify which target should be used?",
+            "metadata": {},
+        }
+        engine = ProtocolEngine(llm_adapter=llm)
+
+        output = engine.run_turn(session, "supplied fallback detail")
+
+        assert output["type"] == "ANSWER"
+        assert session.state.clarification_cycles == 1
+        assert "Clarification: supplied fallback detail" in session.state.current_input
+        assert "CLARIFICATION_CONTEXT:" in llm.prompts[-1]
+
+
 def _core_stub():
     return {
         "bois_core": {},
@@ -360,6 +474,43 @@ def _external_context():
         ],
         "rendered": "[organs:org-sima] section=organs title=ORG-SIMA score=0.9000\nSIMA mechanism chunk",
     }
+
+
+class _ProtocolOutputStub:
+    def __init__(self, output_type, content, metadata):
+        self.type = output_type
+        self.content = content
+        self.metadata = metadata
+
+
+class _ClarifyingAnswerLLM:
+    adapter_name = "mock"
+
+    def __init__(self):
+        self.calls = 0
+        self.prompts = []
+
+    def call(self, prompt: str) -> str:
+        self.calls += 1
+        self.prompts.append(prompt)
+        if self.calls == 1:
+            return (
+                '{"type": "ANSWER", '
+                '"content": "Please clarify which field should be used?", '
+                '"metadata": {"missing_fields": ["field"]}}'
+            )
+        return '{"type": "ANSWER", "content": "final", "metadata": {}}'
+
+
+class _FinalAnswerLLM:
+    adapter_name = "mock"
+
+    def __init__(self):
+        self.prompts = []
+
+    def call(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return '{"type": "ANSWER", "content": "final", "metadata": {}}'
 
 
 @contextmanager

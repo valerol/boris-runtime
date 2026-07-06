@@ -30,6 +30,13 @@ Future entries will track:
 - Narrowed mandatory chunk selection to a small explicit allowlist.
 - Added clarification-aware prompt sections and repeated-question metadata.
 
+## 2026-07-06 - Clarification output normalization
+
+- Normalized clarification-like `ANSWER` outputs into `QUESTION` before loop handling.
+- Preserved LLM-reported missing fields when SIMA reports no missing fields.
+- Added fallback handling for older sessions where clarification requests were stored as `ANSWER`.
+- Strengthened prompt rules for using `QUESTION` for user-facing missing-information requests.
+
 ## 2026-07-04 - Phase 3 protocol engine
 
 Commits: `55d5409 Implement phase 3 protocol engine`, `7df755a Remove pre-LLM semantic decisions`, `9464e20 Fix Phase 3 LLM invocation tracing`

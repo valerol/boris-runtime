@@ -3,6 +3,10 @@ from prompt.prompt_builder import PromptBuilder
 from protocol.bois_frame import BOISFrameBuilder
 from protocol.boris_context import BORISContext
 from protocol.decision import PostLLMController
+from protocol.normalization import (
+    is_clarification_request_content,
+    normalize_protocol_output_type,
+)
 from protocol.sima_signals import SIMASignalExtractor
 from protocol.validator import ProtocolOutputValidator, ProtocolValidationError
 from runtime.executor import ProtocolResponseParser
@@ -57,7 +61,12 @@ class ProtocolEngine:
                 },
             }
 
-        session.state.current_input = self._combined_input(session, text)
+        if self._previous_answer_requested_clarification(session):
+            session.state.record_clarification(text)
+            session.state.last_output_type = "CLARIFIED"
+        else:
+            session.state.current_input = self._combined_input(session, text)
+
         signals = self.sima_signals.extract(session.state.current_input, session.state)
         frame = self.bois_frame.build(session.core, session.state.current_input)
         boris = self.boris_context.build(session.core, session.state)
@@ -80,6 +89,7 @@ class ProtocolEngine:
             "llm_adapter": self.adapter_name,
             **core_metadata,
         }
+        parsed = normalize_protocol_output_type(parsed)
 
         try:
             self.validator.validate(parsed)
@@ -122,3 +132,15 @@ class ProtocolEngine:
         if session.state.current_input and session.state.last_output_type == "QUESTION":
             return f"{session.state.current_input}\nClarification: {text}"
         return text
+
+    @staticmethod
+    def _previous_answer_requested_clarification(session):
+        last_decision = session.state.last_decision or {}
+        if last_decision.get("type") != "ANSWER":
+            return False
+        if session.state.last_output_type in {"QUESTION", "CLARIFIED"}:
+            return False
+        return is_clarification_request_content(
+            last_decision.get("content", ""),
+            last_decision.get("metadata", {}),
+        )

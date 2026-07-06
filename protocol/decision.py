@@ -7,11 +7,15 @@ class PostLLMController:
 
     def control(self, session, sima_signals, bois_frame, boris_context, parsed_output):
         output = parsed_output
+        missing_fields = self._merge_missing_fields(
+            output.metadata.get("missing_fields"),
+            sima_signals["missing_fields"],
+        )
         metadata = {
             **output.metadata,
             "risk": sima_signals["risk"],
             "uncertainty": sima_signals["uncertainty"],
-            "missing_fields": list(sima_signals["missing_fields"]),
+            "missing_fields": missing_fields,
             "clarification_cycles": session.state.clarification_cycles,
             "max_clarification_cycles": session.state.max_clarification_cycles,
             "core_version": output.metadata.get("core_version", session.core["meta"]["version"]),
@@ -91,6 +95,21 @@ class PostLLMController:
             if item.get("question") == question:
                 return item
         return session.state.asked_questions[-1] if session.state.asked_questions else {}
+
+    @staticmethod
+    def _merge_missing_fields(*field_lists):
+        merged = []
+        seen = set()
+        for fields in field_lists:
+            if not isinstance(fields, list):
+                continue
+            for field in fields:
+                value = str(field).strip()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                merged.append(value)
+        return merged
 
 
 DecisionEngine = PostLLMController
