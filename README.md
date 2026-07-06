@@ -55,6 +55,10 @@ The CLI loads `.env` from the repository root automatically. Use
 otherwise it falls back to the deterministic mock adapter. It has no UI,
 database, vector store, Telegram, or Open WebUI dependency.
 
+For CLI prompt visibility during development, set `BORIS_RUNTIME_MODE=dev` in
+`.env`. In dev mode, the CLI prints the final prompt payload immediately before
+the LLM adapter call.
+
 ## Architecture
 
 Read [docs/architecture.md](docs/architecture.md) for the current SDK

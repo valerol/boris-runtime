@@ -36,7 +36,7 @@ def load_env_file(path=None):
 
 def build_llm_adapter():
     mode = os.getenv("BOIS_LLM", "").strip().lower()
-    debug_prompt_enabled = os.getenv("BOIS_DEBUG_PROMPT", "").strip().lower() == "true"
+    debug_prompt_enabled = os.getenv("BORIS_RUNTIME_MODE", "").strip().lower() == "dev"
 
     if mode == "openai":
         if not os.getenv("OPENAI_API_KEY"):

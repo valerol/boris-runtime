@@ -10,6 +10,12 @@ Future entries will track:
 - adapter additions
 - breaking changes
 
+## 2026-07-06 - CLI dev prompt visibility
+
+- Switched CLI prompt visibility to the existing `BORIS_RUNTIME_MODE=dev`.
+- Removed reliance on the extra `BOIS_DEBUG_PROMPT` flag.
+- Documented the required `.env` setting for development prompt output.
+
 ## 2026-07-04 - Phase 3 protocol engine
 
 Commits: `55d5409 Implement phase 3 protocol engine`, `7df755a Remove pre-LLM semantic decisions`, `9464e20 Fix Phase 3 LLM invocation tracing`
