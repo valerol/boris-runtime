@@ -8,5 +8,9 @@ pydantic
 # Optional real LLM adapter:
 openai
 
+# Optional local BOIS Core retriever:
+sentence-transformers
+numpy
+
 # Development:
 pytest

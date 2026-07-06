@@ -16,6 +16,13 @@ Future entries will track:
 - Removed reliance on the extra `BOIS_DEBUG_PROMPT` flag.
 - Documented the required `.env` setting for development prompt output.
 
+## 2026-07-06 - Local BOIS Core retriever
+
+- Added a local semantic retriever for an external canonical `boris-core` JSON file.
+- Added chunking, index build, retrieval, and prompt injection for selected BOIS Core fragments.
+- Added runtime-side setup documentation and retriever `.env` settings.
+- Added tests for chunking, index build, retrieval, deduplication, and prompt injection.
+
 ## 2026-07-04 - Phase 3 protocol engine
 
 Commits: `55d5409 Implement phase 3 protocol engine`, `7df755a Remove pre-LLM semantic decisions`, `9464e20 Fix Phase 3 LLM invocation tracing`

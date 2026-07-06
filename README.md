@@ -59,6 +59,53 @@ For CLI prompt visibility during development, set `BORIS_RUNTIME_MODE=dev` in
 `.env`. In dev mode, the CLI prints the final prompt payload immediately before
 the LLM adapter call.
 
+## Local BOIS Core Retriever
+
+`boris-runtime` does not own BOIS Core. The operator must provide the external
+canonical machine-readable core file at:
+
+```text
+/opt/boris-core/core/BOIS_Core_v3_2_4_Sokrat.machine.json
+```
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Build the local semantic index:
+
+```bash
+cd /opt/boris-runtime
+source .venv/bin/activate
+
+python -m core_retriever.build_index \
+  --core /opt/boris-core/core/BOIS_Core_v3_2_4_Sokrat.machine.json \
+  --out /opt/boris-runtime/data/core_index
+```
+
+Runtime `.env` settings:
+
+```env
+BORIS_CORE_PATH=/opt/boris-core/core/BOIS_Core_v3_2_4_Sokrat.machine.json
+BORIS_CORE_INDEX_DIR=/opt/boris-runtime/data/core_index
+BORIS_CORE_RETRIEVER_ENABLED=true
+BORIS_CORE_RETRIEVER_TOP_K=12
+HF_HOME=/opt/boris-runtime/.cache/huggingface
+```
+
+Optional settings:
+
+```env
+BORIS_CORE_RETRIEVER_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+BORIS_CORE_RETRIEVER_AUTO_BUILD=false
+```
+
+In development mode, missing index files fail clearly. In non-dev mode, the CLI
+continues without `RETRIEVED_ACTIVE_CORE` if the index is not available.
+Set `BORIS_CORE_RETRIEVER_ENABLED=false` to disable retrieval explicitly.
+
 ## Architecture
 
 Read [docs/architecture.md](docs/architecture.md) for the current SDK

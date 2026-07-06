@@ -8,6 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from llm.llm_adapter import MockLLMAdapter, OpenAIAdapter
+from core_retriever.retrieve import CoreRetrieverError
 from runtime.runtime import BOISRuntime
 
 
@@ -36,7 +37,10 @@ def load_env_file(path=None):
 
 def build_llm_adapter():
     mode = os.getenv("BOIS_LLM", "").strip().lower()
-    debug_prompt_enabled = os.getenv("BORIS_RUNTIME_MODE", "").strip().lower() == "dev"
+    debug_prompt_enabled = (
+        os.getenv("BORIS_RUNTIME_MODE", "").strip().lower() == "dev"
+        or os.getenv("BOIS_DEBUG_PROMPT", "").strip().lower() == "true"
+    )
 
     if mode == "openai":
         if not os.getenv("OPENAI_API_KEY"):
@@ -70,7 +74,11 @@ def main():
         if runtime.engine.is_exit(user_input):
             break
 
-        output = runtime.run(user_input, input_provider=ask_for_clarification)
+        try:
+            output = runtime.run(user_input, input_provider=ask_for_clarification)
+        except CoreRetrieverError as exc:
+            print(f"BOIS Core retriever error: {exc}", file=sys.stderr)
+            break
         print(json.dumps(output, ensure_ascii=False))
 
 
