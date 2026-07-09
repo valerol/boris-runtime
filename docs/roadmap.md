@@ -103,8 +103,9 @@ Status: in progress / partially implemented.
 
 Phase 4 is split into:
 
-- Phase 4A Runtime HTTP API / FastAPI
-- Phase 4B MCP Server adapter
+- Phase 4A Runtime HTTP API / FastAPI: implemented
+- Phase 4A.1 API Stabilization: implemented/current
+- Phase 4B MCP Server adapter: pending
 - Phase 4C ChatGPT Apps connection
 
 Phase 4A provides a thin FastAPI transport layer over `BOISRuntime.run(...)`.
@@ -112,8 +113,12 @@ The HTTP API owns request validation and in-memory runtime session plumbing only
 It must not implement BOIS, SIMA, BORIS, protocol logic, memory logic, prompt
 building, LLM orchestration, semantic decisions, or MCP logic.
 
-Phase 4B will add the MCP Server adapter. MCP must not contain BOIS/SIMA/BORIS
-runtime logic; it should call the Runtime HTTP API as an external transport.
+Phase 4A.1 stabilizes the HTTP contract with controlled runtime error responses,
+per-session execution locking, session inspection, and single-session reset.
+`context` remains transport metadata and is not injected into prompt construction.
+
+Phase 4B will add the MCP Server adapter. It must call the stabilized Runtime
+HTTP API and must not contain BOIS/SIMA/BORIS runtime logic.
 
 Phase 4C will add the ChatGPT Apps connection after MCP exists.
 

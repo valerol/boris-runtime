@@ -7,6 +7,10 @@ from llm.llm_adapter import MockLLMAdapter, OpenAIAdapter
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+class LLMConfigurationError(RuntimeError):
+    """Raised when the configured external LLM adapter cannot be created."""
+
+
 def load_env_file(path=None):
     env_path = Path(path) if path else PROJECT_ROOT / ".env"
 
@@ -42,10 +46,10 @@ def build_llm_adapter():
 
     if mode == "openai":
         if not os.getenv("OPENAI_API_KEY"):
-            raise RuntimeError("BOIS_LLM=openai requires OPENAI_API_KEY")
+            raise LLMConfigurationError("BOIS_LLM=openai requires OPENAI_API_KEY")
         return OpenAIAdapter(debug_prompt_enabled=prompt_debug_enabled())
 
     if mode in {"", "mock"}:
         return MockLLMAdapter(debug_prompt_enabled=prompt_debug_enabled())
 
-    raise RuntimeError(f"Unsupported BOIS_LLM mode: {mode}")
+    raise LLMConfigurationError(f"Unsupported BOIS_LLM mode: {mode}")

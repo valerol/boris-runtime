@@ -58,7 +58,29 @@ curl -s http://localhost:8000/health
 curl -s -X POST http://localhost:8000/runtime/ask \
   -H "Content-Type: application/json" \
   -d '{"session_id":"test","input":"Explain BOIS Runtime v0","mode":"default","context":{"source":"curl"}}'
+
+curl -s http://localhost:8000/runtime/session/test
+
+curl -s -X POST http://localhost:8000/runtime/reset \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"test"}'
 ```
+
+`POST /runtime/ask` returns the protocol output shape plus the resolved
+`session_id`. Runtime/session failures return a controlled JSON error:
+
+```json
+{"error":"runtime_error","detail":"...","session_id":"test"}
+```
+
+`POST /runtime/reset` removes one in-memory runtime session. It returns
+`reset: true` when a session existed and was removed, and `reset: false` when
+the session was already absent.
+
+`context` is accepted by `/runtime/ask` for forward compatibility as transport
+metadata. It is not injected into prompt construction, and it cannot bypass
+BOIS/SIMA/BORIS protocol logic unless a future Runtime API explicitly supports
+that behavior.
 
 The CLI and HTTP API load `.env` from the repository root automatically. Use
 `BOIS_LLM=openai` and `OPENAI_API_KEY=...` in `.env` to use the OpenAI adapter;

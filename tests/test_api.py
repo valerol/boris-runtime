@@ -87,6 +87,10 @@ def test_runtime_ask_valid_input_returns_protocol_shape(monkeypatch, api_context
     assert body["type"] in {"ANSWER", "QUESTION", "TOOL_CALL", "GAP"}
     assert isinstance(body["content"], str)
     assert isinstance(body["metadata"], dict)
+    assert body["metadata"]["transport"] == {
+        "mode": "default",
+        "context_received": True,
+    }
 
 
 def test_runtime_ask_generates_session_id(monkeypatch, api_context):
@@ -115,6 +119,58 @@ def test_runtime_ask_reuses_runtime_for_same_session_id(monkeypatch, api_context
     assert runtime.session.session_id == "same"
 
 
+def test_runtime_reset_removes_existing_session(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    client = TestClient(app)
+
+    ask_response = client.post("/runtime/ask", json={"session_id": "reset-me", "input": "hello"})
+    reset_response = client.post("/runtime/reset", json={"session_id": "reset-me"})
+
+    assert ask_response.status_code == 200
+    assert reset_response.status_code == 200
+    assert reset_response.json() == {"session_id": "reset-me", "reset": True}
+    assert runtime_registry.get("reset-me") is None
+
+
+def test_runtime_session_exists_after_ask(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    client = TestClient(app)
+
+    ask_response = client.post("/runtime/ask", json={"session_id": "inspect-me", "input": "hello"})
+    session_response = client.get("/runtime/session/inspect-me")
+
+    assert ask_response.status_code == 200
+    assert session_response.status_code == 200
+    assert session_response.json() == {"session_id": "inspect-me", "exists": True}
+
+
+def test_runtime_session_missing_after_reset(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    client = TestClient(app)
+
+    client.post("/runtime/ask", json={"session_id": "gone", "input": "hello"})
+    reset_response = client.post("/runtime/reset", json={"session_id": "gone"})
+    session_response = client.get("/runtime/session/gone")
+
+    assert reset_response.json() == {"session_id": "gone", "reset": True}
+    assert session_response.status_code == 200
+    assert session_response.json() == {"session_id": "gone", "exists": False}
+
+
+def test_runtime_reset_missing_session_returns_false(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    client = TestClient(app)
+
+    response = client.post("/runtime/reset", json={"session_id": "missing"})
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": "missing", "reset": False}
+
+
 def test_runtime_ask_empty_input_returns_validation_error(monkeypatch, api_context):
     app, runtime_registry = api_context
     clear_api_state(monkeypatch, runtime_registry)
@@ -134,3 +190,99 @@ def test_api_defaults_to_mock_adapter_without_openai_key(monkeypatch, api_contex
 
     assert response.status_code == 200
     assert response.json()["metadata"]["llm_adapter"] == "mock"
+
+
+def test_misconfigured_openai_returns_controlled_error(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    monkeypatch.setenv("BOIS_LLM", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(app)
+
+    response = client.post("/runtime/ask", json={"session_id": "bad-openai", "input": "hello"})
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"] == "llm_unavailable"
+    assert body["detail"] == "BOIS_LLM=openai requires OPENAI_API_KEY"
+    assert body["session_id"] == "bad-openai"
+    assert "Traceback" not in response.text
+
+
+def test_runtime_execution_error_returns_controlled_500(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+
+    import api.app as app_module
+
+    class BrokenRegistry:
+        def run(self, session_id, user_input):
+            raise ValueError("runtime exploded")
+
+    monkeypatch.setattr(app_module, "runtime_registry", BrokenRegistry())
+    client = TestClient(app)
+
+    response = client.post("/runtime/ask", json={"session_id": "broken", "input": "hello"})
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body == {
+        "error": "runtime_error",
+        "detail": "runtime exploded",
+        "session_id": "broken",
+    }
+    assert "Traceback" not in response.text
+
+
+def test_error_detail_redacts_openai_key(monkeypatch, api_context):
+    _app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+
+    import api.app as app_module
+
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-value")
+
+    response = app_module._error_response(
+        500,
+        "runtime_error",
+        "failed with secret-value",
+        session_id="redact",
+    )
+
+    assert response.status_code == 500
+    assert b"secret-value" not in response.body
+    assert b"[redacted]" in response.body
+
+
+def test_runtime_registry_run_uses_handle_lock(monkeypatch, api_context):
+    _app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+
+    import api.runtime_registry as registry_module
+
+    calls = []
+
+    class FakeRuntime:
+        def __init__(self, session_id=None, llm_adapter=None, core_ref=None):
+            self.session_id = session_id
+            self.llm_adapter = llm_adapter
+
+        def run(self, user_input):
+            calls.append((self.session_id, user_input))
+            return {"type": "ANSWER", "content": "ok", "metadata": {}}
+
+    monkeypatch.setattr(registry_module, "BOISRuntime", FakeRuntime)
+    monkeypatch.setattr(registry_module, "build_llm_adapter", lambda: object())
+
+    registry = registry_module.RuntimeRegistry()
+    first = registry.run("locked", "one")
+    handle = registry.get_handle("locked")
+    runtime = registry.get("locked")
+    second = registry.run("locked", "two")
+
+    assert first["content"] == "ok"
+    assert second["content"] == "ok"
+    assert handle is not None
+    assert handle.lock is not None
+    assert runtime is registry.get("locked")
+    assert calls == [("locked", "one"), ("locked", "two")]
