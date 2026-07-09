@@ -23,7 +23,7 @@ User/UI -> Middleware -> LLM -> Tools -> Memory
 - PHASE 1: completed
 - PHASE 2: completed
 - PHASE 3: completed
-- PHASE 4: pending
+- PHASE 4: in progress / partially implemented
 - PHASE 5: pending
 - PHASE 6: pending
 - PHASE 7: pending
@@ -97,14 +97,25 @@ Evidence:
 
 ---
 
-# PHASE 4 - API LAYER (FASTAPI)
+# PHASE 4 - RUNTIME API AND CHATGPT INTEGRATION
 
-Status: pending.
+Status: in progress / partially implemented.
 
-- /chat
-- /session
-- /reset
-- stateless API wrapper over middleware
+Phase 4 is split into:
+
+- Phase 4A Runtime HTTP API / FastAPI
+- Phase 4B MCP Server adapter
+- Phase 4C ChatGPT Apps connection
+
+Phase 4A provides a thin FastAPI transport layer over `BOISRuntime.run(...)`.
+The HTTP API owns request validation and in-memory runtime session plumbing only.
+It must not implement BOIS, SIMA, BORIS, protocol logic, memory logic, prompt
+building, LLM orchestration, semantic decisions, or MCP logic.
+
+Phase 4B will add the MCP Server adapter. MCP must not contain BOIS/SIMA/BORIS
+runtime logic; it should call the Runtime HTTP API as an external transport.
+
+Phase 4C will add the ChatGPT Apps connection after MCP exists.
 
 ---
 

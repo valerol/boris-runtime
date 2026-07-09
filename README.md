@@ -41,23 +41,33 @@ archive/       v0 runtime artifacts
 python cli/main.py
 ```
 
-## Server Smoke Test
+## Runtime HTTP API
+
+Install dependencies and run the FastAPI transport adapter:
 
 ```bash
-git pull
-source .venv/bin/activate
 python -m pip install -r requirements.txt
-python cli/main.py
+uvicorn api.app:app --host 0.0.0.0 --port 8000
 ```
 
-The CLI loads `.env` from the repository root automatically. Use
+Smoke test:
+
+```bash
+curl -s http://localhost:8000/health
+
+curl -s -X POST http://localhost:8000/runtime/ask \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"test","input":"Explain BOIS Runtime v0","mode":"default","context":{"source":"curl"}}'
+```
+
+The CLI and HTTP API load `.env` from the repository root automatically. Use
 `BOIS_LLM=openai` and `OPENAI_API_KEY=...` in `.env` to use the OpenAI adapter;
 otherwise it falls back to the deterministic mock adapter. It has no UI,
 database, vector store, Telegram, or Open WebUI dependency.
 
-For CLI prompt visibility during development, set `BORIS_RUNTIME_MODE=dev` in
-`.env`. In dev mode, the CLI prints the final prompt payload immediately before
-the LLM adapter call.
+For prompt visibility during development, set `BORIS_RUNTIME_MODE=dev` or
+`BOIS_DEBUG_PROMPT=true` in `.env`. In dev mode, the adapter prints the final
+prompt payload immediately before the LLM adapter call.
 
 ## Local BOIS Core Retriever
 
