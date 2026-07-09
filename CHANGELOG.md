@@ -10,6 +10,32 @@ Future entries will track:
 - adapter additions
 - breaking changes
 
+## 2026-07-09 - Phase 4 Runtime HTTP API and MCP adapters
+
+Commits: `c6d408a Implement Phase 4A runtime HTTP API`, `dde0664 Stabilize runtime HTTP API`, `39c71bc Implement MCP server adapter`, `6c018a0 Add remote MCP readiness`
+
+- Added the FastAPI Runtime HTTP API as a thin transport layer over
+  `BOISRuntime.run(...)`.
+- Added `/runtime/ask`, `/runtime/reset`, `/runtime/session/{session_id}`, and
+  `/health`.
+- Added in-memory per-session runtime registry with per-session execution
+  locking.
+- Added controlled Runtime API error responses for runtime failures and LLM
+  configuration errors.
+- Shared CLI/API environment loading and LLM adapter construction through
+  `runtime/config.py`.
+- Added the `mcp_server/` adapter package with `boris.ask`.
+- Kept MCP adapter-only: it calls the Runtime HTTP API over HTTP and does not
+  import Runtime, Protocol Engine, Core loader, or OpenAI adapter internals.
+- Added stdio MCP support and remote `streamable-http` support on `/mcp`.
+- Added MCP tool annotations, server instructions, structured tool result
+  normalization, and remote MCP `/health`.
+- Documented private Runtime API / public MCP deployment patterns and ChatGPT
+  developer-mode connector setup.
+- Added optional OpenAI Responses API remote MCP smoke script.
+- Added tests for API behavior, Runtime API client behavior, MCP config,
+  MCP output normalization, remote transport, and adapter boundary rules.
+
 ## 2026-07-06 - CLI dev prompt visibility
 
 - Switched CLI prompt visibility to the existing `BORIS_RUNTIME_MODE=dev`.
