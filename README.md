@@ -9,6 +9,7 @@
 - Runtime Session -> [docs/RUNTIME_SESSION.md](docs/RUNTIME_SESSION.md)
 - SDK API -> [docs/sdk_api.md](docs/sdk_api.md)
 - Adapters -> [docs/adapters.md](docs/adapters.md)
+- Remote MCP Deployment -> [docs/remote_mcp_deployment.md](docs/remote_mcp_deployment.md)
 - Roadmap -> [docs/roadmap.md](docs/roadmap.md)
 - Archive -> [docs/archive.md](docs/archive.md)
 - Changelog -> [CHANGELOG.md](CHANGELOG.md)
@@ -138,6 +139,29 @@ BOISRuntime.run(...)
 The MCP server is an adapter only. It does not contain BOIS/SIMA/BORIS logic,
 does not call OpenAI directly, does not store memory, does not replace Runtime,
 and communicates with Runtime only through the stabilized HTTP API.
+
+## Remote MCP / ChatGPT Apps
+
+For remote MCP clients and ChatGPT developer-mode connectors, run the Runtime API
+privately and expose only the MCP endpoint over HTTPS.
+
+```bash
+# Terminal 1: private Runtime API
+uvicorn api.app:app --host 127.0.0.1 --port 8000
+
+# Terminal 2: remote MCP adapter
+BORIS_MCP_TRANSPORT=streamable-http \
+BORIS_MCP_HOST=127.0.0.1 \
+BORIS_MCP_PORT=9000 \
+BORIS_MCP_PATH=/mcp \
+BORIS_RUNTIME_API_URL=http://127.0.0.1:8000 \
+python -m mcp_server.server
+```
+
+For ChatGPT developer-mode connectors, expose only the MCP endpoint over HTTPS,
+for example `https://<domain>/mcp`. Keep the Runtime API private.
+
+Deployment details: [docs/remote_mcp_deployment.md](docs/remote_mcp_deployment.md)
 
 ## Local BOIS Core Retriever
 

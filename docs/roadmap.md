@@ -105,8 +105,8 @@ Phase 4 is split into:
 
 - Phase 4A Runtime HTTP API / FastAPI: implemented
 - Phase 4A.1 API Stabilization: implemented
-- Phase 4B MCP Server adapter: implemented/current
-- Phase 4C ChatGPT Apps connection: pending
+- Phase 4B MCP Server adapter: implemented
+- Phase 4C Remote MCP / ChatGPT Apps readiness: implemented/current
 
 Phase 4A provides a thin FastAPI transport layer over `BOISRuntime.run(...)`.
 The HTTP API owns request validation and in-memory runtime session plumbing only.
@@ -121,7 +121,16 @@ Phase 4B introduces an MCP adapter with one tool, `boris.ask`. The adapter calls
 the stabilized Runtime HTTP API and does not import or implement Runtime
 internals.
 
-Phase 4C will add the ChatGPT Apps connection after MCP exists.
+Phase 4C adds remote MCP transport suitable for ChatGPT developer-mode connector
+testing. It exposes `/mcp` as the public adapter boundary while keeping
+`/runtime/ask` private.
+
+Future Phase 4 hardening remains pending:
+
+- OAuth/auth hardening
+- public deployment hardening
+- ChatGPT Apps UI/widget layer
+- app submission package
 
 ---
 

@@ -36,12 +36,13 @@ def test_boris_ask_calls_runtime_api_client():
         client=client,
     )
 
-    assert response == {
+    assert response["structuredContent"] == {
         "session_id": "test",
         "type": "ANSWER",
         "content": "ok",
         "metadata": {},
     }
+    assert response["content"] == [{"type": "text", "text": "ok"}]
     assert client.calls == [
         {
             "input": "Explain BOIS Runtime",
@@ -62,7 +63,11 @@ def test_boris_ask_surfaces_runtime_error_payload():
 
     response = run_boris_ask(input="hello", session_id="test", client=client)
 
-    assert response == error_payload
+    assert response == {
+        "structuredContent": error_payload,
+        "content": [{"type": "text", "text": "Runtime error: failed"}],
+        "isError": True,
+    }
 
 
 def test_boris_ask_returns_structured_adapter_error_without_payload():
@@ -70,11 +75,13 @@ def test_boris_ask_returns_structured_adapter_error_without_payload():
 
     response = run_boris_ask(input="hello", session_id="test", client=client)
 
-    assert response == {
+    assert response["structuredContent"] == {
         "error": "runtime_api_error",
         "detail": "connection failed",
         "session_id": "test",
     }
+    assert response["isError"] is True
+    assert response["content"] == [{"type": "text", "text": "Runtime error: connection failed"}]
 
 
 def test_mcp_adapter_does_not_import_runtime_internals():
@@ -84,6 +91,8 @@ def test_mcp_adapter_does_not_import_runtime_internals():
         "protocol.engine",
         "ProtocolEngine",
         "core.loader",
+        "llm.llm_adapter",
+        "OpenAIAdapter",
     )
 
     for path in (PROJECT_ROOT / "mcp_server").glob("*.py"):

@@ -7,6 +7,7 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_TRANSPORT = "stdio"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9000
+DEFAULT_PATH = "/mcp"
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class MCPServerConfig:
     transport: str = DEFAULT_TRANSPORT
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
+    path: str = DEFAULT_PATH
 
 
 def load_config():
@@ -25,6 +27,7 @@ def load_config():
         transport=os.getenv("BORIS_MCP_TRANSPORT", DEFAULT_TRANSPORT).strip().lower(),
         host=os.getenv("BORIS_MCP_HOST", DEFAULT_HOST),
         port=_int_env("BORIS_MCP_PORT", DEFAULT_PORT),
+        path=_path_env("BORIS_MCP_PATH", DEFAULT_PATH),
     )
 
 
@@ -32,11 +35,27 @@ def _float_env(name, default):
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return default
-    return float(raw)
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid {name}: {raw}") from exc
 
 
 def _int_env(name, default):
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return default
-    return int(raw)
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid {name}: {raw}") from exc
+
+
+def _path_env(name, default):
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    path = raw.strip()
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return path
