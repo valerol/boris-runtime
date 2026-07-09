@@ -30,6 +30,7 @@ llm/           Phase 1 LLM adapter interface
 adapters/      LLM, memory, tool, and platform boundaries
 cli/           validation CLI
 api/           optional API boundary
+mcp_server/    MCP adapter over the Runtime HTTP API
 examples/      usage examples
 docs/          current documentation set
 archive/       v0 runtime artifacts
@@ -90,6 +91,53 @@ database, vector store, Telegram, or Open WebUI dependency.
 For prompt visibility during development, set `BORIS_RUNTIME_MODE=dev` or
 `BOIS_DEBUG_PROMPT=true` in `.env`. In dev mode, the adapter prints the final
 prompt payload immediately before the LLM adapter call.
+
+## MCP Server Adapter
+
+The MCP adapter exposes one tool:
+
+```text
+boris.ask
+```
+
+Run locally with the Runtime HTTP API in one terminal:
+
+```bash
+uvicorn api.app:app --host 0.0.0.0 --port 8000
+```
+
+Then start the MCP adapter in another terminal:
+
+```bash
+BORIS_RUNTIME_API_URL=http://127.0.0.1:8000 python -m mcp_server.server
+```
+
+Tool payload:
+
+```json
+{
+  "input": "Explain BOIS Runtime",
+  "session_id": "test",
+  "mode": "default",
+  "context": {
+    "source": "mcp"
+  }
+}
+```
+
+Architecture:
+
+```text
+MCP boris.ask
+  -> HTTP
+POST /runtime/ask
+  ->
+BOISRuntime.run(...)
+```
+
+The MCP server is an adapter only. It does not contain BOIS/SIMA/BORIS logic,
+does not call OpenAI directly, does not store memory, does not replace Runtime,
+and communicates with Runtime only through the stabilized HTTP API.
 
 ## Local BOIS Core Retriever
 

@@ -4,9 +4,13 @@
 fastapi
 uvicorn
 pydantic
+httpx
 
 # Optional real LLM adapter:
 openai
+
+# Optional MCP adapter:
+mcp
 
 # Optional local BOIS Core retriever:
 sentence-transformers
