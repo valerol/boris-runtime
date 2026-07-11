@@ -141,151 +141,77 @@ Future Phase 4 hardening remains pending:
 Status: implemented.
 
 Goal:
-Add a second Runtime/MCP mode where Runtime does not generate the final answer.
-Instead, Runtime returns a structured BOIS/SIMA/BORIS context packet that
-ChatGPT can use as the controlling frame for its own answer.
+Allow Runtime to return a bounded BOIS/SIMA/BORIS context packet while the
+client model generates the final answer.
 
-Current full-answer mode:
-- `boris.ask`
-- Runtime performs framing/retrieval/reasoning
-- Runtime calls OpenAI API through the configured LLM adapter
-- Runtime returns a final protocol answer
+Delivered:
+- private `/runtime/frame`;
+- MCP `boris.frame`;
+- LLM-independent context generation;
+- bounded and sanitized public packet;
+- non-mutating session behavior.
 
-Implemented context-provider mode:
-- `boris.frame`
-- Runtime performs BOIS/SIMA/BORIS framing and core retrieval
-- Runtime does not call OpenAI API
-- Runtime returns structured context through MCP `structuredContent`
-- ChatGPT generates the final answer using the returned frame
+Acceptance summary:
+- `boris.ask` remains backward compatible;
+- Runtime API remains private;
+- MCP remains the public adapter;
+- context packet is explicit, bounded, and leakage-protected.
 
-Implemented tool:
-- `boris.frame`
+## PHASE 4D.1 - STATELESS ANSWER VALIDATION
 
-Implemented Phase 4D.1 tool:
-- `boris.validate`
+Status: implemented.
 
-`boris.validate` validates a ChatGPT-generated answer against the complete
-supplied BORIS context packet. It is stateless and does not persist packets,
-look up `frame_id`, enforce packet TTL, verify ownership, verify signatures, or
-claim packet authenticity. It returns a layered `boris-validation/1.0` report
-with verdict, issues, recommendations, preflight results, deterministic results,
-semantic results, and LLM invocation metadata. It does not rewrite the answer.
+Goal:
+Validate a client-generated answer against the complete context packet without
+storing packets or mutating Runtime state.
 
-Context packet shape:
+Delivered:
+- private `/runtime/validate`;
+- MCP `boris.validate`;
+- deterministic, semantic, and hybrid modes;
+- mandatory preflight;
+- layered validation report;
+- stateless and non-mutating execution.
 
-```json
-{
-  "packet_version": "boris-context/1.0",
-  "frame_id": "uuid",
-  "session_id": "uuid-or-existing-session-id",
-  "input": "original effective user input",
-  "runtime_mode": "context_provider",
-  "llm_called": false,
-  "bois_frame": {},
-  "sima": {
-    "risk": 0.0,
-    "uncertainty": 0.0,
-    "missing_fields": [],
-    "ambiguity_score": 0.0
-  },
-  "boris_context": {},
-  "retrieved_core": [
-    {
-      "chunk_id": "string",
-      "section": "string",
-      "title": "string",
-      "text": "bounded string",
-      "relevance": 0.0
-    }
-  ],
-  "retrieval_metadata": {
-    "returned_chunks": 0,
-    "total_characters": 0,
-    "truncated": false,
-    "max_chunks": 6,
-    "max_chunk_characters": 3000,
-    "max_total_characters": 12000
-  },
-  "answer_instructions": []
-}
-```
+Boundaries:
+- no answer rewriting;
+- no packet persistence;
+- no `frame_id` lookup;
+- no authenticity guarantee;
+- no HMAC signing.
 
-Implemented acceptance criteria for Phase 4D:
+Acceptance summary:
+- request schema errors remain HTTP 422;
+- readable but invalid packets return a validation report;
+- deterministic validation remains LLM-free;
+- semantic validation is lazy and strictly parsed;
+- hybrid validation preserves deterministic structural and security findings;
+- `boris.ask` and `boris.frame` remain backward compatible.
 
-1. Existing `boris.ask` remains unchanged and continues to return
-   Runtime-generated answers.
-2. New `boris.frame` tool is added.
-3. `boris.frame` does not call OpenAI API or any external LLM.
-4. `boris.frame` returns MCP `structuredContent` containing the full context
-   packet.
-5. `boris.frame` returns concise `content` text instructing ChatGPT to use the
-   packet as the controlling frame.
-6. Runtime metadata explicitly includes `llm_called: false`.
-7. Retrieved BOIS Core chunks are bounded to 6 chunks, 3000 characters per
-   chunk, and 12000 total returned characters.
-8. Secrets, raw prompts, API keys, and internal stack traces are not exposed.
-9. ChatGPT can answer using Runtime context without Runtime generating the final
-   answer.
-10. Tests prove that `boris.frame` does not invoke the LLM adapter.
+### Future improvement - Multilingual Deterministic Validation
 
-Implemented acceptance criteria for Phase 4D.1:
+Status: non-blocking / pending.
 
-1. `boris.validate` is registered as the MCP validation tool.
-2. Private `POST /runtime/validate` accepts `answer`, full `context_packet`,
-   and optional `validation_mode`.
-3. Validation modes are `deterministic`, `semantic`, and `hybrid`; default mode
-   is `deterministic`.
-4. Verdicts are `PASS`, `REVISE`, `FAIL`, and `INDETERMINATE`.
-5. Mandatory packet preflight runs before every validation mode.
-6. Request schema errors return HTTP 422.
-7. Readable but invalid packets return HTTP 200 with verdict `FAIL`.
-8. Deterministic validation does not construct or call a validator LLM.
-9. Semantic validation uses a dedicated lazy validator adapter with strict JSON
-   output parsing.
-10. Hybrid mode selectively escalates semantic-required checks and preserves
-    deterministic structural/security findings.
-11. Validation is non-mutating and does not create Runtime session handles.
-12. MCP returns the full report in `structuredContent` and a concise verdict in
-    `content`.
+Current deterministic heuristics use English-oriented lexical markers for
+relevance, risk, uncertainty, ambiguity, and clarification detection.
 
-Architectural constraints:
+For non-English answers, the validator may conservatively return
+`INDETERMINATE` more often.
 
-- Do not replace `boris.ask`.
-- Do not make ChatGPT call OpenAI API through Runtime in context-provider mode.
-- Do not move BOIS/SIMA/BORIS logic into MCP.
-- Do not import Runtime internals into MCP.
-- Do not expose `/runtime/ask` publicly.
-- Runtime API remains private.
-- MCP remains the public adapter boundary.
-- Context packet must be explicit, bounded, and model-visible through
-  `structuredContent` / `content`.
-- `_meta` may be used later for UI-only data, but Phase 4D context needed by
-  ChatGPT must not be hidden in `_meta`.
+Future scope:
+- language-aware heuristic profiles;
+- Unicode-aware lexical overlap;
+- multilingual disclosure markers;
+- language-neutral structural checks;
+- regression tests for supported languages.
 
-Remaining limitations:
+### Future item - Stateful Frame Registry and Packet Authenticity
 
-1. ChatGPT may not strictly obey the returned frame unless prompt/tool
-   instructions are clear.
-2. Frame packet persistence, lookup by `frame_id`, answer submission, packet
-   signing, and tamper verification are not implemented.
+Status: pending.
 
-Future roadmap item: Stateful Frame Registry and Packet Authenticity.
-
-Not part of Phase 4D.1. Future scope may include server-side packet storage,
+Not part of Phase 4D.1. Future scope may include packet persistence,
 `frame_id` lookup, packet TTL, cleanup, session ownership, restart persistence,
 HMAC packet signing, signature verification, and tamper detection.
-
-Local smoke tests:
-
-```bash
-curl -s -X POST http://localhost:8000/runtime/ask \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"ask-test","input":"Explain BOIS Runtime","mode":"default","context":{"source":"curl"}}'
-
-curl -s -X POST http://localhost:8000/runtime/frame \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"frame-test","input":"Explain BOIS Runtime as a context provider","mode":"default","context":{"source":"curl"}}'
-```
 
 ---
 

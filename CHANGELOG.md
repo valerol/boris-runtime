@@ -4,6 +4,17 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+## 2026-07-11 - Phase 4D.1 Validation Hardening
+
+- Added strict public packet field-type validation.
+- Added BOIS/BORIS/session cross-field invariants.
+- Added strict SIMA ranges and retrieval metadata typing.
+- Moved validation input-size checks before all semantic LLM calls.
+- Added regression tests for malformed allowed fields and semantic
+  cost-amplification.
+- Simplified the Phase 4D roadmap sections and documented multilingual
+  deterministic validation as a non-blocking future improvement.
+
 ## 2026-07-11 - Phase 4D.1 Stateless `boris.validate`
 
 - Added private `POST /runtime/validate` and MCP `boris.validate` for

@@ -82,6 +82,19 @@ class ValidationEngine:
             )
             return report
 
+        size_issues = _validation_input_size_issues(answer, context_packet)
+        if size_issues:
+            report["preflight"] = {
+                "status": "failed",
+                "issues": size_issues,
+            }
+            report["verdict"] = "FAIL" if any(issue["code"] == "PACKET_TOO_LARGE" for issue in size_issues) else "REVISE"
+            report["issues"] = _dedupe_issues(size_issues)
+            report["recommendations"] = _dedupe_recommendations(
+                _recommendations_for_issues(size_issues)
+            )
+            return report
+
         if validation_mode == "deterministic":
             deterministic = DeterministicAnswerValidator().validate(answer, context_packet)
             report["deterministic"] = deterministic
@@ -169,7 +182,9 @@ class PacketPreflightValidator:
         if missing or unexpected:
             return {"frame_id": frame_id, "issues": issues + self._leakage_issues(packet)}
 
-        if packet.get("packet_version") != PACKET_VERSION:
+        if not _non_empty_string(packet.get("packet_version")):
+            issues.append(_issue("PACKET_FIELD_TYPE_INVALID", "critical", "packet_version must be a non-empty string.", "packet_version", "preflight", False))
+        elif packet.get("packet_version") != PACKET_VERSION:
             issues.append(_issue("PACKET_VERSION_UNSUPPORTED", "critical", "The packet version is unsupported for validation.", "packet_version", "preflight", False))
         if frame_id is None:
             issues.append(_issue("FRAME_ID_INVALID", "critical", "The packet frame_id must be a valid UUID.", "frame_id", "preflight", False))
@@ -177,14 +192,16 @@ class PacketPreflightValidator:
             issues.append(_issue("SESSION_ID_INVALID", "high", "The packet session_id must be a non-empty string.", "session_id", "preflight", False))
         if not isinstance(packet.get("input"), str):
             issues.append(_issue("INPUT_INVALID", "high", "The packet input must be a string.", "input", "preflight", False))
-        if packet.get("runtime_mode") != RUNTIME_MODE:
+        if not isinstance(packet.get("runtime_mode"), str):
+            issues.append(_issue("RUNTIME_MODE_INVALID", "critical", "The packet runtime_mode must be a string.", "runtime_mode", "preflight", False))
+        elif packet.get("runtime_mode") != RUNTIME_MODE:
             issues.append(_issue("RUNTIME_MODE_INVALID", "critical", "The packet runtime_mode must be context_provider.", "runtime_mode", "preflight", False))
         if packet.get("llm_called") is not False:
             issues.append(_issue("LLM_CALLED_INVALID", "critical", "The context packet must declare llm_called as false.", "llm_called", "preflight", False))
 
-        issues.extend(self._validate_mapping_fields(packet.get("bois_frame"), set(BOIS_FRAME_PUBLIC_FIELDS), "bois_frame", "BOIS_FRAME_INVALID"))
+        issues.extend(self._validate_bois_frame(packet.get("bois_frame"), packet.get("input")))
         issues.extend(self._validate_sima(packet.get("sima")))
-        issues.extend(self._validate_boris_context(packet.get("boris_context")))
+        issues.extend(self._validate_boris_context(packet.get("boris_context"), packet.get("session_id")))
         issues.extend(self._validate_retrieved_core(packet.get("retrieved_core"), packet.get("retrieval_metadata")))
         issues.extend(self._validate_answer_instructions(packet.get("answer_instructions")))
         issues.extend(self._leakage_issues(packet))
@@ -198,25 +215,87 @@ class PacketPreflightValidator:
             for field in sorted(set(value) - allowed_fields)
         ]
 
+    def _validate_bois_frame(self, bois_frame, packet_input):
+        issues = self._validate_mapping_fields(bois_frame, set(BOIS_FRAME_PUBLIC_FIELDS), "bois_frame", "BOIS_FRAME_INVALID")
+        if issues:
+            return issues
+
+        if "framework" in bois_frame:
+            if not isinstance(bois_frame["framework"], str):
+                issues.append(_issue("BOIS_FRAME_TYPE_INVALID", "high", "bois_frame.framework must be a string.", "bois_frame.framework", "preflight", False))
+            elif bois_frame["framework"] != "BOIS":
+                issues.append(_issue("BOIS_FRAMEWORK_INVALID", "high", "bois_frame.framework must be BOIS.", "bois_frame.framework", "preflight", False))
+        if "core" in bois_frame and not isinstance(bois_frame["core"], dict):
+            issues.append(_issue("BOIS_FRAME_TYPE_INVALID", "high", "bois_frame.core must be an object.", "bois_frame.core", "preflight", False))
+        if "input" in bois_frame:
+            if not isinstance(bois_frame["input"], str):
+                issues.append(_issue("BOIS_FRAME_TYPE_INVALID", "high", "bois_frame.input must be a string.", "bois_frame.input", "preflight", False))
+            elif isinstance(packet_input, str) and bois_frame["input"] != packet_input:
+                issues.append(_issue("BOIS_INPUT_MISMATCH", "high", "bois_frame.input must match packet.input.", "bois_frame.input", "preflight", False))
+        if "constraints" in bois_frame:
+            constraints = bois_frame["constraints"]
+            if not isinstance(constraints, list):
+                issues.append(_issue("BOIS_FRAME_TYPE_INVALID", "high", "bois_frame.constraints must be a list of strings.", "bois_frame.constraints", "preflight", False))
+            elif any(not isinstance(item, str) for item in constraints):
+                issues.append(_issue("BOIS_FRAME_TYPE_INVALID", "high", "bois_frame.constraints must contain only strings.", "bois_frame.constraints", "preflight", False))
+        return issues
+
     def _validate_sima(self, sima):
         issues = self._validate_mapping_fields(sima, SIMA_FIELDS, "sima", "SIMA_INVALID")
         if issues:
             return issues
         for field in ("risk", "uncertainty", "ambiguity_score"):
-            if not isinstance(sima.get(field), (int, float)):
-                issues.append(_issue("SIMA_INVALID", "high", f"sima.{field} must be a number.", f"sima.{field}", "preflight", False))
+            value = sima.get(field)
+            if not _is_strict_number(value):
+                issues.append(_issue("SIMA_TYPE_INVALID", "high", f"sima.{field} must be a number.", f"sima.{field}", "preflight", False))
+            elif not 0.0 <= float(value) <= 1.0:
+                issues.append(_issue("SIMA_RANGE_INVALID", "high", f"sima.{field} must be between 0.0 and 1.0.", f"sima.{field}", "preflight", False))
         missing_fields = sima.get("missing_fields")
         if not isinstance(missing_fields, list) or any(not isinstance(item, str) for item in missing_fields):
-            issues.append(_issue("SIMA_INVALID", "high", "sima.missing_fields must be a list of strings.", "sima.missing_fields", "preflight", False))
+            issues.append(_issue("SIMA_TYPE_INVALID", "high", "sima.missing_fields must be a list of strings.", "sima.missing_fields", "preflight", False))
         return issues
 
-    def _validate_boris_context(self, boris_context):
+    def _validate_boris_context(self, boris_context, packet_session_id):
         issues = self._validate_mapping_fields(boris_context, set(BORIS_CONTEXT_PUBLIC_FIELDS), "boris_context", "BORIS_CONTEXT_INVALID")
         if issues:
             return issues
+        if "name" in boris_context:
+            if not isinstance(boris_context["name"], str):
+                issues.append(_issue("BORIS_CONTEXT_TYPE_INVALID", "high", "boris_context.name must be a string.", "boris_context.name", "preflight", False))
+            elif boris_context["name"] != "BORIS":
+                issues.append(_issue("BORIS_NAME_INVALID", "high", "boris_context.name must be BORIS.", "boris_context.name", "preflight", False))
+        if "role" in boris_context and not isinstance(boris_context["role"], str):
+            issues.append(_issue("BORIS_CONTEXT_TYPE_INVALID", "high", "boris_context.role must be a string.", "boris_context.role", "preflight", False))
+        if "context" in boris_context and not isinstance(boris_context["context"], dict):
+            issues.append(_issue("BORIS_CONTEXT_TYPE_INVALID", "high", "boris_context.context must be an object.", "boris_context.context", "preflight", False))
+        if "definition" in boris_context and not isinstance(boris_context["definition"], (dict, str)):
+            issues.append(_issue("BORIS_CONTEXT_TYPE_INVALID", "high", "boris_context.definition must be an object or a string.", "boris_context.definition", "preflight", False))
         session = boris_context.get("session")
         if session is not None:
-            issues.extend(self._validate_mapping_fields(session, set(BORIS_SESSION_PUBLIC_FIELDS), "boris_context.session", "BORIS_SESSION_INVALID"))
+            issues.extend(self._validate_boris_session(session))
+            session_id = session.get("session_id") if isinstance(session, dict) else None
+            if _non_empty_string(session_id) and _non_empty_string(packet_session_id) and session_id != packet_session_id:
+                issues.append(_issue("BORIS_SESSION_ID_MISMATCH", "high", "boris_context.session.session_id must match packet.session_id.", "boris_context.session.session_id", "preflight", False))
+        return issues
+
+    def _validate_boris_session(self, session):
+        issues = self._validate_mapping_fields(session, set(BORIS_SESSION_PUBLIC_FIELDS), "boris_context.session", "BORIS_SESSION_INVALID")
+        if issues:
+            return issues
+        session_id = session.get("session_id")
+        if "session_id" in session and not _non_empty_string(session_id):
+            issues.append(_issue("BORIS_SESSION_TYPE_INVALID", "high", "boris_context.session.session_id must be a non-empty string.", "boris_context.session.session_id", "preflight", False))
+        for field in ("clarification_cycles", "max_clarification_cycles"):
+            if field in session:
+                value = session.get(field)
+                if not _is_strict_int(value):
+                    issues.append(_issue("BORIS_SESSION_TYPE_INVALID", "high", f"boris_context.session.{field} must be an integer.", f"boris_context.session.{field}", "preflight", False))
+                elif value < 0:
+                    issues.append(_issue("CLARIFICATION_CYCLES_INVALID", "high", f"boris_context.session.{field} must be non-negative.", f"boris_context.session.{field}", "preflight", False))
+        cycles = session.get("clarification_cycles")
+        max_cycles = session.get("max_clarification_cycles")
+        if _is_strict_int(cycles) and _is_strict_int(max_cycles) and cycles > max_cycles:
+            issues.append(_issue("CLARIFICATION_CYCLES_INVALID", "high", "clarification_cycles cannot exceed max_clarification_cycles.", "boris_context.session.clarification_cycles", "preflight", False))
         return issues
 
     def _validate_retrieved_core(self, retrieved_core, metadata):
@@ -241,9 +320,17 @@ class PacketPreflightValidator:
             "max_total_characters": MAX_TOTAL_CHARACTERS,
         }
         for field, expected in expected_limits.items():
-            if metadata.get(field) != expected:
+            if not _is_strict_int(metadata.get(field)):
+                issues.append(_issue("RETRIEVAL_METADATA_TYPE_INVALID", "critical", f"retrieval_metadata.{field} must be an integer.", f"retrieval_metadata.{field}", "preflight", False))
+            elif metadata.get(field) != expected:
                 issues.append(_issue("RETRIEVAL_LIMIT_INVALID", "critical", f"retrieval_metadata.{field} must be {expected}.", f"retrieval_metadata.{field}", "preflight", False))
-        if metadata.get("truncated") is not None and not isinstance(metadata.get("truncated"), bool):
+        for field in ("returned_chunks", "total_characters"):
+            value = metadata.get(field)
+            if not _is_strict_int(value):
+                issues.append(_issue("RETRIEVAL_METADATA_TYPE_INVALID", "critical", f"retrieval_metadata.{field} must be an integer.", f"retrieval_metadata.{field}", "preflight", False))
+            elif value < 0:
+                issues.append(_issue("RETRIEVAL_METADATA_TYPE_INVALID", "critical", f"retrieval_metadata.{field} must be non-negative.", f"retrieval_metadata.{field}", "preflight", False))
+        if not isinstance(metadata.get("truncated"), bool):
             issues.append(_issue("RETRIEVAL_METADATA_INVALID", "high", "retrieval_metadata.truncated must be a boolean.", "retrieval_metadata.truncated", "preflight", False))
         if len(retrieved_core) > MAX_CHUNKS:
             issues.append(_issue("RETRIEVAL_LIMIT_EXCEEDED", "critical", "retrieved_core contains more than 6 chunks.", "retrieved_core", "preflight", False))
@@ -265,18 +352,27 @@ class PacketPreflightValidator:
             else:
                 chunk_ids.add(chunk_id)
             text = chunk.get("text")
+            for field in ("section", "title"):
+                if not isinstance(chunk.get(field), str):
+                    issues.append(_issue("RETRIEVED_CHUNK_TYPE_INVALID", "critical", f"Retrieved chunk {field} must be a string.", f"{path}.{field}", "preflight", False))
             if not isinstance(text, str):
-                issues.append(_issue("RETRIEVED_CHUNK_INVALID", "critical", "Retrieved chunk text must be a string.", f"{path}.text", "preflight", False))
+                issues.append(_issue("RETRIEVED_CHUNK_TYPE_INVALID", "critical", "Retrieved chunk text must be a string.", f"{path}.text", "preflight", False))
             else:
                 total += len(text)
                 if len(text) > MAX_CHUNK_CHARACTERS:
                     issues.append(_issue("RETRIEVAL_LIMIT_EXCEEDED", "critical", "Retrieved chunk text exceeds 3000 characters.", f"{path}.text", "preflight", False))
+            if not _is_strict_number(chunk.get("relevance")):
+                issues.append(_issue("RETRIEVED_CHUNK_TYPE_INVALID", "critical", "Retrieved chunk relevance must be a number.", f"{path}.relevance", "preflight", False))
         if total > MAX_TOTAL_CHARACTERS:
             issues.append(_issue("RETRIEVAL_LIMIT_EXCEEDED", "critical", "Retrieved chunk text exceeds the 12000 character total limit.", "retrieved_core", "preflight", False))
         if metadata.get("returned_chunks") != len(retrieved_core):
             issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.returned_chunks does not match retrieved_core length.", "retrieval_metadata.returned_chunks", "preflight", False))
         if metadata.get("total_characters") != total:
             issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.total_characters does not match retrieved chunk text length.", "retrieval_metadata.total_characters", "preflight", False))
+        if _is_strict_int(metadata.get("returned_chunks")) and _is_strict_int(metadata.get("max_chunks")) and metadata["returned_chunks"] > metadata["max_chunks"]:
+            issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.returned_chunks cannot exceed max_chunks.", "retrieval_metadata.returned_chunks", "preflight", False))
+        if _is_strict_int(metadata.get("total_characters")) and _is_strict_int(metadata.get("max_total_characters")) and metadata["total_characters"] > metadata["max_total_characters"]:
+            issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.total_characters cannot exceed max_total_characters.", "retrieval_metadata.total_characters", "preflight", False))
         return issues
 
     def _validate_answer_instructions(self, instructions):
@@ -318,9 +414,6 @@ class DeterministicAnswerValidator:
             _add_check(checks, issues, "ANSWER_TOO_LARGE", "REVISE", "medium", "The answer exceeds the validation size bound.", "answer", False)
         else:
             checks.append(_check("ANSWER_SIZE_WITHIN_LIMIT", "PASS", "low", "The answer is within the validation size bound.", "answer", False))
-
-        if _packet_text_size(packet) > MAX_PACKET_TEXT_CHARACTERS:
-            _add_check(checks, issues, "PACKET_TOO_LARGE", "FAIL", "critical", "The packet text exceeds the validation size bound.", "context_packet", False)
 
         for secret in _known_secret_values():
             if secret and secret in answer:
@@ -535,6 +628,12 @@ def _dedupe_recommendations(recommendations):
 def _recommendations_for_issues(issues):
     recommendations = []
     for issue in issues:
+        if issue["code"] == "ANSWER_TOO_LARGE":
+            recommendations.append("Revise the answer so it stays within the validation size bound.")
+            continue
+        if issue["code"] == "PACKET_TOO_LARGE":
+            recommendations.append("Request a new bounded boris.frame context packet before relying on this answer.")
+            continue
         if issue["source"] == "preflight":
             recommendations.append("Request a new boris.frame context packet before relying on this answer.")
     return recommendations
@@ -542,6 +641,23 @@ def _recommendations_for_issues(issues):
 
 def _non_empty_string(value):
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_strict_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_strict_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validation_input_size_issues(answer, packet):
+    issues = []
+    if len(answer) > MAX_ANSWER_CHARACTERS:
+        issues.append(_issue("ANSWER_TOO_LARGE", "medium", "The answer exceeds the validation size bound.", "answer", "preflight", False))
+    if _packet_text_size(packet) > MAX_PACKET_TEXT_CHARACTERS:
+        issues.append(_issue("PACKET_TOO_LARGE", "critical", "The packet text exceeds the validation size bound.", "context_packet", "preflight", False))
+    return issues
 
 
 def _walk_keys(value, path="", skip_paths=None):
@@ -576,7 +692,7 @@ def _walk_strings(value, path="", skip_paths=None):
 
 
 def _packet_text_size(packet):
-    return sum(len(value) for _path, value in _walk_strings(packet, skip_paths={"input"}))
+    return sum(len(value) for _path, value in _walk_strings(packet))
 
 
 def _has_duplicate_questions(answer):

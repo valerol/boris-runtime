@@ -101,6 +101,26 @@ the centralized Phase 4D leakage policy before any answer validation layer runs.
 Readable but invalid packets return a normal validation report with verdict
 `FAIL`; request schema errors remain HTTP 422.
 
+Preflight also validates public field types and structural consistency. Boolean
+values do not pass integer or numeric checks: counters must be strict integers,
+and SIMA scores must be strict numbers. SIMA `risk`, `uncertainty`, and
+`ambiguity_score` are constrained to `0.0 <= value <= 1.0`. `bois_frame`
+allowed fields are type-checked, `bois_frame.framework` must be `BOIS`, and
+`bois_frame.input` must match packet `input` when present. `boris_context`
+allowed fields and session fields are type-checked, `boris_context.name` must
+be `BORIS` when present, nested session IDs must match packet `session_id`, and
+clarification cycles must be non-negative and cannot exceed the configured
+maximum. Retrieved chunks require non-empty string IDs, string section/title/text
+fields, and strict numeric relevance. Relevance is not capped at 1.0 because the
+current retriever may add lexical boosts to normalized similarity scores.
+Retrieval metadata requires strict integer counts and limits, an actual boolean
+`truncated`, and cross-field consistency between declared counts/character
+totals and returned chunks.
+
+These checks establish structural consistency, logical consistency, and public
+contract compatibility only. They do not establish packet authenticity, packet
+immutability, server origin, or tamper resistance.
+
 Deterministic validation performs explainable non-LLM checks only and reports
 whether each check requires semantic validation. It uses SIMA pass thresholds of
 0.30 for risk, uncertainty, and ambiguity. Semantic validation is a dedicated
@@ -113,6 +133,15 @@ returns HTTP 503 and invalid validator output returns HTTP 502. In hybrid mode,
 deterministic structural and security findings remain authoritative, semantic
 escalation is selective, and unavailable or invalid semantic validation yields
 HTTP 200 with verdict `INDETERMINATE` while preserving deterministic findings.
+
+Validation input-size gates run after packet preflight and before mode dispatch,
+including pure semantic and hybrid modes. `MAX_ANSWER_CHARACTERS` bounds the
+answer. `MAX_PACKET_TEXT_CHARACTERS` counts all string values in the supplied
+context packet, including top-level `input`, because those values are included
+in the semantic validation payload. Oversized answers return a normal report
+with verdict `REVISE`; oversized packets return verdict `FAIL` and require a
+new bounded frame. In both cases `llm_called` remains false and the semantic
+adapter is not constructed.
 
 The context packet is explicit and bounded:
 

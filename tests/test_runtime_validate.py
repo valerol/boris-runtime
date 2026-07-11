@@ -178,6 +178,94 @@ def test_preflight_failures_return_200_fail(api_context, mutate, code):
     assert code in {issue["code"] for issue in body["issues"]}
 
 
+@pytest.mark.parametrize(
+    "mutate,code",
+    [
+        (lambda p: p["sima"].update({"risk": True}), "SIMA_TYPE_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"returned_chunks": False}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["bois_frame"].update({"framework": 123}), "BOIS_FRAME_TYPE_INVALID"),
+        (lambda p: p["bois_frame"].update({"core": "invalid"}), "BOIS_FRAME_TYPE_INVALID"),
+        (lambda p: p["bois_frame"].update({"input": []}), "BOIS_FRAME_TYPE_INVALID"),
+        (lambda p: p["bois_frame"].update({"constraints": "invalid"}), "BOIS_FRAME_TYPE_INVALID"),
+        (lambda p: p["bois_frame"].update({"constraints": ["ok", 1]}), "BOIS_FRAME_TYPE_INVALID"),
+        (lambda p: p["sima"].update({"risk": "high"}), "SIMA_TYPE_INVALID"),
+        (lambda p: p["sima"].update({"uncertainty": None}), "SIMA_TYPE_INVALID"),
+        (lambda p: p["sima"].update({"ambiguity_score": False}), "SIMA_TYPE_INVALID"),
+        (lambda p: p["sima"].update({"missing_fields": "target"}), "SIMA_TYPE_INVALID"),
+        (lambda p: p["sima"].update({"missing_fields": ["target", 1]}), "SIMA_TYPE_INVALID"),
+        (lambda p: p["sima"].update({"risk": -0.1}), "SIMA_RANGE_INVALID"),
+        (lambda p: p["sima"].update({"risk": 1.1}), "SIMA_RANGE_INVALID"),
+        (lambda p: p["sima"].update({"uncertainty": 1.1}), "SIMA_RANGE_INVALID"),
+        (lambda p: p["sima"].update({"ambiguity_score": -0.1}), "SIMA_RANGE_INVALID"),
+        (lambda p: p["boris_context"].update({"name": 123}), "BORIS_CONTEXT_TYPE_INVALID"),
+        (lambda p: p["boris_context"].update({"role": []}), "BORIS_CONTEXT_TYPE_INVALID"),
+        (lambda p: p["boris_context"].update({"context": "invalid"}), "BORIS_CONTEXT_TYPE_INVALID"),
+        (lambda p: p["boris_context"].update({"definition": []}), "BORIS_CONTEXT_TYPE_INVALID"),
+        (lambda p: p["boris_context"].update({"session": []}), "BORIS_SESSION_INVALID"),
+        (lambda p: p["boris_context"].update({"session": {"session_id": "   "}}), "BORIS_SESSION_TYPE_INVALID"),
+        (lambda p: p["boris_context"].update({"session": {"clarification_cycles": True}}), "BORIS_SESSION_TYPE_INVALID"),
+        (lambda p: p["boris_context"].update({"session": {"clarification_cycles": -1}}), "CLARIFICATION_CYCLES_INVALID"),
+        (lambda p: p["boris_context"].update({"session": {"max_clarification_cycles": -1}}), "CLARIFICATION_CYCLES_INVALID"),
+        (lambda p: p["bois_frame"].update({"framework": "NOT_BOIS"}), "BOIS_FRAMEWORK_INVALID"),
+        (lambda p: p["bois_frame"].update({"input": "Different input"}), "BOIS_INPUT_MISMATCH"),
+        (lambda p: p["boris_context"].update({"name": "NOT_BORIS"}), "BORIS_NAME_INVALID"),
+        (lambda p: p["boris_context"].update({"session": {"session_id": "different"}}), "BORIS_SESSION_ID_MISMATCH"),
+        (lambda p: p["boris_context"].update({"session": {"clarification_cycles": 3, "max_clarification_cycles": 2}}), "CLARIFICATION_CYCLES_INVALID"),
+        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"section": 1}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"title": 1}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"relevance": "0.1"}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"relevance": True}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"truncated": None}), "RETRIEVAL_METADATA_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"truncated": 0}), "RETRIEVAL_METADATA_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"total_characters": 0.0}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"max_chunks": True}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"max_chunk_characters": False}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"max_total_characters": True}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"returned_chunks": -1}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["retrieval_metadata"].update({"total_characters": -1}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+    ],
+)
+def test_preflight_strict_types_and_invariants_return_200_fail(api_context, mutate, code):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    packet = valid_packet()
+    mutate(packet)
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": packet},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verdict"] == "FAIL"
+    assert body["llm_called"] is False
+    assert body["preflight"]["status"] == "failed"
+    assert body["deterministic"]["status"] == "not_run"
+    assert body["semantic"]["status"] == "not_run"
+    assert code in {issue["code"] for issue in body["issues"]}
+
+
+def test_retrieval_metadata_cross_field_limits_are_enforced(api_context):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    packet = valid_packet()
+    packet["retrieval_metadata"]["returned_chunks"] = 7
+    packet["retrieval_metadata"]["total_characters"] = 12001
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": packet},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["verdict"] == "FAIL"
+    assert "RETRIEVAL_METADATA_MISMATCH" in {issue["code"] for issue in body["issues"]}
+
+
 def test_preflight_detects_configured_secret_but_not_top_level_input(api_context, monkeypatch):
     app, runtime_registry = api_context
     runtime_registry.clear()
@@ -196,6 +284,56 @@ def test_preflight_detects_configured_secret_but_not_top_level_input(api_context
     assert body["verdict"] == "FAIL"
     assert "PACKET_SECRET_LEAK" in {issue["code"] for issue in body["issues"]}
     assert all(issue["path"] != "input" for issue in body["issues"])
+
+
+def test_semantic_mode_answer_size_gate_blocks_adapter_construction():
+    ValidationEngine = active_module("runtime.validation").ValidationEngine
+
+    report = ValidationEngine(validator_adapter_factory=ForbiddenAdapterFactory()).validate(
+        answer="x" * 20001,
+        context_packet=valid_packet(),
+        validation_mode="semantic",
+    )
+
+    assert report["verdict"] == "REVISE"
+    assert report["llm_called"] is False
+    assert report["semantic"]["status"] == "not_run"
+    assert report["deterministic"]["status"] == "not_run"
+    assert "ANSWER_TOO_LARGE" in {issue["code"] for issue in report["issues"]}
+
+
+def test_semantic_mode_packet_size_gate_blocks_adapter_construction():
+    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    packet = valid_packet()
+    packet["input"] = "x" * 60001
+
+    report = ValidationEngine(validator_adapter_factory=ForbiddenAdapterFactory()).validate(
+        answer="BOIS Runtime answer",
+        context_packet=packet,
+        validation_mode="semantic",
+    )
+
+    assert report["verdict"] == "FAIL"
+    assert report["llm_called"] is False
+    assert report["semantic"]["status"] == "not_run"
+    assert report["deterministic"]["status"] == "not_run"
+    assert "PACKET_TOO_LARGE" in {issue["code"] for issue in report["issues"]}
+
+
+def test_hybrid_size_gate_blocks_semantic_escalation():
+    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    packet = valid_packet()
+    packet["sima"]["risk"] = 0.9
+
+    report = ValidationEngine(validator_adapter_factory=ForbiddenAdapterFactory()).validate(
+        answer="x" * 20001,
+        context_packet=packet,
+        validation_mode="hybrid",
+    )
+
+    assert report["verdict"] == "REVISE"
+    assert report["llm_called"] is False
+    assert report["semantic"]["status"] == "not_run"
 
 
 def test_deterministic_checks_secret_leak_missing_fields_and_duplicate_questions(monkeypatch):
