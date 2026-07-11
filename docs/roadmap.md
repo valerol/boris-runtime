@@ -106,7 +106,8 @@ Phase 4 is split into:
 - Phase 4A Runtime HTTP API / FastAPI: implemented
 - Phase 4A.1 API Stabilization: implemented
 - Phase 4B MCP Server adapter: implemented
-- Phase 4C Remote MCP / ChatGPT Apps readiness: implemented/current
+- Phase 4C Remote MCP / ChatGPT Apps readiness: implemented
+- Phase 4D Runtime as Context Provider: planned
 
 Phase 4A provides a thin FastAPI transport layer over `BOISRuntime.run(...)`.
 The HTTP API owns request validation and in-memory runtime session plumbing only.
@@ -131,6 +132,105 @@ Future Phase 4 hardening remains pending:
 - public deployment hardening
 - ChatGPT Apps UI/widget layer
 - app submission package
+
+---
+
+# PHASE 4D - RUNTIME AS CONTEXT PROVIDER
+
+Status: planned.
+
+Goal:
+Add a second Runtime/MCP mode where Runtime does not generate the final answer.
+Instead, Runtime returns a structured BOIS/SIMA/BORIS context packet that
+ChatGPT can use as the controlling frame for its own answer.
+
+Current full-answer mode:
+- `boris.ask`
+- Runtime performs framing/retrieval/reasoning
+- Runtime calls OpenAI API through the configured LLM adapter
+- Runtime returns a final protocol answer
+
+New context-provider mode:
+- `boris.frame`
+- Runtime performs BOIS/SIMA/BORIS framing and core retrieval
+- Runtime does not call OpenAI API
+- Runtime returns structured context through MCP `structuredContent`
+- ChatGPT generates the final answer using the returned frame
+
+Planned tool:
+- `boris.frame`
+
+Possible later tool:
+- `boris.validate`
+
+`boris.validate` should validate a ChatGPT-generated answer against a previously
+returned BORIS context packet, but it is not required for the first
+implementation of Phase 4D.
+
+Intended context packet shape:
+
+```json
+{
+  "session_id": "...",
+  "input": "...",
+  "runtime_mode": "context_provider",
+  "llm_called": false,
+  "bois_frame": {},
+  "sima": {
+    "risk": 0.0,
+    "uncertainty": 0.0,
+    "missing_fields": [],
+    "ambiguity_score": 0.0
+  },
+  "boris_context": {},
+  "retrieved_core": [],
+  "answer_instructions": []
+}
+```
+
+Acceptance criteria for Phase 4D implementation:
+
+1. Existing `boris.ask` remains unchanged and continues to return
+   Runtime-generated answers.
+2. New `boris.frame` tool is added.
+3. `boris.frame` does not call OpenAI API or any external LLM.
+4. `boris.frame` returns MCP `structuredContent` containing the full context
+   packet.
+5. `boris.frame` returns concise `content` text instructing ChatGPT to use the
+   packet as the controlling frame.
+6. Runtime metadata explicitly includes `llm_called: false`.
+7. Retrieved BOIS Core chunks are bounded by a safe limit to avoid context
+   bloat.
+8. Secrets, raw prompts, API keys, and internal stack traces are not exposed.
+9. ChatGPT can answer using Runtime context without Runtime generating the final
+   answer.
+10. Tests prove that `boris.frame` does not invoke the LLM adapter.
+
+Architectural constraints:
+
+- Do not replace `boris.ask`.
+- Do not make ChatGPT call OpenAI API through Runtime in context-provider mode.
+- Do not move BOIS/SIMA/BORIS logic into MCP.
+- Do not import Runtime internals into MCP.
+- Do not expose `/runtime/ask` publicly.
+- Runtime API remains private.
+- MCP remains the public adapter boundary.
+- Context packet must be explicit, bounded, and model-visible through
+  `structuredContent` / `content`.
+- `_meta` may be used later for UI-only data, but Phase 4D context needed by
+  ChatGPT must not be hidden in `_meta`.
+
+Risks and open questions:
+
+1. ChatGPT may not strictly obey the returned frame unless prompt/tool
+   instructions are clear.
+2. Context packet size must be bounded to avoid excessive token use.
+3. `boris.frame` must reuse Runtime framing/retrieval logic without duplicating
+   ProtocolEngine logic.
+4. Need to decide whether `/runtime/frame` should be a new Runtime API endpoint
+   or a new `BOISRuntime.frame(...)` method exposed through existing API
+   plumbing.
+5. Need to decide whether `boris.validate` belongs in Phase 4D or Phase 4D.1.
 
 ---
 
