@@ -1,3 +1,5 @@
+import os
+import re
 from uuid import uuid4
 
 
@@ -14,6 +16,57 @@ ANSWER_INSTRUCTIONS = [
     "Do not invent missing facts.",
     "Ask only necessary and non-duplicate clarification questions.",
 ]
+BOIS_FRAME_PUBLIC_FIELDS = ("framework", "core", "input", "constraints")
+BORIS_CONTEXT_PUBLIC_FIELDS = ("name", "role", "context", "definition", "session")
+BORIS_SESSION_PUBLIC_FIELDS = (
+    "session_id",
+    "clarification_cycles",
+    "max_clarification_cycles",
+)
+FORBIDDEN_PUBLIC_KEYS = {
+    "apikey",
+    "openaiapikey",
+    "secret",
+    "secrets",
+    "token",
+    "accesstoken",
+    "refreshtoken",
+    "authorization",
+    "authheader",
+    "password",
+    "passwd",
+    "credential",
+    "credentials",
+    "privatekey",
+    "clientsecret",
+    "rawprompt",
+    "systemprompt",
+    "finalprompt",
+    "promptpayload",
+    "environment",
+    "env",
+    "environ",
+    "environmentvariables",
+    "headers",
+    "httpheaders",
+    "traceback",
+    "stacktrace",
+    "exception",
+    "exceptiondata",
+    "internalpath",
+    "filesystempath",
+    "filepath",
+    "embedding",
+    "embeddings",
+    "vector",
+    "vectors",
+    "debugcontext",
+    "runtimeinternal",
+}
+SECRET_ENV_NAME_PATTERN = re.compile(
+    r"(^OPENAI_API_KEY$|_API_KEY$|_TOKEN$|_SECRET$|_PASSWORD$|_CREDENTIAL$)"
+)
+MIN_SECRET_VALUE_LENGTH = 8
 
 
 def build_context_packet(session, frame_context):
@@ -27,13 +80,47 @@ def build_context_packet(session, frame_context):
         "input": frame_context.user_input,
         "runtime_mode": RUNTIME_MODE,
         "llm_called": False,
-        "bois_frame": _sanitize_mapping(frame_context.bois_frame),
+        "bois_frame": project_public_bois_frame(frame_context.bois_frame),
         "sima": _sanitize_sima(frame_context.sima),
-        "boris_context": _sanitize_mapping(frame_context.boris_context),
+        "boris_context": project_public_boris_context(frame_context.boris_context),
         "retrieved_core": retrieved_core,
         "retrieval_metadata": retrieval_metadata,
         "answer_instructions": list(ANSWER_INSTRUCTIONS),
     }
+
+
+def project_public_bois_frame(frame):
+    if not isinstance(frame, dict):
+        return {}
+    projected = {}
+    for field in BOIS_FRAME_PUBLIC_FIELDS:
+        if field in frame:
+            projected[field] = sanitize_public_value(frame[field])
+    return projected
+
+
+def project_public_boris_context(context):
+    if not isinstance(context, dict):
+        return {}
+    projected = {}
+    for field in BORIS_CONTEXT_PUBLIC_FIELDS:
+        if field not in context:
+            continue
+        if field == "session":
+            projected[field] = project_public_boris_session(context[field])
+        else:
+            projected[field] = sanitize_public_value(context[field])
+    return projected
+
+
+def project_public_boris_session(session):
+    if not isinstance(session, dict):
+        return {}
+    projected = {}
+    for field in BORIS_SESSION_PUBLIC_FIELDS:
+        if field in session:
+            projected[field] = sanitize_public_value(session[field])
+    return projected
 
 
 def bound_retrieved_core(chunks):
@@ -59,7 +146,7 @@ def bound_retrieved_core(chunks):
     total_characters = 0
 
     for chunk in selected:
-        text = _safe_text(chunk.get("text", ""))
+        text = redact_known_secrets(_safe_text(chunk.get("text", "")))
         if len(text) > MAX_CHUNK_CHARACTERS:
             text = text[:MAX_CHUNK_CHARACTERS]
             truncated = True
@@ -75,9 +162,9 @@ def bound_retrieved_core(chunks):
 
         total_characters += len(text)
         returned.append({
-            "chunk_id": str(chunk.get("id") or chunk.get("chunk_id") or ""),
-            "section": _safe_text(chunk.get("section", "")),
-            "title": _safe_text(chunk.get("title", "")),
+            "chunk_id": redact_known_secrets(str(chunk.get("id") or chunk.get("chunk_id") or "")),
+            "section": redact_known_secrets(_safe_text(chunk.get("section", ""))),
+            "title": redact_known_secrets(_safe_text(chunk.get("title", ""))),
             "text": text,
             "relevance": _safe_float(chunk.get("score", chunk.get("relevance", 0.0))),
         })
@@ -108,23 +195,57 @@ def _sanitize_sima(signals):
     }
 
 
-def _sanitize_mapping(value):
-    if isinstance(value, dict):
-        return {
-            _safe_text(key): _sanitize_value(item)
-            for key, item in value.items()
-        }
-    return {}
-
-
-def _sanitize_value(value):
+def sanitize_public_value(value):
     if isinstance(value, dict):
         return _sanitize_mapping(value)
     if isinstance(value, list):
-        return [_sanitize_value(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
+        return [sanitize_public_value(item) for item in value]
+    if isinstance(value, str):
+        return redact_known_secrets(value)
+    if isinstance(value, (int, float, bool)) or value is None:
         return value
-    return _safe_text(value)
+    return redact_known_secrets(_safe_text(value))
+
+
+def is_forbidden_public_key(key):
+    return _normalize_public_key(key) in FORBIDDEN_PUBLIC_KEYS
+
+
+def redact_known_secrets(text):
+    result = str(text or "")
+    for secret in _known_secret_values():
+        result = result.replace(secret, "[redacted]")
+    return result
+
+
+def _sanitize_mapping(value):
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            if is_forbidden_public_key(key):
+                continue
+            sanitized[redact_known_secrets(_safe_text(key))] = sanitize_public_value(item)
+        return sanitized
+    return {}
+
+
+def _known_secret_values():
+    secrets = []
+    seen = set()
+    for name, value in os.environ.items():
+        if not value or len(value) < MIN_SECRET_VALUE_LENGTH:
+            continue
+        if not SECRET_ENV_NAME_PATTERN.search(name.upper()):
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        secrets.append(value)
+    return tuple(secrets)
+
+
+def _normalize_public_key(key):
+    return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
 
 
 def _safe_text(value):

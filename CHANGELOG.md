@@ -4,6 +4,21 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+## 2026-07-11 - Phase 4D Context Packet Hardening
+
+- Replaced permissive recursive BOIS/BORIS context serialization with explicit
+  public projections for `bois_frame`, `boris_context`, and
+  `boris_context.session`.
+- Added normalized recursive forbidden-key filtering for secret-like,
+  prompt-like, environment, credential, traceback, vector, debug, and internal
+  path fields inside flexible canonical containers.
+- Added configured-secret value redaction for allowed nested frame/context
+  strings and retrieved chunk text without changing packet version or top-level
+  user input semantics.
+- Added security regression tests for public allowlists, recursive leakage-key
+  filtering, secret redaction, retrieved chunk sanitization, retrieval metadata,
+  and packet-wide leakage assertions.
+
 ## 2026-07-11 - Phase 4D Runtime as Context Provider
 
 - Added `BOISRuntime.frame(...)` and private `POST /runtime/frame` for

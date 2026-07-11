@@ -1,6 +1,9 @@
+import copy
+import json
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ARCHIVE_ROOT = PROJECT_ROOT / "archive" / "v0-runtime"
@@ -177,6 +180,257 @@ def test_bound_retrieved_core_mandatory_chunks_do_not_bypass_limits():
     assert metadata["truncated"] is True
 
 
+def test_bois_frame_public_projection_uses_top_level_allowlist():
+    with active_runtime_imports():
+        from runtime.context_packet import project_public_bois_frame
+
+        projected = project_public_bois_frame({
+            "framework": "BOIS",
+            "core": {"principle": "do_not_invent_facts"},
+            "input": "Explain BOIS",
+            "constraints": ["do_not_invent_facts"],
+            "raw_prompt": "internal prompt",
+            "api_key": "secret",
+            "debug_context": {"path": "/opt/private"},
+            "internal_path": "/opt/private",
+        })
+
+    assert projected == {
+        "framework": "BOIS",
+        "core": {"principle": "do_not_invent_facts"},
+        "input": "Explain BOIS",
+        "constraints": ["do_not_invent_facts"],
+    }
+
+
+def test_boris_context_public_projection_uses_top_level_and_session_allowlists():
+    with active_runtime_imports():
+        from runtime.context_packet import project_public_boris_context
+
+        projected = project_public_boris_context({
+            "name": "BORIS",
+            "role": "operator/domain specialization",
+            "context": {"safe": "preserve"},
+            "definition": "public definition",
+            "session": {
+                "session_id": "session",
+                "clarification_cycles": 1,
+                "max_clarification_cycles": 3,
+                "last_decision": {"content": "remove"},
+                "processed_inputs": ["remove"],
+                "asked_questions": ["remove"],
+                "memory": {"remove": True},
+            },
+            "authorization": "remove",
+            "environment": {"OPENAI_API_KEY": "remove"},
+            "traceback": "remove",
+            "runtime_internal": {"remove": True},
+        })
+
+    assert set(projected) == {"name", "role", "context", "definition", "session"}
+    assert projected["session"] == {
+        "session_id": "session",
+        "clarification_cycles": 1,
+        "max_clarification_cycles": 3,
+    }
+
+
+def test_recursive_forbidden_key_removal_preserves_safe_nested_values():
+    with active_runtime_imports():
+        from runtime.context_packet import project_public_boris_context
+
+        projected = project_public_boris_context({
+            "context": {
+                "safe_rule": "preserve",
+                "nested": {
+                    "system_prompt": "remove",
+                    "apiKey": "remove",
+                    "safe_value": 42,
+                },
+                "items": [
+                    {
+                        "authorization": "remove",
+                        "rule": "preserve",
+                    }
+                ],
+                "token_budget": 4096,
+                "risk_vector": "conceptual field",
+            }
+        })
+
+    assert projected["context"] == {
+        "safe_rule": "preserve",
+        "nested": {"safe_value": 42},
+        "items": [{"rule": "preserve"}],
+        "token_budget": 4096,
+        "risk_vector": "conceptual field",
+    }
+
+
+def test_known_secret_values_are_redacted_without_mutating_source(monkeypatch):
+    with active_runtime_imports():
+        from runtime.context_packet import project_public_boris_context
+
+        monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
+        source = {
+            "context": {
+                "safe_rule": "uses super-secret-test-value here",
+                "nested": {"safe": "super-secret-test-value"},
+            }
+        }
+        original = copy.deepcopy(source)
+
+        projected = project_public_boris_context(source)
+
+    assert source == original
+    serialized = json.dumps(projected)
+    assert "super-secret-test-value" not in serialized
+    assert serialized.count("[redacted]") == 2
+
+
+def test_sima_projection_omits_unexpected_keys():
+    with active_runtime_imports():
+        from runtime.context_packet import build_context_packet
+
+        packet = build_context_packet(
+            _session_stub(),
+            _frame_context_stub(
+                sima={
+                    "risk": 0.2,
+                    "uncertainty": 0.3,
+                    "missing_fields": [],
+                    "ambiguity_score": 0.1,
+                    "raw_prompt": "secret",
+                },
+            ),
+        )
+
+    assert packet["sima"] == {
+        "risk": 0.2,
+        "uncertainty": 0.3,
+        "missing_fields": [],
+        "ambiguity_score": 0.1,
+    }
+
+
+def test_retrieved_chunk_allowlist_and_secret_redaction(monkeypatch):
+    with active_runtime_imports():
+        from runtime.context_packet import bound_retrieved_core
+
+        monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
+        chunks = [{
+            "id": "chunk",
+            "section": "section",
+            "title": "title",
+            "text": "before super-secret-test-value after",
+            "score": 0.8,
+            "embedding": [1, 2, 3],
+            "source_path": "/opt/private",
+            "raw_query": "remove",
+            "headers": {"authorization": "remove"},
+            "debug_context": {"remove": True},
+        }]
+
+        returned, metadata = bound_retrieved_core(chunks)
+
+    assert returned == [{
+        "chunk_id": "chunk",
+        "section": "section",
+        "title": "title",
+        "text": "before [redacted] after",
+        "relevance": 0.8,
+    }]
+    assert metadata["total_characters"] == len("before [redacted] after")
+    assert metadata["returned_chunks"] == 1
+    assert metadata["truncated"] is False
+    assert set(returned[0]) == {"chunk_id", "section", "title", "text", "relevance"}
+
+
+def test_packet_wide_leakage_assertion(monkeypatch):
+    with active_runtime_imports():
+        from runtime.context_packet import build_context_packet
+
+        monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
+        packet = build_context_packet(
+            _session_stub(),
+            _frame_context_stub(
+                bois_frame={
+                    "framework": "BOIS",
+                    "core": {
+                        "safe": "preserve",
+                        "system_prompt": "remove",
+                        "nested": {"openaiApiKey": "super-secret-test-value"},
+                    },
+                    "input": "intentional user input remains",
+                    "constraints": ["safe"],
+                    "raw_prompt": "remove",
+                    "internal_path": "/opt/private",
+                },
+                boris_context={
+                    "name": "BORIS",
+                    "role": "role",
+                    "context": {
+                        "safe": "mentions super-secret-test-value",
+                        "traceback": "remove",
+                    },
+                    "session": {
+                        "session_id": "session",
+                        "clarification_cycles": 0,
+                        "max_clarification_cycles": 3,
+                        "authorization": "remove",
+                    },
+                    "environment": {"OPENAI_API_KEY": "remove"},
+                    "runtime_internal": {"path": "/opt/private"},
+                },
+                core_context={
+                    "chunks": [{
+                        "id": "chunk",
+                        "section": "section",
+                        "title": "title",
+                        "text": "chunk super-secret-test-value",
+                        "score": 0.5,
+                        "authorization": "remove",
+                    }]
+                },
+            ),
+        )
+
+    serialized = json.dumps(packet)
+    for forbidden in (
+        "raw_prompt",
+        "system_prompt",
+        "OPENAI_API_KEY",
+        "authorization",
+        "traceback",
+        "/opt/private",
+        "super-secret-test-value",
+    ):
+        assert forbidden not in serialized
+    assert "[redacted]" in serialized
+    assert packet["input"] == "intentional user input remains"
+    assert packet["packet_version"] == "boris-context/1.0"
+
+
+def test_normal_packet_still_contains_expected_public_fields():
+    with active_runtime_imports():
+        from runtime.context_packet import build_context_packet
+
+        packet = build_context_packet(_session_stub(), _frame_context_stub())
+
+    assert packet["bois_frame"]["framework"] == "BOIS"
+    assert "core" in packet["bois_frame"]
+    assert "input" in packet["bois_frame"]
+    assert "constraints" in packet["bois_frame"]
+    assert packet["boris_context"]["name"] == "BORIS"
+    assert "role" in packet["boris_context"]
+    assert "context" in packet["boris_context"]
+    assert "session" in packet["boris_context"]
+    assert "sima" in packet
+    assert "retrieved_core" in packet
+    assert "retrieval_metadata" in packet
+    assert "answer_instructions" in packet
+
+
 def _chunk(chunk_id, score, text):
     return {
         "id": chunk_id,
@@ -185,6 +439,44 @@ def _chunk(chunk_id, score, text):
         "text": text,
         "score": score,
     }
+
+
+def _session_stub():
+    return SimpleNamespace(session_id="session")
+
+
+def _frame_context_stub(
+    bois_frame=None,
+    sima=None,
+    boris_context=None,
+    core_context=None,
+):
+    return SimpleNamespace(
+        user_input="intentional user input remains",
+        bois_frame=bois_frame or {
+            "framework": "BOIS",
+            "core": {"principle": "do_not_invent_facts"},
+            "input": "intentional user input remains",
+            "constraints": ["do_not_invent_facts"],
+        },
+        sima=sima or {
+            "risk": 0.2,
+            "uncertainty": 0.2,
+            "missing_fields": [],
+            "ambiguity_score": 0.1,
+        },
+        boris_context=boris_context or {
+            "name": "BORIS",
+            "role": "operator/domain specialization",
+            "context": {"definition": "public"},
+            "session": {
+                "session_id": "session",
+                "clarification_cycles": 0,
+                "max_clarification_cycles": 3,
+            },
+        },
+        core_context=core_context or {"chunks": []},
+    )
 
 
 @contextmanager

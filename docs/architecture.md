@@ -109,6 +109,22 @@ The context packet is explicit and bounded:
 }
 ```
 
+The packet is also an explicit public projection. `bois_frame` exposes only
+`framework`, `core`, `input`, and `constraints`. `boris_context` exposes only
+`name`, `role`, `context`, `definition`, and `session`; inside `session`, only
+`session_id`, `clarification_cycles`, and `max_clarification_cycles` are public.
+
+Flexible canonical containers such as `bois_frame.core`,
+`boris_context.context`, and `boris_context.definition` are recursively filtered
+instead of serialized wholesale. Secret-like and internal keys are removed with
+a normalized case-insensitive key policy, including prompt payloads,
+authorization data, credentials, environment fields, tracebacks, vectors, debug
+contexts, and internal filesystem path fields. Configured secret values from
+secret-like environment variables are redacted as `[redacted]` when they appear
+inside allowed internal frame/context fields or retrieved chunk text. The
+top-level packet `input` remains intentional model-visible user content and is
+not globally rewritten.
+
 ## Separation Of Concerns
 
 - BOIS is declarative and lives under `core/definitions/`.
