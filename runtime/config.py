@@ -11,6 +11,27 @@ class LLMConfigurationError(RuntimeError):
     """Raised when the configured external LLM adapter cannot be created."""
 
 
+class LazyLLMAdapter:
+    """Thread-confined lazy adapter; construction happens only on first call()."""
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._adapter = None
+
+    @property
+    def adapter_name(self):
+        if self._adapter is not None:
+            return getattr(self._adapter, "adapter_name", "mock")
+
+        mode = os.getenv("BOIS_LLM", "").strip().lower()
+        return mode or "mock"
+
+    def call(self, prompt):
+        if self._adapter is None:
+            self._adapter = self._factory()
+        return self._adapter.call(prompt)
+
+
 def load_env_file(path=None):
     env_path = Path(path) if path else PROJECT_ROOT / ".env"
 
@@ -53,3 +74,7 @@ def build_llm_adapter():
         return MockLLMAdapter(debug_prompt_enabled=prompt_debug_enabled())
 
     raise LLMConfigurationError(f"Unsupported BOIS_LLM mode: {mode}")
+
+
+def build_lazy_llm_adapter():
+    return LazyLLMAdapter(build_llm_adapter)

@@ -15,8 +15,17 @@ class PromptBuilder:
     def __init__(self):
         self.last_context = {}
 
-    def build(self, core, sima_signals, bois_frame, boris_context, user_input, state):
-        core_context = self._build_core_context(core, user_input)
+    def build(
+        self,
+        core,
+        sima_signals,
+        bois_frame,
+        boris_context,
+        user_input,
+        state,
+        core_context=None,
+    ):
+        core_context = core_context or self._build_core_context(core, user_input)
         clarification_context = self._build_clarification_context(user_input, state)
         split_input = self._split_clarifications(user_input)
         self.last_context = {

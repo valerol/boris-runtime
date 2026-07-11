@@ -209,6 +209,118 @@ def test_misconfigured_openai_returns_controlled_error(monkeypatch, api_context)
     assert "Traceback" not in response.text
 
 
+def test_runtime_frame_valid_input_returns_context_packet(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/frame",
+        json={
+            "session_id": "frame-test",
+            "input": "Explain BOIS Runtime",
+            "mode": "default",
+            "context": {"source": "pytest"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["packet_version"] == "boris-context/1.0"
+    assert body["session_id"] == "frame-test"
+    assert body["input"] == "Explain BOIS Runtime"
+    assert body["runtime_mode"] == "context_provider"
+    assert body["llm_called"] is False
+    assert "type" not in body
+    assert "content" not in body
+    assert body["retrieval_metadata"] == {
+        "returned_chunks": 0,
+        "total_characters": 0,
+        "truncated": False,
+        "max_chunks": 6,
+        "max_chunk_characters": 3000,
+        "max_total_characters": 12000,
+    }
+
+
+def test_runtime_frame_generates_and_reuses_session(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
+    client = TestClient(app)
+
+    generated = client.post("/runtime/frame", json={"input": "hello"}).json()["session_id"]
+    first = client.post("/runtime/frame", json={"session_id": "same-frame", "input": "hello"})
+    runtime = runtime_registry.get("same-frame")
+    second = client.post("/runtime/frame", json={"session_id": "same-frame", "input": "next"})
+
+    assert generated
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert runtime is runtime_registry.get("same-frame")
+
+
+def test_runtime_frame_empty_input_returns_validation_error(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    client = TestClient(app)
+
+    response = client.post("/runtime/frame", json={"input": "   "})
+
+    assert response.status_code == 422
+
+
+def test_runtime_frame_is_independent_of_openai_configuration(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+    monkeypatch.setenv("BOIS_LLM", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
+    client = TestClient(app)
+
+    frame_response = client.post(
+        "/runtime/frame",
+        json={"session_id": "openai-frame", "input": "hello"},
+    )
+    ask_response = client.post(
+        "/runtime/ask",
+        json={"session_id": "openai-frame", "input": "hello"},
+    )
+
+    assert frame_response.status_code == 200
+    assert frame_response.json()["llm_called"] is False
+    assert ask_response.status_code == 503
+    assert ask_response.json()["error"] == "llm_unavailable"
+
+
+def test_runtime_frame_execution_error_is_controlled_and_redacted(monkeypatch, api_context):
+    app, runtime_registry = api_context
+    clear_api_state(monkeypatch, runtime_registry)
+
+    import api.app as app_module
+
+    class BrokenRegistry:
+        def frame(self, session_id, user_input):
+            raise ValueError("runtime exploded with secret-value")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-value")
+    monkeypatch.setattr(app_module, "runtime_registry", BrokenRegistry())
+    client = TestClient(app)
+
+    response = client.post("/runtime/frame", json={"session_id": "broken", "input": "hello"})
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body == {
+        "error": "runtime_error",
+        "detail": "runtime exploded with [redacted]",
+        "session_id": "broken",
+    }
+    assert "Traceback" not in response.text
+    assert "secret-value" not in response.text
+
+
 def test_runtime_execution_error_returns_controlled_500(monkeypatch, api_context):
     app, runtime_registry = api_context
     clear_api_state(monkeypatch, runtime_registry)
@@ -272,7 +384,7 @@ def test_runtime_registry_run_uses_handle_lock(monkeypatch, api_context):
             return {"type": "ANSWER", "content": "ok", "metadata": {}}
 
     monkeypatch.setattr(registry_module, "BOISRuntime", FakeRuntime)
-    monkeypatch.setattr(registry_module, "build_llm_adapter", lambda: object())
+    monkeypatch.setattr(registry_module, "build_lazy_llm_adapter", lambda: object())
 
     registry = registry_module.RuntimeRegistry()
     first = registry.run("locked", "one")

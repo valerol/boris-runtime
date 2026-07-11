@@ -4,11 +4,28 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-Future entries will track:
-- protocol changes
-- middleware updates
-- adapter additions
-- breaking changes
+## 2026-07-11 - Phase 4D Runtime as Context Provider
+
+- Added `BOISRuntime.frame(...)` and private `POST /runtime/frame` for
+  context-provider mode.
+- Added MCP `boris.frame`, which returns the complete bounded context packet in
+  `structuredContent` and concise instructions in `content`.
+- Preserved `boris.ask` and `/runtime/ask` as Runtime-generated-answer mode.
+- Extracted shared deterministic framing through `ProtocolEngine.build_frame_context(...)`
+  for SIMA signals, BOIS frame, BORIS context, and BOIS Core retrieval.
+- Made Runtime registry LLM adapter construction lazy so frame mode works when
+  `BOIS_LLM=openai` is set without `OPENAI_API_KEY`; ask mode still returns the
+  controlled `llm_unavailable` error.
+- Added allowlisted `boris-context/1.0` packets with `frame_id`, `session_id`,
+  `runtime_mode: context_provider`, `llm_called: false`, `retrieval_metadata`,
+  and answer instructions.
+- Bounded retrieved BOIS Core output to 6 chunks, 3000 characters per chunk, and
+  12000 total returned characters with deduplication and truncation metadata.
+- Added tests for LLM independence, session non-mutation, retrieval bounding,
+  Runtime API frame behavior, MCP client frame behavior, and MCP tool output.
+- Documented `boris.ask` vs `boris.frame`, private Runtime/public MCP boundaries,
+  packet schema, retrieval limits, smoke tests, and Phase 4D.1 `boris.validate`
+  deferral.
 
 ## 2026-07-09 - Phase 4 Runtime HTTP API and MCP adapters
 

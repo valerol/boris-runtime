@@ -1,5 +1,6 @@
 from llm.llm_adapter import MockLLMAdapter
 from protocol.engine import ProtocolEngine
+from runtime.context_packet import build_context_packet
 from runtime.loop import ProtocolRuntimeLoop
 from runtime.session import create_runtime_session
 
@@ -21,3 +22,11 @@ class BOISRuntime:
 
     def run(self, user_input, input_provider=None):
         return self.loop.run(self.session, user_input, input_provider=input_provider)
+
+    def frame(self, user_input):
+        frame_context = self.engine.build_frame_context(
+            self.session,
+            user_input,
+            mutate_state=False,
+        )
+        return build_context_packet(self.session, frame_context)

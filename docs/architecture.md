@@ -47,6 +47,68 @@ The platform provides UI, transport, authentication, tools, memory, and storage.
 The middleware runtime applies the BOIS / SIMA / BORIS protocol and delegates
 LLM inference to an adapter.
 
+The Runtime now has two public composition-root modes behind the private HTTP
+API:
+
+```text
+MCP boris.ask
+  -> private POST /runtime/ask
+  -> BOISRuntime.run(...)
+  -> ProtocolEngine.run_turn(...)
+  -> configured LLM adapter
+  -> Runtime-generated protocol answer
+
+MCP boris.frame
+  -> private POST /runtime/frame
+  -> BOISRuntime.frame(...)
+  -> ProtocolEngine.build_frame_context(...)
+  -> bounded BOIS/SIMA/BORIS context packet
+  -> ChatGPT-generated final answer
+```
+
+`boris.frame` is context-provider mode. It reuses Runtime SIMA extraction, BOIS
+frame construction, BORIS context construction, and BOIS Core retrieval, but it
+does not build the final raw LLM prompt, call an external LLM, parse LLM output,
+record a final answer, update `last_decision`, update `last_output_type`, add
+asked clarification questions, increment clarification cycles, or write to the
+processed-input cache.
+
+The Runtime API remains private. MCP remains the public adapter boundary, and
+the MCP server communicates with Runtime only through the HTTP API. The MCP
+server must not import Runtime, ProtocolEngine, Core loader, or LLM adapter
+internals.
+
+The context packet is explicit and bounded:
+
+```json
+{
+  "packet_version": "boris-context/1.0",
+  "frame_id": "uuid",
+  "session_id": "session-id",
+  "input": "effective user input",
+  "runtime_mode": "context_provider",
+  "llm_called": false,
+  "bois_frame": {},
+  "sima": {
+    "risk": 0.0,
+    "uncertainty": 0.0,
+    "missing_fields": [],
+    "ambiguity_score": 0.0
+  },
+  "boris_context": {},
+  "retrieved_core": [],
+  "retrieval_metadata": {
+    "returned_chunks": 0,
+    "total_characters": 0,
+    "truncated": false,
+    "max_chunks": 6,
+    "max_chunk_characters": 3000,
+    "max_total_characters": 12000
+  },
+  "answer_instructions": []
+}
+```
+
 ## Separation Of Concerns
 
 - BOIS is declarative and lives under `core/definitions/`.

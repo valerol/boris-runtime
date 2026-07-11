@@ -1,4 +1,4 @@
-from mcp_server.server import normalize_tool_result
+from mcp_server.server import normalize_frame_tool_result, normalize_tool_result
 
 
 def test_runtime_success_payload_becomes_structured_result():
@@ -45,3 +45,39 @@ def test_runtime_error_payload_becomes_error_result():
         "content": [{"type": "text", "text": "Runtime error: failed"}],
         "isError": True,
     }
+
+
+def test_frame_payload_becomes_context_only_tool_result():
+    payload = {
+        "packet_version": "boris-context/1.0",
+        "frame_id": "frame-id",
+        "session_id": "test",
+        "input": "final answer must not appear here",
+        "runtime_mode": "context_provider",
+        "llm_called": False,
+        "bois_frame": {},
+        "sima": {
+            "risk": 0.2,
+            "uncertainty": 0.2,
+            "missing_fields": [],
+            "ambiguity_score": 0.1,
+        },
+        "boris_context": {},
+        "retrieved_core": [{"chunk_id": "a", "section": "s", "title": "t", "text": "chunk", "relevance": 0.5}],
+        "retrieval_metadata": {
+            "returned_chunks": 1,
+            "total_characters": 5,
+            "truncated": False,
+            "max_chunks": 6,
+            "max_chunk_characters": 3000,
+            "max_total_characters": 12000,
+        },
+        "answer_instructions": ["Generate the final answer yourself."],
+    }
+
+    result = normalize_frame_tool_result(payload)
+
+    assert result["structuredContent"] == payload
+    assert "retrieved_core" not in result["content"][0]["text"]
+    assert result["content"][0]["text"].startswith("BORIS Runtime returned a context frame only")
+    assert "isError" not in result

@@ -9,6 +9,8 @@ from api.models import (
     RuntimeAskRequest,
     RuntimeAskResponse,
     RuntimeErrorResponse,
+    RuntimeFrameRequest,
+    RuntimeFrameResponse,
     RuntimeResetRequest,
     RuntimeResetResponse,
     RuntimeSessionResponse,
@@ -81,6 +83,24 @@ def ask_runtime(request: RuntimeAskRequest):
         "content": output["content"],
         "metadata": metadata,
     }
+
+
+@app.post(
+    "/runtime/frame",
+    response_model=RuntimeFrameResponse,
+    responses={
+        500: {"model": RuntimeErrorResponse},
+        503: {"model": RuntimeErrorResponse},
+    },
+)
+def frame_runtime(request: RuntimeFrameRequest):
+    session_id = request.session_id or str(uuid4())
+    try:
+        return runtime_registry.frame(session_id, request.input)
+    except LLMConfigurationError as exc:
+        return _error_response(503, "llm_unavailable", exc, session_id=session_id)
+    except Exception as exc:
+        return _error_response(500, "runtime_error", exc, session_id=session_id)
 
 
 @app.post("/runtime/reset", response_model=RuntimeResetResponse)

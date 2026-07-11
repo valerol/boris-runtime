@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from llm.llm_adapter import MockLLMAdapter
 from prompt.prompt_builder import PromptBuilder
 from protocol.bois_frame import BOISFrameBuilder
@@ -11,6 +13,15 @@ from protocol.sima_signals import SIMASignalExtractor
 from protocol.validator import ProtocolOutputValidator, ProtocolValidationError
 from runtime.executor import ProtocolResponseParser
 from runtime.state import ProtocolOutput
+
+
+@dataclass(frozen=True)
+class ProtocolFrameContext:
+    user_input: str
+    sima: dict
+    bois_frame: dict
+    boris_context: dict
+    core_context: dict
 
 
 class ProtocolEngine:
@@ -61,23 +72,16 @@ class ProtocolEngine:
                 },
             }
 
-        if self._previous_answer_requested_clarification(session):
-            session.state.record_clarification(text)
-            session.state.last_output_type = "CLARIFIED"
-        else:
-            session.state.current_input = self._combined_input(session, text)
-
-        signals = self.sima_signals.extract(session.state.current_input, session.state)
-        frame = self.bois_frame.build(session.core, session.state.current_input)
-        boris = self.boris_context.build(session.core, session.state)
+        frame_context = self.build_frame_context(session, text, mutate_state=True)
 
         prompt = self.prompt_builder.build(
             session.core,
-            signals,
-            frame,
-            boris,
-            session.state.current_input,
+            frame_context.sima,
+            frame_context.bois_frame,
+            frame_context.boris_context,
+            frame_context.user_input,
             session.state,
+            core_context=frame_context.core_context,
         )
         prompt_context = getattr(self.prompt_builder, "last_context", {})
         core_metadata = dict(prompt_context.get("core", {}))
@@ -105,11 +109,32 @@ class ProtocolEngine:
                 },
             )
 
-        decision = self.controller.control(session, signals, frame, boris, parsed)
+        decision = self.controller.control(
+            session,
+            frame_context.sima,
+            frame_context.bois_frame,
+            frame_context.boris_context,
+            parsed,
+        )
         self.validator.validate(decision)
         output = decision.to_dict()
         session.state.processed_inputs[text] = output
         return output
+
+    def build_frame_context(self, session, user_input, mutate_state=False):
+        text = (user_input or "").strip()
+        effective_input = self._effective_input(session, text, mutate_state=mutate_state)
+        signals = self.sima_signals.extract(effective_input, session.state)
+        frame = self.bois_frame.build(session.core, effective_input)
+        boris = self.boris_context.build(session.core, session.state)
+        core_context = self.prompt_builder._build_core_context(session.core, effective_input)
+        return ProtocolFrameContext(
+            user_input=effective_input,
+            sima=signals,
+            bois_frame=frame,
+            boris_context=boris,
+            core_context=core_context,
+        )
 
     @staticmethod
     def record_clarification(session, clarification):
@@ -144,3 +169,17 @@ class ProtocolEngine:
             last_decision.get("content", ""),
             last_decision.get("metadata", {}),
         )
+
+    def _effective_input(self, session, user_input, mutate_state=False):
+        text = (user_input or "").strip()
+        if self._previous_answer_requested_clarification(session):
+            if mutate_state:
+                session.state.record_clarification(text)
+                session.state.last_output_type = "CLARIFIED"
+                return session.state.current_input
+            return f"{session.state.current_input}\nClarification: {text}".strip()
+
+        effective_input = self._combined_input(session, text)
+        if mutate_state:
+            session.state.current_input = effective_input
+        return effective_input

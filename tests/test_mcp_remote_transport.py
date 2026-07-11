@@ -34,13 +34,22 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
     server = create_mcp_server(MCPServerConfig())
 
     tools = asyncio.run(server.list_tools())
-    tool = next(item for item in tools if item.name == "boris.ask")
+    tool_names = {item.name for item in tools}
+    ask_tool = next(item for item in tools if item.name == "boris.ask")
+    frame_tool = next(item for item in tools if item.name == "boris.frame")
 
     assert server._mcp_server.instructions.startswith("BORIS Runtime exposes BOIS/SIMA/BORIS reasoning")
     assert len(server._mcp_server.instructions) <= 512
-    assert tool.annotations.readOnlyHint is True
-    assert tool.annotations.openWorldHint is False
-    assert tool.annotations.destructiveHint is False
+    assert {"boris.ask", "boris.frame"}.issubset(tool_names)
+    assert "Runtime-generated" in ask_tool.description
+    assert "Context-only" in frame_tool.description
+    assert "does not generate a final answer or call an external LLM" in frame_tool.description
+    assert ask_tool.annotations.readOnlyHint is True
+    assert frame_tool.annotations.readOnlyHint is True
+    assert ask_tool.annotations.openWorldHint is False
+    assert frame_tool.annotations.openWorldHint is False
+    assert ask_tool.annotations.destructiveHint is False
+    assert frame_tool.annotations.destructiveHint is False
     assert TOOL_ANNOTATIONS == {
         "readOnlyHint": True,
         "openWorldHint": False,

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from threading import Lock
 
-from runtime.config import build_llm_adapter
+from runtime.config import build_lazy_llm_adapter
 from runtime.runtime import BOISRuntime
 
 
@@ -22,7 +22,7 @@ class RuntimeRegistry:
             if handle is None:
                 runtime = BOISRuntime(
                     session_id=session_id,
-                    llm_adapter=build_llm_adapter(),
+                    llm_adapter=build_lazy_llm_adapter(),
                 )
                 handle = RuntimeHandle(runtime=runtime, lock=Lock())
                 self._handles[session_id] = handle
@@ -35,6 +35,11 @@ class RuntimeRegistry:
         handle = self._get_or_create_handle(session_id)
         with handle.lock:
             return handle.runtime.run(user_input)
+
+    def frame(self, session_id, user_input):
+        handle = self._get_or_create_handle(session_id)
+        with handle.lock:
+            return handle.runtime.frame(user_input)
 
     def reset(self, session_id):
         with self._lock:

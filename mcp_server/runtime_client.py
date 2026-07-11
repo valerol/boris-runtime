@@ -19,15 +19,32 @@ class RuntimeAPIClient:
         )
 
     def ask(self, input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
+        return self._post_runtime(
+            "/runtime/ask",
+            input=input,
+            session_id=session_id,
+            mode=mode,
+            context=context,
+        )
+
+    def frame(self, input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
+        return self._post_runtime(
+            "/runtime/frame",
+            input=input,
+            session_id=session_id,
+            mode=mode,
+            context=context,
+        )
+
+    def _post_runtime(self, path, input, session_id=None, mode="default", context=None):
         request_body = {
             "input": input,
             "session_id": session_id,
             "mode": mode,
             "context": dict(context or {}),
         }
-
         try:
-            response = self._client.post("/runtime/ask", json=request_body)
+            response = self._client.post(path, json=request_body)
         except httpx.TimeoutException as exc:
             raise RuntimeAPIError("Runtime API request timed out") from exc
         except httpx.RequestError as exc:

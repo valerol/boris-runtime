@@ -61,6 +61,17 @@ curl -s -X POST http://localhost:8000/runtime/ask \
   -H "Content-Type: application/json" \
   -d '{"session_id":"test","input":"Explain BOIS Runtime v0","mode":"default","context":{"source":"curl"}}'
 
+curl -s -X POST http://localhost:8000/runtime/frame \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "frame-test",
+    "input": "Explain BOIS Runtime as a context provider",
+    "mode": "default",
+    "context": {
+      "source": "curl"
+    }
+  }'
+
 curl -s http://localhost:8000/runtime/session/test
 
 curl -s -X POST http://localhost:8000/runtime/reset \
@@ -69,7 +80,17 @@ curl -s -X POST http://localhost:8000/runtime/reset \
 ```
 
 `POST /runtime/ask` returns the protocol output shape plus the resolved
-`session_id`. Runtime/session failures return a controlled JSON error:
+`session_id`. Runtime generates the final answer through its configured LLM
+adapter.
+
+`POST /runtime/frame` returns a bounded BOIS/SIMA/BORIS context packet only.
+Runtime does not generate a final answer, does not call an external LLM, and
+does not advance protocol conversation state. The packet uses
+`packet_version: "boris-context/1.0"`, `runtime_mode: "context_provider"`, and
+`llm_called: false`. Retrieved BOIS Core chunks are limited to 6 chunks, 3000
+characters per chunk, and 12000 total returned characters.
+
+Runtime/session failures return a controlled JSON error:
 
 ```json
 {"error":"runtime_error","detail":"...","session_id":"test"}
@@ -79,10 +100,9 @@ curl -s -X POST http://localhost:8000/runtime/reset \
 `reset: true` when a session existed and was removed, and `reset: false` when
 the session was already absent.
 
-`context` is accepted by `/runtime/ask` for forward compatibility as transport
-metadata. It is not injected into prompt construction, and it cannot bypass
-BOIS/SIMA/BORIS protocol logic unless a future Runtime API explicitly supports
-that behavior.
+`context` is accepted by `/runtime/ask` and `/runtime/frame` as transport
+metadata. It is not injected into prompt construction or framing, and it cannot
+bypass BOIS/SIMA/BORIS protocol logic.
 
 The CLI and HTTP API load `.env` from the repository root automatically. Use
 `BOIS_LLM=openai` and `OPENAI_API_KEY=...` in `.env` to use the OpenAI adapter;
@@ -95,11 +115,19 @@ prompt payload immediately before the LLM adapter call.
 
 ## MCP Server Adapter
 
-The MCP adapter exposes one tool:
+The MCP adapter exposes two tools:
 
 ```text
 boris.ask
+boris.frame
 ```
+
+`boris.ask`: Runtime generates the final answer through its configured LLM
+adapter.
+
+`boris.frame`: Runtime returns a bounded BOIS/SIMA/BORIS context packet without
+calling an LLM. The MCP client model, such as ChatGPT, uses `structuredContent`
+as the controlling frame and generates the final answer itself.
 
 Run locally with the Runtime HTTP API in one terminal:
 
@@ -134,6 +162,14 @@ MCP boris.ask
 POST /runtime/ask
   ->
 BOISRuntime.run(...)
+
+MCP boris.frame
+  -> HTTP
+POST /runtime/frame
+  ->
+BOISRuntime.frame(...)
+  ->
+bounded context packet in structuredContent
 ```
 
 The MCP server is an adapter only. It does not contain BOIS/SIMA/BORIS logic,
