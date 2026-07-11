@@ -1,16 +1,17 @@
 from pydantic import ValidationError
 
 from mcp_server.config import MCPServerConfig, load_config
-from mcp_server.models import BorisAskRequest, BorisFrameRequest
+from mcp_server.models import BorisAskRequest, BorisFrameRequest, BorisValidateRequest
 from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS Runtime exposes BOIS/SIMA/BORIS reasoning through two adapter tools. "
-    "Use boris.ask when the private Runtime should generate the final answer through its configured LLM. "
-    "Use boris.frame when Runtime should return only a bounded context frame; ChatGPT must use "
-    "structuredContent as the controlling BOIS/SIMA/BORIS frame and generate the final answer itself. "
-    "The MCP server is an adapter and does not store memory or call LLMs directly."
+    "BORIS Runtime exposes BOIS/SIMA/BORIS reasoning through adapter tools. "
+    "Use boris.ask for Runtime-generated answers. Use boris.frame for a bounded "
+    "context frame that ChatGPT answers from. Use boris.validate to statelessly "
+    "validate a ChatGPT-generated answer against the complete frame without "
+    "rewriting it. The MCP server is an adapter and does not store memory or "
+    "call LLMs directly."
 )
 
 TOOL_ANNOTATIONS = {
@@ -40,6 +41,17 @@ def boris_frame(input: str, session_id: str | None = None, mode: str = "default"
             session_id=session_id,
             mode=mode,
             context=context,
+            client=client,
+        )
+
+
+def boris_validate(answer: str, context_packet: dict, validation_mode: str = "deterministic"):
+    config = load_config()
+    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as client:
+        return run_boris_validate(
+            answer=answer,
+            context_packet=context_packet,
+            validation_mode=validation_mode,
             client=client,
         )
 
@@ -86,6 +98,25 @@ def run_boris_frame(
         return _frame_runtime(request, runtime_client)
 
 
+def run_boris_validate(
+    answer: str,
+    context_packet: dict,
+    validation_mode: str = "deterministic",
+    client=None,
+):
+    request = BorisValidateRequest(
+        answer=answer,
+        context_packet=context_packet,
+        validation_mode=validation_mode,
+    )
+    if client is not None:
+        return _validate_runtime(request, client)
+
+    config = load_config()
+    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as runtime_client:
+        return _validate_runtime(request, runtime_client)
+
+
 def _ask_runtime(request, runtime_client):
     try:
         runtime_payload = runtime_client.ask(
@@ -121,6 +152,24 @@ def _frame_runtime(request, runtime_client):
             "error": "runtime_api_error",
             "detail": str(exc),
             "session_id": request.session_id,
+        })
+
+
+def _validate_runtime(request, runtime_client):
+    try:
+        runtime_payload = runtime_client.validate(
+            answer=request.answer,
+            context_packet=request.context_packet,
+            validation_mode=request.validation_mode,
+        )
+        return normalize_validation_tool_result(runtime_payload)
+    except RuntimeAPIError as exc:
+        if exc.payload:
+            return normalize_tool_result(exc.payload)
+        return normalize_tool_result({
+            "error": "runtime_api_error",
+            "detail": str(exc),
+            "session_id": request.context_packet.get("session_id"),
         })
 
 
@@ -161,6 +210,25 @@ def normalize_frame_tool_result(payload):
                 "text": (
                     "BORIS Runtime returned a context frame only. Use structuredContent "
                     "as the controlling BOIS/SIMA/BORIS frame and generate the final answer yourself."
+                ),
+            }
+        ],
+    }
+
+
+def normalize_validation_tool_result(payload):
+    if "error" in payload:
+        return normalize_tool_result(payload)
+
+    verdict = str(payload.get("verdict", "INDETERMINATE"))
+    return {
+        "structuredContent": dict(payload),
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    f"BORIS validation verdict: {verdict}. "
+                    "Review structuredContent for issues and recommendations."
                 ),
             }
         ],
@@ -235,6 +303,38 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                     "error": "invalid_request",
                     "detail": str(exc),
                     "session_id": session_id,
+                },
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Runtime error: {exc}",
+                    }
+                ],
+                "isError": True,
+            }
+
+    @mcp.tool(
+        name="boris.validate",
+        annotations=ToolAnnotations(**TOOL_ANNOTATIONS),
+    )
+    def tool_boris_validate(
+        answer: str,
+        context_packet: dict,
+        validation_mode: str = "deterministic",
+    ) -> dict:
+        """Statelessly validate a ChatGPT-generated answer against the complete context packet returned by boris.frame. The tool does not rewrite the answer, defaults to deterministic validation, and semantic or hybrid modes may call the Runtime-configured validator LLM. The layered validation report is returned in structuredContent."""
+        try:
+            return boris_validate(
+                answer=answer,
+                context_packet=context_packet,
+                validation_mode=validation_mode,
+            )
+        except ValidationError as exc:
+            return {
+                "structuredContent": {
+                    "error": "invalid_request",
+                    "detail": str(exc),
+                    "session_id": context_packet.get("session_id") if isinstance(context_packet, dict) else None,
                 },
                 "content": [
                     {

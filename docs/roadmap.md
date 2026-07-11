@@ -108,6 +108,7 @@ Phase 4 is split into:
 - Phase 4B MCP Server adapter: implemented
 - Phase 4C Remote MCP / ChatGPT Apps readiness: implemented
 - Phase 4D Runtime as Context Provider: implemented
+- Phase 4D.1 Stateless `boris.validate`: implemented
 
 Phase 4A provides a thin FastAPI transport layer over `BOISRuntime.run(...)`.
 The HTTP API owns request validation and in-memory runtime session plumbing only.
@@ -160,11 +161,15 @@ Implemented context-provider mode:
 Implemented tool:
 - `boris.frame`
 
-Deferred Phase 4D.1 tool:
+Implemented Phase 4D.1 tool:
 - `boris.validate`
 
-`boris.validate` should validate a ChatGPT-generated answer against a previously
-returned BORIS context packet, but it is deferred to Phase 4D.1.
+`boris.validate` validates a ChatGPT-generated answer against the complete
+supplied BORIS context packet. It is stateless and does not persist packets,
+look up `frame_id`, enforce packet TTL, verify ownership, verify signatures, or
+claim packet authenticity. It returns a layered `boris-validation/1.0` report
+with verdict, issues, recommendations, preflight results, deterministic results,
+semantic results, and LLM invocation metadata. It does not rewrite the answer.
 
 Context packet shape:
 
@@ -223,6 +228,26 @@ Implemented acceptance criteria for Phase 4D:
    answer.
 10. Tests prove that `boris.frame` does not invoke the LLM adapter.
 
+Implemented acceptance criteria for Phase 4D.1:
+
+1. `boris.validate` is registered as the MCP validation tool.
+2. Private `POST /runtime/validate` accepts `answer`, full `context_packet`,
+   and optional `validation_mode`.
+3. Validation modes are `deterministic`, `semantic`, and `hybrid`; default mode
+   is `deterministic`.
+4. Verdicts are `PASS`, `REVISE`, `FAIL`, and `INDETERMINATE`.
+5. Mandatory packet preflight runs before every validation mode.
+6. Request schema errors return HTTP 422.
+7. Readable but invalid packets return HTTP 200 with verdict `FAIL`.
+8. Deterministic validation does not construct or call a validator LLM.
+9. Semantic validation uses a dedicated lazy validator adapter with strict JSON
+   output parsing.
+10. Hybrid mode selectively escalates semantic-required checks and preserves
+    deterministic structural/security findings.
+11. Validation is non-mutating and does not create Runtime session handles.
+12. MCP returns the full report in `structuredContent` and a concise verdict in
+    `content`.
+
 Architectural constraints:
 
 - Do not replace `boris.ask`.
@@ -241,9 +266,14 @@ Remaining limitations:
 
 1. ChatGPT may not strictly obey the returned frame unless prompt/tool
    instructions are clear.
-2. `boris.validate` remains Phase 4D.1.
-3. Frame packet persistence, lookup by `frame_id`, answer submission, packet
+2. Frame packet persistence, lookup by `frame_id`, answer submission, packet
    signing, and tamper verification are not implemented.
+
+Future roadmap item: Stateful Frame Registry and Packet Authenticity.
+
+Not part of Phase 4D.1. Future scope may include server-side packet storage,
+`frame_id` lookup, packet TTL, cleanup, session ownership, restart persistence,
+HMAC packet signing, signature verification, and tamper detection.
 
 Local smoke tests:
 

@@ -72,6 +72,39 @@ curl -s -X POST http://localhost:8000/runtime/frame \
     }
   }'
 
+curl -s -X POST http://localhost:8000/runtime/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "answer": "The ChatGPT-generated answer",
+    "context_packet": {
+      "packet_version": "boris-context/1.0",
+      "frame_id": "00000000-0000-4000-8000-000000000000",
+      "session_id": "validate-test",
+      "input": "Explain BOIS Runtime",
+      "runtime_mode": "context_provider",
+      "llm_called": false,
+      "bois_frame": {},
+      "sima": {
+        "risk": 0.2,
+        "uncertainty": 0.2,
+        "missing_fields": [],
+        "ambiguity_score": 0.1
+      },
+      "boris_context": {},
+      "retrieved_core": [],
+      "retrieval_metadata": {
+        "returned_chunks": 0,
+        "total_characters": 0,
+        "truncated": false,
+        "max_chunks": 6,
+        "max_chunk_characters": 3000,
+        "max_total_characters": 12000
+      },
+      "answer_instructions": []
+    },
+    "validation_mode": "deterministic"
+  }'
+
 curl -s http://localhost:8000/runtime/session/test
 
 curl -s -X POST http://localhost:8000/runtime/reset \
@@ -89,6 +122,35 @@ does not advance protocol conversation state. The packet uses
 `packet_version: "boris-context/1.0"`, `runtime_mode: "context_provider"`, and
 `llm_called: false`. Retrieved BOIS Core chunks are limited to 6 chunks, 3000
 characters per chunk, and 12000 total returned characters.
+
+`POST /runtime/validate` validates a ChatGPT-generated answer against the full
+context packet returned by `/runtime/frame`. It is stateless: Runtime does not
+persist packets, look up `frame_id`, bind packets to sessions, enforce TTL,
+verify signatures, or claim that the supplied packet is authentic or unchanged.
+The supplied `frame_id` is report correlation only. Validation does not rewrite
+the answer and does not mutate protocol conversation state.
+
+Validation modes are `deterministic`, `semantic`, and `hybrid`; the default is
+`deterministic`. Every mode runs packet preflight first and returns the unified
+`boris-validation/1.0` layered report with `preflight`, `deterministic`, and
+`semantic` sections. Verdicts are `PASS`, `REVISE`, `FAIL`, and
+`INDETERMINATE`. Request-shape errors return HTTP 422. Readable but invalid
+packets return HTTP 200 with verdict `FAIL`. In pure semantic mode, unavailable
+validator configuration returns HTTP 503 `llm_unavailable`, and invalid
+validator output returns HTTP 502 `semantic_validation_error`. Hybrid mode
+preserves deterministic results and returns HTTP 200 `INDETERMINATE` when
+semantic escalation is unavailable or invalid.
+
+Optional validator-specific configuration:
+
+```env
+BORIS_VALIDATOR_LLM=openai
+BORIS_VALIDATOR_MODEL=gpt-4o-mini
+```
+
+When these are absent, semantic validation falls back to the main
+`BOIS_LLM`/`OPENAI_MODEL` settings and existing credentials such as
+`OPENAI_API_KEY`.
 
 Runtime/session failures return a controlled JSON error:
 
@@ -115,11 +177,12 @@ prompt payload immediately before the LLM adapter call.
 
 ## MCP Server Adapter
 
-The MCP adapter exposes two tools:
+The MCP adapter exposes three tools:
 
 ```text
 boris.ask
 boris.frame
+boris.validate
 ```
 
 `boris.ask`: Runtime generates the final answer through its configured LLM
@@ -128,6 +191,21 @@ adapter.
 `boris.frame`: Runtime returns a bounded BOIS/SIMA/BORIS context packet without
 calling an LLM. The MCP client model, such as ChatGPT, uses `structuredContent`
 as the controlling frame and generates the final answer itself.
+
+`boris.validate`: Runtime statelessly validates a ChatGPT-generated answer
+against the complete `boris.frame` packet. It defaults to deterministic
+validation, does not rewrite the answer, and returns the full layered report in
+`structuredContent`. Semantic and hybrid modes may call the Runtime-configured
+validator LLM.
+
+Recommended ChatGPT workflow:
+
+```text
+boris.frame
+-> ChatGPT generates answer
+-> boris.validate(answer, full context packet)
+-> ChatGPT reviews verdict/issues/recommendations
+```
 
 Run locally with the Runtime HTTP API in one terminal:
 
@@ -170,6 +248,12 @@ POST /runtime/frame
 BOISRuntime.frame(...)
   ->
 bounded context packet in structuredContent
+
+MCP boris.validate
+  -> HTTP
+POST /runtime/validate
+  ->
+stateless validation report in structuredContent
 ```
 
 The MCP server is an adapter only. It does not contain BOIS/SIMA/BORIS logic,

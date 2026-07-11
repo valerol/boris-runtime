@@ -2,7 +2,9 @@
 
 Phase 4C exposes the MCP server as the public adapter boundary while keeping the
 BORIS Runtime HTTP API private. Phase 4D adds `boris.frame`, a context-provider
-tool that still reaches Runtime only through the private HTTP API.
+tool that still reaches Runtime only through the private HTTP API. Phase 4D.1
+adds `boris.validate`, a stateless validation tool that also reaches Runtime
+only through the private HTTP API.
 
 ```text
 ChatGPT / Remote MCP client
@@ -24,6 +26,9 @@ Available MCP tools:
 - `boris.frame`: calls private `/runtime/frame`; Runtime returns only a bounded
   BOIS/SIMA/BORIS context packet in `structuredContent`, does not call an LLM,
   and ChatGPT generates the final answer itself.
+- `boris.validate`: calls private `/runtime/validate`; Runtime validates a
+  ChatGPT-generated answer against the complete `boris.frame` packet, returns a
+  layered report in `structuredContent`, and does not rewrite the answer.
 
 ## Mode A - Local Development
 
@@ -87,16 +92,27 @@ location /mcp {
 }
 ```
 
-Do not expose `/runtime/ask` or `/runtime/frame` directly to the public
-internet. The public boundary is `/mcp`; the internal execution boundaries are
-`http://127.0.0.1:8000/runtime/ask` and
-`http://127.0.0.1:8000/runtime/frame`.
+Do not expose `/runtime/ask`, `/runtime/frame`, or `/runtime/validate` directly
+to the public internet. The public boundary is `/mcp`; the internal execution
+boundaries are `http://127.0.0.1:8000/runtime/ask`,
+`http://127.0.0.1:8000/runtime/frame`, and
+`http://127.0.0.1:8000/runtime/validate`.
 
 `/runtime/frame` returns packets with `packet_version:
 "boris-context/1.0"`, `runtime_mode: "context_provider"`, `llm_called: false`,
 and retrieval bounded to 6 chunks, 3000 characters per chunk, and 12000 total
 retrieved-core characters. The operation is non-mutating with respect to
 protocol conversation state.
+
+`/runtime/validate` accepts `answer`, the full `context_packet`, and optional
+`validation_mode` (`deterministic`, `semantic`, or `hybrid`; default
+`deterministic`). Validation is stateless: Runtime does not persist packets,
+look up `frame_id`, enforce TTL, verify HMAC signatures, or claim packet
+authenticity. The report uses `validation_version: "boris-validation/1.0"` and
+verdicts `PASS`, `REVISE`, `FAIL`, and `INDETERMINATE`. Semantic and hybrid
+modes may call the Runtime-configured validator LLM. If needed, set
+`BORIS_VALIDATOR_LLM` and `BORIS_VALIDATOR_MODEL`; otherwise validator
+configuration falls back to the main LLM settings.
 
 ## Mode C - OpenAI Secure MCP Tunnel / Temporary Tunnel
 
@@ -135,7 +151,7 @@ BORIS Runtime
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS Runtime. Use boris.ask for Runtime-generated answers and boris.frame for LLM-free BOIS/SIMA/BORIS context packets that ChatGPT answers from.
+Connects ChatGPT to BORIS Runtime. Use boris.ask for Runtime-generated answers, boris.frame for LLM-free BOIS/SIMA/BORIS context packets that ChatGPT answers from, and boris.validate to statelessly validate ChatGPT-generated answers.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
@@ -150,4 +166,37 @@ curl -s -X POST http://127.0.0.1:8000/runtime/ask \
 curl -s -X POST http://127.0.0.1:8000/runtime/frame \
   -H "Content-Type: application/json" \
   -d '{"session_id":"frame-test","input":"Explain BOIS Runtime as a context provider","mode":"default","context":{"source":"curl"}}'
+
+curl -s -X POST http://127.0.0.1:8000/runtime/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "answer": "The ChatGPT-generated answer",
+    "context_packet": {
+      "packet_version": "boris-context/1.0",
+      "frame_id": "00000000-0000-4000-8000-000000000000",
+      "session_id": "validate-test",
+      "input": "Explain BOIS Runtime",
+      "runtime_mode": "context_provider",
+      "llm_called": false,
+      "bois_frame": {},
+      "sima": {
+        "risk": 0.2,
+        "uncertainty": 0.2,
+        "missing_fields": [],
+        "ambiguity_score": 0.1
+      },
+      "boris_context": {},
+      "retrieved_core": [],
+      "retrieval_metadata": {
+        "returned_chunks": 0,
+        "total_characters": 0,
+        "truncated": false,
+        "max_chunks": 6,
+        "max_chunk_characters": 3000,
+        "max_total_characters": 12000
+      },
+      "answer_instructions": []
+    },
+    "validation_mode": "deterministic"
+  }'
 ```

@@ -20,6 +20,12 @@ class BorisFrameRequest(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class BorisValidateRequest(BaseModel):
+    answer: constr(strip_whitespace=True, min_length=1)
+    context_packet: dict[str, Any]
+    validation_mode: Literal["deterministic", "semantic", "hybrid"] = "deterministic"
+
+
 class BorisAskResponse(BaseModel):
     session_id: str
     type: ProtocolOutputType

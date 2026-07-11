@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from threading import Lock
 
-from runtime.config import build_lazy_llm_adapter
+from runtime.config import build_lazy_llm_adapter, build_lazy_validator_llm_adapter
 from runtime.runtime import BOISRuntime
+from runtime.validation import ValidationEngine
 
 
 @dataclass
@@ -40,6 +41,16 @@ class RuntimeRegistry:
         handle = self._get_or_create_handle(session_id)
         with handle.lock:
             return handle.runtime.frame(user_input)
+
+    def validate(self, answer, context_packet, validation_mode="deterministic"):
+        engine = ValidationEngine(
+            validator_adapter_factory=lambda: build_lazy_validator_llm_adapter()
+        )
+        return engine.validate(
+            answer=answer,
+            context_packet=context_packet,
+            validation_mode=validation_mode,
+        )
 
     def reset(self, session_id):
         with self._lock:

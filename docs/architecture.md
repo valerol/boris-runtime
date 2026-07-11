@@ -64,6 +64,12 @@ MCP boris.frame
   -> ProtocolEngine.build_frame_context(...)
   -> bounded BOIS/SIMA/BORIS context packet
   -> ChatGPT-generated final answer
+
+MCP boris.validate
+  -> private POST /runtime/validate
+  -> RuntimeRegistry.validate(...)
+  -> validation engine
+  -> layered validation report
 ```
 
 `boris.frame` is context-provider mode. It reuses Runtime SIMA extraction, BOIS
@@ -77,6 +83,36 @@ The Runtime API remains private. MCP remains the public adapter boundary, and
 the MCP server communicates with Runtime only through the HTTP API. The MCP
 server must not import Runtime, ProtocolEngine, Core loader, or LLM adapter
 internals.
+
+`boris.validate` is Phase 4D.1 stateless validation. Its input is the
+ChatGPT-generated answer, the complete `boris.frame` context packet, and an
+optional validation mode. The default mode is `deterministic`; `semantic` and
+`hybrid` are also supported. Validation does not rewrite the answer, does not
+create or mutate Runtime sessions, does not persist packets, does not look up
+`frame_id`, does not enforce packet TTL, and does not verify packet ownership or
+HMAC signatures. The supplied `frame_id` is used only for report correlation,
+and Runtime does not claim that a supplied packet is authentic or unchanged.
+
+The validation report uses `validation_version: "boris-validation/1.0"` and the
+public verdicts `PASS`, `REVISE`, `FAIL`, and `INDETERMINATE`. A mandatory
+preflight layer validates packet structure, public field allowlists, retrieval
+metadata invariants, bounded retrieved core content, answer instructions, and
+the centralized Phase 4D leakage policy before any answer validation layer runs.
+Readable but invalid packets return a normal validation report with verdict
+`FAIL`; request schema errors remain HTTP 422.
+
+Deterministic validation performs explainable non-LLM checks only and reports
+whether each check requires semantic validation. It uses SIMA pass thresholds of
+0.30 for risk, uncertainty, and ambiguity. Semantic validation is a dedicated
+lazy validator adapter with strict JSON output parsing; it treats both the
+packet and answer as untrusted validation data and never returns a rewritten
+answer. `BORIS_VALIDATOR_LLM` and `BORIS_VALIDATOR_MODEL` may override the main
+LLM settings; otherwise the validator falls back to `BOIS_LLM` and
+`OPENAI_MODEL`. In pure semantic mode, unavailable validator configuration
+returns HTTP 503 and invalid validator output returns HTTP 502. In hybrid mode,
+deterministic structural and security findings remain authoritative, semantic
+escalation is selective, and unavailable or invalid semantic validation yields
+HTTP 200 with verdict `INDETERMINATE` while preserving deterministic findings.
 
 The context packet is explicit and bounded:
 

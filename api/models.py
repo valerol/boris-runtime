@@ -66,6 +66,67 @@ class RuntimeFrameResponse(BaseModel):
     answer_instructions: list[str] = Field(default_factory=list)
 
 
+ValidationMode = Literal["deterministic", "semantic", "hybrid"]
+ValidationVerdict = Literal["PASS", "REVISE", "FAIL", "INDETERMINATE"]
+
+
+class RuntimeValidationRequest(BaseModel):
+    answer: constr(strip_whitespace=True, min_length=1)
+    context_packet: dict[str, Any]
+    validation_mode: ValidationMode = "deterministic"
+
+
+class RuntimeValidationIssue(BaseModel):
+    code: str
+    severity: Literal["low", "medium", "high", "critical"]
+    message: str
+    path: str | None = None
+    source: Literal["preflight", "deterministic", "semantic"]
+    semantic_required: bool
+
+
+class RuntimeDeterministicCheck(BaseModel):
+    code: str
+    status: ValidationVerdict
+    severity: Literal["low", "medium", "high", "critical"]
+    message: str
+    path: str | None = None
+    semantic_required: bool
+
+
+class RuntimePreflightReport(BaseModel):
+    status: Literal["completed", "failed"]
+    issues: list[RuntimeValidationIssue] = Field(default_factory=list)
+
+
+class RuntimeDeterministicReport(BaseModel):
+    status: Literal["completed", "not_run"]
+    verdict: ValidationVerdict
+    checks: list[RuntimeDeterministicCheck] = Field(default_factory=list)
+    issues: list[RuntimeValidationIssue] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class RuntimeSemanticReport(BaseModel):
+    status: Literal["completed", "not_run", "unavailable", "invalid_output"]
+    verdict: ValidationVerdict
+    issues: list[RuntimeValidationIssue] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class RuntimeValidationResponse(BaseModel):
+    validation_version: Literal["boris-validation/1.0"]
+    frame_id: str | None = None
+    validation_mode: ValidationMode
+    verdict: ValidationVerdict
+    llm_called: bool
+    preflight: RuntimePreflightReport
+    deterministic: RuntimeDeterministicReport
+    semantic: RuntimeSemanticReport
+    issues: list[RuntimeValidationIssue] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
 class RuntimeErrorResponse(BaseModel):
     error: str
     detail: str

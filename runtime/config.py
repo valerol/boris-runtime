@@ -78,3 +78,22 @@ def build_llm_adapter():
 
 def build_lazy_llm_adapter():
     return LazyLLMAdapter(build_llm_adapter)
+
+
+def build_validator_llm_adapter():
+    mode = os.getenv("BORIS_VALIDATOR_LLM", os.getenv("BOIS_LLM", "")).strip().lower()
+
+    if mode == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise LLMConfigurationError("BORIS_VALIDATOR_LLM=openai requires OPENAI_API_KEY")
+        model = os.getenv("BORIS_VALIDATOR_MODEL") or os.getenv("OPENAI_MODEL")
+        return OpenAIAdapter(model=model, debug_prompt_enabled=prompt_debug_enabled())
+
+    if mode in {"", "mock"}:
+        return MockLLMAdapter(debug_prompt_enabled=prompt_debug_enabled())
+
+    raise LLMConfigurationError(f"Unsupported BORIS_VALIDATOR_LLM mode: {mode}")
+
+
+def build_lazy_validator_llm_adapter():
+    return LazyLLMAdapter(build_validator_llm_adapter)

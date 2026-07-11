@@ -4,6 +4,31 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+## 2026-07-11 - Phase 4D.1 Stateless `boris.validate`
+
+- Added private `POST /runtime/validate` and MCP `boris.validate` for
+  stateless validation of ChatGPT-generated answers against complete
+  `boris.frame` context packets.
+- Added layered `boris-validation/1.0` reports with mandatory packet preflight,
+  deterministic checks, semantic checks, top-level verdicts, issues,
+  recommendations, and `llm_called` metadata.
+- Added packet preflight validation for public packet fields, BOIS/SIMA/BORIS
+  allowlists, retrieved-core invariants, answer instructions, retrieval limits,
+  forbidden public keys, traceback leakage, and configured-secret leakage.
+- Added deterministic validation with SIMA pass thresholds of 0.30, stable issue
+  codes, answer secret leakage detection, duplicate clarification detection,
+  missing-field handling, risk/uncertainty/ambiguity disclosure checks, and
+  semantic-required reporting.
+- Added dedicated lazy semantic validator configuration with
+  `BORIS_VALIDATOR_LLM` and `BORIS_VALIDATOR_MODEL`, falling back to the main
+  LLM provider/model settings.
+- Added strict semantic validator output parsing, controlled semantic
+  unavailable/error behavior, hybrid escalation, conservative verdict merging,
+  and non-mutating registry behavior.
+- Documented validation modes, verdicts, error behavior, stateless semantics,
+  lack of packet authenticity guarantees, and the future stateful frame registry
+  and packet authenticity roadmap item.
+
 ## 2026-07-11 - Phase 4D Context Packet Hardening
 
 - Replaced permissive recursive BOIS/BORIS context serialization with explicit

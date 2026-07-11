@@ -36,6 +36,14 @@ class RuntimeAPIClient:
             context=context,
         )
 
+    def validate(self, answer: str, context_packet: dict, validation_mode: str = "deterministic"):
+        request_body = {
+            "answer": answer,
+            "context_packet": dict(context_packet or {}),
+            "validation_mode": validation_mode,
+        }
+        return self._post_json("/runtime/validate", request_body)
+
     def _post_runtime(self, path, input, session_id=None, mode="default", context=None):
         request_body = {
             "input": input,
@@ -43,6 +51,9 @@ class RuntimeAPIClient:
             "mode": mode,
             "context": dict(context or {}),
         }
+        return self._post_json(path, request_body)
+
+    def _post_json(self, path, request_body):
         try:
             response = self._client.post(path, json=request_body)
         except httpx.TimeoutException as exc:

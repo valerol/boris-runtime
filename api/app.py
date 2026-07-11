@@ -14,9 +14,12 @@ from api.models import (
     RuntimeResetRequest,
     RuntimeResetResponse,
     RuntimeSessionResponse,
+    RuntimeValidationRequest,
+    RuntimeValidationResponse,
 )
 from api.runtime_registry import RuntimeRegistry
 from runtime.config import LLMConfigurationError, load_env_file
+from runtime.semantic_validation import SemanticValidationOutputError
 
 
 load_env_file()
@@ -99,6 +102,33 @@ def frame_runtime(request: RuntimeFrameRequest):
         return runtime_registry.frame(session_id, request.input)
     except LLMConfigurationError as exc:
         return _error_response(503, "llm_unavailable", exc, session_id=session_id)
+    except Exception as exc:
+        return _error_response(500, "runtime_error", exc, session_id=session_id)
+
+
+@app.post(
+    "/runtime/validate",
+    response_model=RuntimeValidationResponse,
+    responses={
+        500: {"model": RuntimeErrorResponse},
+        502: {"model": RuntimeErrorResponse},
+        503: {"model": RuntimeErrorResponse},
+    },
+)
+def validate_runtime(request: RuntimeValidationRequest):
+    session_id = request.context_packet.get("session_id")
+    if not isinstance(session_id, str):
+        session_id = None
+    try:
+        return runtime_registry.validate(
+            answer=request.answer,
+            context_packet=request.context_packet,
+            validation_mode=request.validation_mode,
+        )
+    except LLMConfigurationError as exc:
+        return _error_response(503, "llm_unavailable", exc, session_id=session_id)
+    except SemanticValidationOutputError as exc:
+        return _error_response(502, "semantic_validation_error", exc, session_id=session_id)
     except Exception as exc:
         return _error_response(500, "runtime_error", exc, session_id=session_id)
 

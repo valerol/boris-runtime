@@ -1,0 +1,578 @@
+import copy
+import importlib
+import json
+import sys
+from pathlib import Path
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ARCHIVE_ROOT = PROJECT_ROOT / "archive" / "v0-runtime"
+ACTIVE_RUNTIME_PREFIXES = ("api", "core", "llm", "prompt", "protocol", "runtime")
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _matches_active_runtime(module_name):
+    return module_name in ACTIVE_RUNTIME_PREFIXES or module_name.startswith(
+        tuple(f"{prefix}." for prefix in ACTIVE_RUNTIME_PREFIXES)
+    )
+
+
+def active_module(module_name):
+    if str(ARCHIVE_ROOT) in sys.path:
+        sys.path.remove(str(ARCHIVE_ROOT))
+    if str(PROJECT_ROOT) in sys.path:
+        sys.path.remove(str(PROJECT_ROOT))
+    sys.path.insert(0, str(PROJECT_ROOT))
+    for name in list(sys.modules):
+        if _matches_active_runtime(name):
+            sys.modules.pop(name, None)
+    return importlib.import_module(module_name)
+
+
+@pytest.fixture
+def api_context():
+    saved_path = list(sys.path)
+    saved_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if _matches_active_runtime(name)
+    }
+
+    if str(PROJECT_ROOT) in sys.path:
+        sys.path.remove(str(PROJECT_ROOT))
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+    for module_name in list(sys.modules):
+        if _matches_active_runtime(module_name):
+            sys.modules.pop(module_name, None)
+
+    from api.app import app, runtime_registry
+
+    try:
+        yield app, runtime_registry
+    finally:
+        for module_name in list(sys.modules):
+            if _matches_active_runtime(module_name):
+                sys.modules.pop(module_name, None)
+        sys.modules.update(saved_modules)
+        sys.path[:] = saved_path
+        if str(PROJECT_ROOT) not in sys.path:
+            sys.path.insert(0, str(PROJECT_ROOT))
+
+
+class ForbiddenAdapterFactory:
+    def __call__(self):
+        raise AssertionError("deterministic validation must not construct a validator LLM")
+
+
+class FakeSemanticAdapter:
+    adapter_name = "fake-semantic"
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = []
+
+    def call(self, prompt):
+        self.calls.append(prompt)
+        if isinstance(self.payload, str):
+            return self.payload
+        return json.dumps(self.payload)
+
+
+def test_runtime_validate_default_deterministic_is_stateless(api_context, monkeypatch):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    monkeypatch.delenv("BOIS_LLM", raising=False)
+    monkeypatch.delenv("BORIS_VALIDATOR_LLM", raising=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/validate",
+        json={
+            "answer": "BOIS Runtime validates a context-provider answer.",
+            "context_packet": valid_packet(),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["validation_version"] == "boris-validation/1.0"
+    assert body["validation_mode"] == "deterministic"
+    assert body["verdict"] == "PASS"
+    assert body["llm_called"] is False
+    assert body["preflight"]["status"] == "completed"
+    assert body["deterministic"]["status"] == "completed"
+    assert body["semantic"]["status"] == "not_run"
+    assert runtime_registry.get("validate-session") is None
+
+
+@pytest.mark.parametrize(
+    "payload_factory",
+    [
+        lambda: {"context_packet": valid_packet()},
+        lambda: {"answer": "   ", "context_packet": valid_packet()},
+        lambda: {"answer": 123, "context_packet": valid_packet()},
+        lambda: {"answer": "ok"},
+        lambda: {"answer": "ok", "context_packet": []},
+        lambda: {"answer": "ok", "context_packet": valid_packet(), "validation_mode": "deep"},
+    ],
+)
+def test_runtime_validate_request_schema_errors_return_422(api_context, payload_factory):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    client = TestClient(app)
+
+    response = client.post("/runtime/validate", json=payload_factory())
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "mutate,code",
+    [
+        (lambda p: p.update({"packet_version": "boris-context/9.9"}), "PACKET_VERSION_UNSUPPORTED"),
+        (lambda p: p.update({"frame_id": "not-a-uuid"}), "FRAME_ID_INVALID"),
+        (lambda p: p.pop("sima"), "PACKET_MISSING_FIELD"),
+        (lambda p: p.update({"unexpected": True}), "PACKET_UNEXPECTED_FIELD"),
+        (lambda p: p.update({"runtime_mode": "answer_provider"}), "RUNTIME_MODE_INVALID"),
+        (lambda p: p.update({"llm_called": True}), "LLM_CALLED_INVALID"),
+        (lambda p: p["bois_frame"].update({"raw_prompt": "secret"}), "BOIS_FRAME_INVALID"),
+        (lambda p: p["sima"].update({"extra": True}), "SIMA_INVALID"),
+        (lambda p: p["boris_context"].update({"authorization": "secret"}), "BORIS_CONTEXT_INVALID"),
+        (lambda p: p["boris_context"].setdefault("session", {}).update({"last_decision": "secret"}), "BORIS_SESSION_INVALID"),
+        (lambda p: p["retrieved_core"].append({"chunk_id": "a", "section": "s", "title": "t", "text": "x", "relevance": 1.0, "embedding": [1]}), "RETRIEVED_CHUNK_INVALID"),
+        (lambda p: p["retrieved_core"].extend([chunk("a", "x"), chunk("a", "y")]) or p["retrieval_metadata"].update({"returned_chunks": 2, "total_characters": 2}), "DUPLICATE_CHUNK_ID"),
+        (lambda p: p["retrieved_core"].extend([chunk(str(i), "x") for i in range(7)]) or p["retrieval_metadata"].update({"returned_chunks": 7, "total_characters": 7}), "RETRIEVAL_LIMIT_EXCEEDED"),
+        (lambda p: p["retrieved_core"].append(chunk("long", "x" * 3001)) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 3001}), "RETRIEVAL_LIMIT_EXCEEDED"),
+        (lambda p: p["retrieval_metadata"].update({"returned_chunks": 99}), "RETRIEVAL_METADATA_MISMATCH"),
+        (lambda p: p["retrieval_metadata"].update({"total_characters": 99}), "RETRIEVAL_METADATA_MISMATCH"),
+        (lambda p: p["retrieval_metadata"].update({"max_chunks": 7}), "RETRIEVAL_LIMIT_INVALID"),
+        (lambda p: p["bois_frame"].update({"core": {"system_prompt": "hidden"}}), "FORBIDDEN_PACKET_FIELD"),
+    ],
+)
+def test_preflight_failures_return_200_fail(api_context, mutate, code):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    packet = valid_packet()
+    mutate(packet)
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": packet},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verdict"] == "FAIL"
+    assert body["llm_called"] is False
+    assert body["preflight"]["status"] == "failed"
+    assert body["deterministic"]["status"] == "not_run"
+    assert body["semantic"]["status"] == "not_run"
+    assert code in {issue["code"] for issue in body["issues"]}
+
+
+def test_preflight_detects_configured_secret_but_not_top_level_input(api_context, monkeypatch):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
+    packet = valid_packet()
+    packet["input"] = "User typed super-secret-test-value as model-visible content"
+    packet["bois_frame"]["core"] = {"public": "leaks super-secret-test-value"}
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": packet},
+    )
+
+    body = response.json()
+    assert body["verdict"] == "FAIL"
+    assert "PACKET_SECRET_LEAK" in {issue["code"] for issue in body["issues"]}
+    assert all(issue["path"] != "input" for issue in body["issues"])
+
+
+def test_deterministic_checks_secret_leak_missing_fields_and_duplicate_questions(monkeypatch):
+    ValidationEngine = active_module("runtime.validation").ValidationEngine
+
+    monkeypatch.setenv("OPENAI_API_KEY", "answer-secret-value")
+    packet = valid_packet()
+    packet["sima"]["missing_fields"] = ["target"]
+    answer = "Which scope? Which scope? Also answer-secret-value"
+
+    report = ValidationEngine(validator_adapter_factory=ForbiddenAdapterFactory()).validate(
+        answer=answer,
+        context_packet=packet,
+        validation_mode="deterministic",
+    )
+
+    assert report["verdict"] == "FAIL"
+    assert report["llm_called"] is False
+    assert report["semantic"]["status"] == "not_run"
+    codes = {issue["code"] for issue in report["issues"]}
+    assert {"ANSWER_SECRET_LEAK", "DUPLICATE_CLARIFICATION_QUESTION"}.issubset(codes)
+    assert any(issue["code"] == "MISSING_FIELDS_NOT_ADDRESSED" and issue["semantic_required"] for issue in report["issues"])
+
+
+def test_semantic_mode_uses_strict_validator_output():
+    ValidationEngine = active_module("runtime.validation").ValidationEngine
+
+    adapter = FakeSemanticAdapter({
+        "verdict": "REVISE",
+        "issues": [
+            {
+                "code": "SEMANTIC_BOIS_MISALIGNMENT",
+                "severity": "high",
+                "message": "The answer contradicts the BOIS frame.",
+                "path": "bois_frame.core",
+            }
+        ],
+        "recommendations": ["Revise the claim so it remains supported by the packet."],
+    })
+
+    report = ValidationEngine(validator_adapter_factory=lambda: adapter).validate(
+        answer="BOIS Runtime answer",
+        context_packet=valid_packet(),
+        validation_mode="semantic",
+    )
+
+    assert report["verdict"] == "REVISE"
+    assert report["llm_called"] is True
+    assert report["deterministic"]["status"] == "not_run"
+    assert report["semantic"]["status"] == "completed"
+    assert report["issues"][0]["source"] == "semantic"
+    assert adapter.calls
+    assert "Do not rewrite the answer" in adapter.calls[0]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not-json",
+        {"verdict": "MAYBE", "issues": [], "recommendations": []},
+        {"verdict": "PASS", "issues": [{"code": "X", "severity": "severe", "message": "bad"}], "recommendations": []},
+        {"verdict": "PASS"},
+        {"verdict": "PASS", "issues": [], "recommendations": [], "revised_answer": "no"},
+    ],
+)
+def test_semantic_invalid_output_is_controlled(payload):
+    validation_module = active_module("runtime.validation")
+    semantic_module = sys.modules["runtime.semantic_validation"]
+    SemanticValidationOutputError = semantic_module.SemanticValidationOutputError
+    ValidationEngine = validation_module.ValidationEngine
+
+    adapter = FakeSemanticAdapter(payload)
+
+    with pytest.raises(SemanticValidationOutputError):
+        ValidationEngine(validator_adapter_factory=lambda: adapter).validate(
+            answer="BOIS Runtime answer",
+            context_packet=valid_packet(),
+            validation_mode="semantic",
+        )
+
+
+def test_semantic_unavailable_and_invalid_output_api_errors(api_context, monkeypatch):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    monkeypatch.setenv("BORIS_VALIDATOR_LLM", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(app)
+
+    unavailable = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": valid_packet(), "validation_mode": "semantic"},
+    )
+
+    assert unavailable.status_code == 503
+    assert unavailable.json()["error"] == "llm_unavailable"
+    assert "Traceback" not in unavailable.text
+
+    monkeypatch.delenv("BORIS_VALIDATOR_LLM", raising=False)
+    invalid = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": valid_packet(), "validation_mode": "semantic"},
+    )
+
+    assert invalid.status_code == 502
+    assert invalid.json()["error"] == "semantic_validation_error"
+    assert "type" not in invalid.text
+
+
+@pytest.mark.parametrize(
+    "packet_factory,deterministic_answer,semantic_verdict,expected",
+    [
+        (lambda: elevated_packet(), "BOIS Runtime mentions unknown uncertainty.", "PASS", "REVISE"),
+        (lambda: elevated_packet(), "BOIS Runtime mentions unknown uncertainty.", "REVISE", "REVISE"),
+        (lambda: elevated_packet(), "BOIS Runtime mentions unknown uncertainty.", "FAIL", "FAIL"),
+        (lambda: elevated_packet(), "BOIS Runtime mentions unknown uncertainty.", "INDETERMINATE", "INDETERMINATE"),
+        (lambda: valid_packet(), "Nothing overlaps.", "PASS", "PASS"),
+        (lambda: valid_packet(), "Nothing overlaps.", "FAIL", "FAIL"),
+    ],
+)
+def test_hybrid_escalation_and_merge(packet_factory, deterministic_answer, semantic_verdict, expected):
+    ValidationEngine = active_module("runtime.validation").ValidationEngine
+
+    packet = packet_factory()
+    adapter = FakeSemanticAdapter({"verdict": semantic_verdict, "issues": [], "recommendations": []})
+
+    report = ValidationEngine(validator_adapter_factory=lambda: adapter).validate(
+        answer=deterministic_answer,
+        context_packet=packet,
+        validation_mode="hybrid",
+    )
+
+    assert report["verdict"] == expected
+    assert report["llm_called"] is True
+    assert report["semantic"]["status"] == "completed"
+
+
+def test_hybrid_deterministic_fail_does_not_call_semantic(monkeypatch):
+    ValidationEngine = active_module("runtime.validation").ValidationEngine
+
+    monkeypatch.setenv("OPENAI_API_KEY", "answer-secret-value")
+
+    report = ValidationEngine(validator_adapter_factory=ForbiddenAdapterFactory()).validate(
+        answer="BOIS Runtime leaks answer-secret-value",
+        context_packet=valid_packet(),
+        validation_mode="hybrid",
+    )
+
+    assert report["verdict"] == "FAIL"
+    assert report["semantic"]["status"] == "not_run"
+    assert report["llm_called"] is False
+
+
+def test_hybrid_semantic_unavailable_and_invalid_output_preserve_deterministic(monkeypatch):
+    validation_module = active_module("runtime.validation")
+    config_module = sys.modules["runtime.config"]
+    LLMConfigurationError = config_module.LLMConfigurationError
+    ValidationEngine = validation_module.ValidationEngine
+
+    packet = valid_packet()
+    packet["sima"]["risk"] = 0.8
+
+    unavailable = ValidationEngine(
+        validator_adapter_factory=lambda: (_ for _ in ()).throw(LLMConfigurationError("missing key"))
+    ).validate(
+        answer="BOIS Runtime answer without risk disclosure",
+        context_packet=packet,
+        validation_mode="hybrid",
+    )
+
+    assert unavailable["verdict"] == "INDETERMINATE"
+    assert unavailable["semantic"]["status"] == "unavailable"
+    assert unavailable["deterministic"]["status"] == "completed"
+    assert unavailable["llm_called"] is False
+
+    invalid = ValidationEngine(
+        validator_adapter_factory=lambda: FakeSemanticAdapter("not-json")
+    ).validate(
+        answer="BOIS Runtime answer without risk disclosure",
+        context_packet=packet,
+        validation_mode="hybrid",
+    )
+
+    assert invalid["verdict"] == "INDETERMINATE"
+    assert invalid["semantic"]["status"] == "invalid_output"
+    assert invalid["deterministic"]["status"] == "completed"
+    assert invalid["llm_called"] is True
+
+
+def test_runtime_api_client_validate_posts_expected_body():
+    from mcp_server.runtime_client import RuntimeAPIClient
+
+    captured = {}
+    report = minimal_report()
+
+    def handler(request):
+        captured["method"] = request.method
+        captured["path"] = request.url.path
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json=report)
+
+    client = RuntimeAPIClient("http://runtime.test", transport=httpx.MockTransport(handler))
+
+    response = client.validate(answer="BOIS Runtime answer", context_packet=valid_packet())
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/runtime/validate"
+    assert captured["body"] == {
+        "answer": "BOIS Runtime answer",
+        "context_packet": valid_packet(),
+        "validation_mode": "deterministic",
+    }
+    assert response == report
+
+
+def test_mcp_validate_returns_structured_report_and_concise_text():
+    from mcp_server.server import run_boris_validate
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def validate(self, **kwargs):
+            self.calls.append(kwargs)
+            return minimal_report(verdict="REVISE")
+
+    client = FakeClient()
+    result = run_boris_validate(
+        answer="BOIS Runtime answer",
+        context_packet=valid_packet(),
+        validation_mode="deterministic",
+        client=client,
+    )
+
+    assert result["structuredContent"]["verdict"] == "REVISE"
+    assert result["content"] == [
+        {
+            "type": "text",
+            "text": "BORIS validation verdict: REVISE. Review structuredContent for issues and recommendations.",
+        }
+    ]
+    assert "validation_version" not in result["content"][0]["text"]
+    assert client.calls == [
+        {
+            "answer": "BOIS Runtime answer",
+            "context_packet": valid_packet(),
+            "validation_mode": "deterministic",
+        }
+    ]
+
+
+def test_validator_specific_config_falls_back_to_main_settings(monkeypatch):
+    config = active_module("runtime.config")
+
+    captured = {}
+
+    class FakeOpenAIAdapter:
+        def __init__(self, model=None, api_key=None, debug_prompt_enabled=False):
+            captured["model"] = model
+            captured["api_key"] = api_key
+            captured["debug_prompt_enabled"] = debug_prompt_enabled
+
+    monkeypatch.setattr(config, "OpenAIAdapter", FakeOpenAIAdapter)
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+    monkeypatch.setenv("BOIS_LLM", "openai")
+    monkeypatch.setenv("OPENAI_MODEL", "main-model")
+    monkeypatch.delenv("BORIS_VALIDATOR_LLM", raising=False)
+    monkeypatch.delenv("BORIS_VALIDATOR_MODEL", raising=False)
+
+    adapter = config.build_validator_llm_adapter()
+
+    assert isinstance(adapter, FakeOpenAIAdapter)
+    assert captured["model"] == "main-model"
+
+    monkeypatch.setenv("BORIS_VALIDATOR_LLM", "openai")
+    monkeypatch.setenv("BORIS_VALIDATOR_MODEL", "validator-model")
+
+    config.build_validator_llm_adapter()
+
+    assert captured["model"] == "validator-model"
+
+
+def test_validate_does_not_mutate_existing_session_state(api_context, monkeypatch):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    monkeypatch.delenv("BOIS_LLM", raising=False)
+    client = TestClient(app)
+    client.post("/runtime/ask", json={"session_id": "existing", "input": "hello"})
+    runtime = runtime_registry.get("existing")
+    before = (
+        copy.deepcopy(runtime.session.state.snapshot()),
+        runtime.session.state.current_input,
+        dict(runtime.session.state.processed_inputs),
+        set(runtime_registry._handles),
+    )
+
+    response = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": valid_packet() | {"session_id": "validate-session"}},
+    )
+
+    after = (
+        runtime.session.state.snapshot(),
+        runtime.session.state.current_input,
+        dict(runtime.session.state.processed_inputs),
+        set(runtime_registry._handles),
+    )
+    assert response.status_code == 200
+    assert after == before
+    assert "validate-session" not in runtime_registry._handles
+
+
+def valid_packet():
+    return {
+        "packet_version": "boris-context/1.0",
+        "frame_id": "00000000-0000-4000-8000-000000000000",
+        "session_id": "validate-session",
+        "input": "Explain BOIS Runtime",
+        "runtime_mode": "context_provider",
+        "llm_called": False,
+        "bois_frame": {},
+        "sima": {
+            "risk": 0.2,
+            "uncertainty": 0.2,
+            "missing_fields": [],
+            "ambiguity_score": 0.1,
+        },
+        "boris_context": {},
+        "retrieved_core": [],
+        "retrieval_metadata": {
+            "returned_chunks": 0,
+            "total_characters": 0,
+            "truncated": False,
+            "max_chunks": 6,
+            "max_chunk_characters": 3000,
+            "max_total_characters": 12000,
+        },
+        "answer_instructions": [],
+    }
+
+
+def chunk(chunk_id, text):
+    return {
+        "chunk_id": chunk_id,
+        "section": "section",
+        "title": "title",
+        "text": text,
+        "relevance": 1.0,
+    }
+
+
+def elevated_packet():
+    packet = valid_packet()
+    packet["sima"].update({"risk": 0.9, "uncertainty": 0.9, "missing_fields": ["target"]})
+    return packet
+
+
+def minimal_report(verdict="PASS"):
+    return {
+        "validation_version": "boris-validation/1.0",
+        "frame_id": "00000000-0000-4000-8000-000000000000",
+        "validation_mode": "deterministic",
+        "verdict": verdict,
+        "llm_called": False,
+        "preflight": {"status": "completed", "issues": []},
+        "deterministic": {
+            "status": "completed",
+            "verdict": verdict,
+            "checks": [],
+            "issues": [],
+            "recommendations": [],
+        },
+        "semantic": {
+            "status": "not_run",
+            "verdict": "INDETERMINATE",
+            "issues": [],
+            "recommendations": [],
+        },
+        "issues": [],
+        "recommendations": [],
+    }

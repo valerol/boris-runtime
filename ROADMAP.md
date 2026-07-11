@@ -7,6 +7,7 @@ Current completed phases:
 - PHASE 1 - CLI MVP
 - PHASE 2 - Core Loader System
 - PHASE 3 - Protocol Engine
+- PHASE 4A-4D.1 - Runtime API, MCP adapter, context packets, and stateless validation
 
 Next planned phase:
-- PHASE 4 - API Layer (FastAPI)
+- Stateful Frame Registry and Packet Authenticity (future; not part of Phase 4D.1)
