@@ -84,6 +84,13 @@ the MCP server communicates with Runtime only through the HTTP API. The MCP
 server must not import Runtime, ProtocolEngine, Core loader, or LLM adapter
 internals.
 
+MCP tools return native MCP `CallToolResult` objects. Runtime payloads,
+context packets, validation reports, and structured error envelopes are
+delivered through MCP `structuredContent`; concise model-facing text is
+delivered through `content`; and error envelopes set `isError: true`. The MCP
+adapter does not serialize its own `structuredContent`/`content` envelope into a
+JSON text block.
+
 `boris.validate` is Phase 4D.1 stateless validation. Its input is the
 ChatGPT-generated answer, the complete `boris.frame` context packet, and an
 optional validation mode. The default mode is `deterministic`; `semantic` and

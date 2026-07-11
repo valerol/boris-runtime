@@ -1,9 +1,13 @@
 import asyncio
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 from mcp_server.config import MCPServerConfig
+from mcp_server.runtime_client import RuntimeAPIError
 from mcp_server.server import TOOL_ANNOTATIONS, create_mcp_server, create_remote_app, main
 
 
@@ -62,3 +66,186 @@ def test_unsupported_transport_fails_clearly(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Unsupported BORIS_MCP_TRANSPORT"):
         main()
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_client_receives_native_structured_content(monkeypatch):
+    import mcp_server.server as server_module
+
+    monkeypatch.setattr(server_module, "RuntimeAPIClient", FakeRuntimeAPIClient)
+    app = create_remote_app(MCPServerConfig(path="/mcp"))
+    transport = httpx.ASGITransport(app=app)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:9000") as http_client:
+            async with streamable_http_client(
+                "http://127.0.0.1:9000/mcp",
+                http_client=http_client,
+            ) as (read_stream, write_stream, _get_session_id):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools = await session.list_tools()
+                    tool_names = [tool.name for tool in tools.tools]
+
+                    frame_result = await session.call_tool(
+                        "boris.frame",
+                        {
+                            "input": "Explain BOIS Runtime",
+                            "session_id": "mcp-native-frame",
+                        },
+                    )
+                    validate_result = await session.call_tool(
+                        "boris.validate",
+                        {
+                            "answer": "BOIS Runtime validates the answer.",
+                            "context_packet": frame_packet(),
+                        },
+                    )
+                    ask_result = await session.call_tool(
+                        "boris.ask",
+                        {
+                            "input": "Explain BOIS Runtime",
+                            "session_id": "mcp-native-ask",
+                        },
+                    )
+                    error_result = await session.call_tool(
+                        "boris.ask",
+                        {
+                            "input": "trigger error",
+                            "session_id": "mcp-native-error",
+                        },
+                    )
+
+    assert tool_names == ["boris.ask", "boris.frame", "boris.validate"]
+    assert frame_result.isError is False
+    assert frame_result.structuredContent is not None
+    assert frame_result.structuredContent["packet_version"] == "boris-context/1.0"
+    assert frame_result.structuredContent["runtime_mode"] == "context_provider"
+    assert frame_result.structuredContent["llm_called"] is False
+    frame_text = frame_result.content[0].text
+    assert frame_text.startswith("BORIS Runtime returned a context frame only.")
+    assert '"packet_version"' not in frame_text
+    assert '"structuredContent"' not in frame_text
+
+    assert validate_result.isError is False
+    assert validate_result.structuredContent["validation_version"] == "boris-validation/1.0"
+    assert validate_result.structuredContent["verdict"] in {
+        "PASS",
+        "REVISE",
+        "FAIL",
+        "INDETERMINATE",
+    }
+    validate_text = validate_result.content[0].text
+    assert validate_text == (
+        "BORIS validation verdict: PASS. "
+        "Review structuredContent for issues and recommendations."
+    )
+    assert '"validation_version"' not in validate_text
+
+    assert ask_result.isError is False
+    assert ask_result.structuredContent == {
+        "session_id": "mcp-native-ask",
+        "type": "ANSWER",
+        "content": "ok",
+        "metadata": {},
+    }
+    assert ask_result.content[0].text == "ok"
+    assert '"structuredContent"' not in ask_result.content[0].text
+
+    assert error_result.isError is True
+    assert error_result.structuredContent["error"] == "runtime_error"
+    assert error_result.content[0].text == "Runtime error: failed"
+    assert '"error"' not in error_result.content[0].text
+
+
+class FakeRuntimeAPIClient:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
+    def ask(self, input, session_id=None, mode="default", context=None):
+        if input == "trigger error":
+            raise RuntimeAPIError(
+                "HTTP 500",
+                status_code=500,
+                payload={
+                    "error": "runtime_error",
+                    "detail": "failed",
+                    "session_id": session_id,
+                },
+            )
+        return {
+            "session_id": session_id or "generated",
+            "type": "ANSWER",
+            "content": "ok",
+            "metadata": {},
+        }
+
+    def frame(self, input, session_id=None, mode="default", context=None):
+        packet = frame_packet()
+        packet["session_id"] = session_id or packet["session_id"]
+        packet["input"] = input
+        return packet
+
+    def validate(self, answer, context_packet, validation_mode="deterministic"):
+        return validation_report(context_packet.get("frame_id"))
+
+
+def frame_packet():
+    return {
+        "packet_version": "boris-context/1.0",
+        "frame_id": "00000000-0000-4000-8000-000000000000",
+        "session_id": "mcp-native-frame",
+        "input": "Explain BOIS Runtime",
+        "runtime_mode": "context_provider",
+        "llm_called": False,
+        "bois_frame": {},
+        "sima": {
+            "risk": 0.2,
+            "uncertainty": 0.2,
+            "missing_fields": [],
+            "ambiguity_score": 0.1,
+        },
+        "boris_context": {},
+        "retrieved_core": [],
+        "retrieval_metadata": {
+            "returned_chunks": 0,
+            "total_characters": 0,
+            "truncated": False,
+            "max_chunks": 6,
+            "max_chunk_characters": 3000,
+            "max_total_characters": 12000,
+        },
+        "answer_instructions": [],
+    }
+
+
+def validation_report(frame_id):
+    return {
+        "validation_version": "boris-validation/1.0",
+        "frame_id": frame_id,
+        "validation_mode": "deterministic",
+        "verdict": "PASS",
+        "llm_called": False,
+        "preflight": {"status": "completed", "issues": []},
+        "deterministic": {
+            "status": "completed",
+            "verdict": "PASS",
+            "checks": [],
+            "issues": [],
+            "recommendations": [],
+        },
+        "semantic": {
+            "status": "not_run",
+            "verdict": "INDETERMINATE",
+            "issues": [],
+            "recommendations": [],
+        },
+        "issues": [],
+        "recommendations": [],
+    }

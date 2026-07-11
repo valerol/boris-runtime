@@ -198,6 +198,14 @@ validation, does not rewrite the answer, and returns the full layered report in
 `structuredContent`. Semantic and hybrid modes may call the Runtime-configured
 validator LLM.
 
+All MCP tools return native MCP `CallToolResult` objects. Complete Runtime
+payloads, context packets, validation reports, and structured error details are
+carried in MCP `structuredContent`. The `content` field contains only concise
+model-visible text, such as the final answer, frame instruction, validation
+verdict summary, or runtime error summary. The MCP adapter does not JSON-wrap
+its own result envelope inside a text content block. Error results set
+`isError: true`.
+
 Recommended ChatGPT workflow:
 
 ```text

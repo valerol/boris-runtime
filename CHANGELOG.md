@@ -4,6 +4,14 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+## 2026-07-11 - MCP Native Structured Content Fix
+
+- Changed MCP tools to return native `CallToolResult`.
+- Fixed context packets and validation reports being serialized inside text.
+- Preserved concise model-visible content.
+- Added protocol-level MCP client regression tests.
+- Added native structured error delivery.
+
 ## 2026-07-11 - Phase 4D.1 Validation Hardening
 
 - Added strict public packet field-type validation.

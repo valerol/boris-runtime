@@ -235,10 +235,24 @@ def normalize_validation_tool_result(payload):
     }
 
 
+def to_call_tool_result(envelope, call_tool_result_cls, text_content_cls):
+    return call_tool_result_cls(
+        content=[
+            text_content_cls(
+                type=item.get("type", "text"),
+                text=str(item.get("text", "")),
+            )
+            for item in envelope.get("content", [])
+        ],
+        structuredContent=envelope.get("structuredContent"),
+        isError=bool(envelope.get("isError", False)),
+    )
+
+
 def create_mcp_server(config: MCPServerConfig | None = None):
     try:
         from mcp.server.fastmcp import FastMCP
-        from mcp.types import ToolAnnotations
+        from mcp.types import CallToolResult, TextContent, ToolAnnotations
         from starlette.responses import JSONResponse
     except ModuleNotFoundError as exc:
         raise RuntimeError(
@@ -264,12 +278,12 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         session_id: str | None = None,
         mode: str = "default",
         context: dict | None = None,
-    ) -> dict:
+    ) -> CallToolResult:
         """Runtime-generated BOIS/SIMA/BORIS answer through the configured Runtime LLM adapter."""
         try:
-            return boris_ask(input=input, session_id=session_id, mode=mode, context=context)
+            envelope = boris_ask(input=input, session_id=session_id, mode=mode, context=context)
         except ValidationError as exc:
-            return {
+            envelope = {
                 "structuredContent": {
                     "error": "invalid_request",
                     "detail": str(exc),
@@ -283,6 +297,7 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 ],
                 "isError": True,
             }
+        return to_call_tool_result(envelope, CallToolResult, TextContent)
 
     @mcp.tool(
         name="boris.frame",
@@ -293,12 +308,12 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         session_id: str | None = None,
         mode: str = "default",
         context: dict | None = None,
-    ) -> dict:
+    ) -> CallToolResult:
         """Context-only BOIS/SIMA/BORIS frame. Runtime does not generate a final answer or call an external LLM; ChatGPT must use structuredContent as the controlling frame and answer itself."""
         try:
-            return boris_frame(input=input, session_id=session_id, mode=mode, context=context)
+            envelope = boris_frame(input=input, session_id=session_id, mode=mode, context=context)
         except ValidationError as exc:
-            return {
+            envelope = {
                 "structuredContent": {
                     "error": "invalid_request",
                     "detail": str(exc),
@@ -312,6 +327,7 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 ],
                 "isError": True,
             }
+        return to_call_tool_result(envelope, CallToolResult, TextContent)
 
     @mcp.tool(
         name="boris.validate",
@@ -321,16 +337,16 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         answer: str,
         context_packet: dict,
         validation_mode: str = "deterministic",
-    ) -> dict:
+    ) -> CallToolResult:
         """Statelessly validate a ChatGPT-generated answer against the complete context packet returned by boris.frame. The tool does not rewrite the answer, defaults to deterministic validation, and semantic or hybrid modes may call the Runtime-configured validator LLM. The layered validation report is returned in structuredContent."""
         try:
-            return boris_validate(
+            envelope = boris_validate(
                 answer=answer,
                 context_packet=context_packet,
                 validation_mode=validation_mode,
             )
         except ValidationError as exc:
-            return {
+            envelope = {
                 "structuredContent": {
                     "error": "invalid_request",
                     "detail": str(exc),
@@ -344,6 +360,7 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 ],
                 "isError": True,
             }
+        return to_call_tool_result(envelope, CallToolResult, TextContent)
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(_request):
