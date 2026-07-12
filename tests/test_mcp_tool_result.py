@@ -73,11 +73,13 @@ def test_frame_payload_becomes_context_only_tool_result():
             "max_total_characters": 12000,
         },
         "answer_instructions": ["Generate the final answer yourself."],
+        "runtime_generated_prompt": "## User input\nfinal answer must not appear here",
     }
 
     result = normalize_frame_tool_result(payload)
 
     assert result["structuredContent"] == payload
-    assert "retrieved_core" not in result["content"][0]["text"]
-    assert result["content"][0]["text"].startswith("BORIS Runtime returned a context frame only")
+    assert result["content"][0]["text"].startswith("Show the user the complete runtime_generated_prompt")
+    assert "Do not hide, shorten, or omit the Runtime-generated prompt." in result["content"][0]["text"]
+    assert "## User input\nfinal answer must not appear here" in result["content"][0]["text"]
     assert "isError" not in result

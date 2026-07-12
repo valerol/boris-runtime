@@ -97,6 +97,7 @@ def test_frame_posts_to_runtime_frame_with_expected_body():
             "max_total_characters": 12000,
         },
         "answer_instructions": [],
+        "runtime_generated_prompt": "## User input\nExplain BOIS Runtime",
     }
 
     def handler(request):

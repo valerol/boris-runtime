@@ -6,12 +6,10 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS Runtime exposes BOIS/SIMA/BORIS reasoning through adapter tools. "
-    "Use boris.ask for Runtime-generated answers. Use boris.frame for a bounded "
-    "context frame that ChatGPT answers from. Use boris.validate to statelessly "
-    "validate a ChatGPT-generated answer against the complete frame without "
-    "rewriting it. The MCP server is an adapter and does not store memory or "
-    "call LLMs directly."
+    "BORIS exposes one public tool: boris.frame. Use it to obtain a bounded "
+    "BOIS/SIMA/BORIS context frame and the complete Runtime-generated prompt "
+    "that ChatGPT must show to the user before generating its own answer. "
+    "The MCP server is an adapter and does not store memory or call LLMs directly."
 )
 
 TOOL_ANNOTATIONS = {
@@ -202,14 +200,17 @@ def normalize_frame_tool_result(payload):
     if "error" in payload:
         return normalize_tool_result(payload)
 
+    runtime_prompt = str(payload.get("runtime_generated_prompt", ""))
     return {
         "structuredContent": dict(payload),
         "content": [
             {
                 "type": "text",
                 "text": (
-                    "BORIS Runtime returned a context frame only. Use structuredContent "
-                    "as the controlling BOIS/SIMA/BORIS frame and generate the final answer yourself."
+                    "Show the user the complete runtime_generated_prompt below, then "
+                    "generate your own answer from it. Do not hide, shorten, or omit "
+                    "the Runtime-generated prompt.\n\n"
+                    f"{runtime_prompt}"
                 ),
             }
         ],
@@ -262,42 +263,12 @@ def create_mcp_server(config: MCPServerConfig | None = None):
 
     resolved_config = config or load_config()
     mcp = FastMCP(
-        "boris-runtime",
+        "BORIS",
         instructions=SERVER_INSTRUCTIONS,
         host=resolved_config.host,
         port=resolved_config.port,
         streamable_http_path=resolved_config.path,
     )
-
-    @mcp.tool(
-        name="boris.ask",
-        annotations=ToolAnnotations(**TOOL_ANNOTATIONS),
-    )
-    def tool_boris_ask(
-        input: str,
-        session_id: str | None = None,
-        mode: str = "default",
-        context: dict | None = None,
-    ) -> CallToolResult:
-        """Runtime-generated BOIS/SIMA/BORIS answer through the configured Runtime LLM adapter."""
-        try:
-            envelope = boris_ask(input=input, session_id=session_id, mode=mode, context=context)
-        except ValidationError as exc:
-            envelope = {
-                "structuredContent": {
-                    "error": "invalid_request",
-                    "detail": str(exc),
-                    "session_id": session_id,
-                },
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Runtime error: {exc}",
-                    }
-                ],
-                "isError": True,
-            }
-        return to_call_tool_result(envelope, CallToolResult, TextContent)
 
     @mcp.tool(
         name="boris.frame",
@@ -309,7 +280,7 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         mode: str = "default",
         context: dict | None = None,
     ) -> CallToolResult:
-        """Context-only BOIS/SIMA/BORIS frame. Runtime does not generate a final answer or call an external LLM; ChatGPT must use structuredContent as the controlling frame and answer itself."""
+        """Context-only BOIS/SIMA/BORIS frame. BORIS does not generate a final answer or call an external LLM; ChatGPT must show runtime_generated_prompt and then answer itself."""
         try:
             envelope = boris_frame(input=input, session_id=session_id, mode=mode, context=context)
         except ValidationError as exc:
@@ -318,39 +289,6 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                     "error": "invalid_request",
                     "detail": str(exc),
                     "session_id": session_id,
-                },
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Runtime error: {exc}",
-                    }
-                ],
-                "isError": True,
-            }
-        return to_call_tool_result(envelope, CallToolResult, TextContent)
-
-    @mcp.tool(
-        name="boris.validate",
-        annotations=ToolAnnotations(**TOOL_ANNOTATIONS),
-    )
-    def tool_boris_validate(
-        answer: str,
-        context_packet: dict,
-        validation_mode: str = "deterministic",
-    ) -> CallToolResult:
-        """Statelessly validate a ChatGPT-generated answer against the complete context packet returned by boris.frame. The tool does not rewrite the answer, defaults to deterministic validation, and semantic or hybrid modes may call the Runtime-configured validator LLM. The layered validation report is returned in structuredContent."""
-        try:
-            envelope = boris_validate(
-                answer=answer,
-                context_packet=context_packet,
-                validation_mode=validation_mode,
-            )
-        except ValidationError as exc:
-            envelope = {
-                "structuredContent": {
-                    "error": "invalid_request",
-                    "detail": str(exc),
-                    "session_id": context_packet.get("session_id") if isinstance(context_packet, dict) else None,
                 },
                 "content": [
                     {

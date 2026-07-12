@@ -64,6 +64,7 @@ class RuntimeFrameResponse(BaseModel):
     retrieved_core: list[RuntimeRetrievedCoreChunk] = Field(default_factory=list)
     retrieval_metadata: RuntimeRetrievalMetadata
     answer_instructions: list[str] = Field(default_factory=list)
+    runtime_generated_prompt: str
 
 
 ValidationMode = Literal["deterministic", "semantic", "hybrid"]

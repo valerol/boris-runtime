@@ -232,6 +232,9 @@ def test_runtime_frame_valid_input_returns_context_packet(monkeypatch, api_conte
     assert body["input"] == "Explain BOIS Runtime"
     assert body["runtime_mode"] == "context_provider"
     assert body["llm_called"] is False
+    assert body["runtime_generated_prompt"]
+    assert "## User input\nExplain BOIS Runtime" in body["runtime_generated_prompt"]
+    assert "## Answer instructions" in body["runtime_generated_prompt"]
     assert "type" not in body
     assert "content" not in body
     assert body["retrieval_metadata"] == {

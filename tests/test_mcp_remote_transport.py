@@ -39,20 +39,18 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
 
     tools = asyncio.run(server.list_tools())
     tool_names = {item.name for item in tools}
-    ask_tool = next(item for item in tools if item.name == "boris.ask")
     frame_tool = next(item for item in tools if item.name == "boris.frame")
 
-    assert server._mcp_server.instructions.startswith("BORIS Runtime exposes BOIS/SIMA/BORIS reasoning")
+    assert server._mcp_server.name == "BORIS"
+    assert server._mcp_server.instructions.startswith("BORIS exposes one public tool")
     assert len(server._mcp_server.instructions) <= 512
-    assert {"boris.ask", "boris.frame"}.issubset(tool_names)
-    assert "Runtime-generated" in ask_tool.description
+    assert tool_names == {"boris.frame"}
+    assert "boris.ask" not in tool_names
+    assert "boris.validate" not in tool_names
     assert "Context-only" in frame_tool.description
     assert "does not generate a final answer or call an external LLM" in frame_tool.description
-    assert ask_tool.annotations.readOnlyHint is True
     assert frame_tool.annotations.readOnlyHint is True
-    assert ask_tool.annotations.openWorldHint is False
     assert frame_tool.annotations.openWorldHint is False
-    assert ask_tool.annotations.destructiveHint is False
     assert frame_tool.annotations.destructiveHint is False
     assert TOOL_ANNOTATIONS == {
         "readOnlyHint": True,
@@ -94,68 +92,18 @@ async def test_streamable_http_client_receives_native_structured_content(monkeyp
                             "session_id": "mcp-native-frame",
                         },
                     )
-                    validate_result = await session.call_tool(
-                        "boris.validate",
-                        {
-                            "answer": "BOIS Runtime validates the answer.",
-                            "context_packet": frame_packet(),
-                        },
-                    )
-                    ask_result = await session.call_tool(
-                        "boris.ask",
-                        {
-                            "input": "Explain BOIS Runtime",
-                            "session_id": "mcp-native-ask",
-                        },
-                    )
-                    error_result = await session.call_tool(
-                        "boris.ask",
-                        {
-                            "input": "trigger error",
-                            "session_id": "mcp-native-error",
-                        },
-                    )
-
-    assert tool_names == ["boris.ask", "boris.frame", "boris.validate"]
+    assert tool_names == ["boris.frame"]
     assert frame_result.isError is False
     assert frame_result.structuredContent is not None
     assert frame_result.structuredContent["packet_version"] == "boris-context/1.0"
     assert frame_result.structuredContent["runtime_mode"] == "context_provider"
     assert frame_result.structuredContent["llm_called"] is False
+    assert frame_result.structuredContent["runtime_generated_prompt"]
     frame_text = frame_result.content[0].text
-    assert frame_text.startswith("BORIS Runtime returned a context frame only.")
-    assert '"packet_version"' not in frame_text
+    assert frame_text.startswith("Show the user the complete runtime_generated_prompt")
+    assert "Do not hide, shorten, or omit the Runtime-generated prompt." in frame_text
+    assert frame_result.structuredContent["runtime_generated_prompt"] in frame_text
     assert '"structuredContent"' not in frame_text
-
-    assert validate_result.isError is False
-    assert validate_result.structuredContent["validation_version"] == "boris-validation/1.0"
-    assert validate_result.structuredContent["verdict"] in {
-        "PASS",
-        "REVISE",
-        "FAIL",
-        "INDETERMINATE",
-    }
-    validate_text = validate_result.content[0].text
-    assert validate_text == (
-        "BORIS validation verdict: PASS. "
-        "Review structuredContent for issues and recommendations."
-    )
-    assert '"validation_version"' not in validate_text
-
-    assert ask_result.isError is False
-    assert ask_result.structuredContent == {
-        "session_id": "mcp-native-ask",
-        "type": "ANSWER",
-        "content": "ok",
-        "metadata": {},
-    }
-    assert ask_result.content[0].text == "ok"
-    assert '"structuredContent"' not in ask_result.content[0].text
-
-    assert error_result.isError is True
-    assert error_result.structuredContent["error"] == "runtime_error"
-    assert error_result.content[0].text == "Runtime error: failed"
-    assert '"error"' not in error_result.content[0].text
 
 
 class FakeRuntimeAPIClient:
@@ -222,6 +170,7 @@ def frame_packet():
             "max_total_characters": 12000,
         },
         "answer_instructions": [],
+        "runtime_generated_prompt": "## User input\nExplain BOIS Runtime",
     }
 
 

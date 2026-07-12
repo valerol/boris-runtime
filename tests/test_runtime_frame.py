@@ -46,6 +46,7 @@ def test_runtime_frame_does_not_call_injected_llm(monkeypatch):
         "retrieved_core",
         "retrieval_metadata",
         "answer_instructions",
+        "runtime_generated_prompt",
     }
 
 
@@ -429,6 +430,104 @@ def test_normal_packet_still_contains_expected_public_fields():
     assert "retrieved_core" in packet
     assert "retrieval_metadata" in packet
     assert "answer_instructions" in packet
+    assert "runtime_generated_prompt" in packet
+    assert packet["runtime_generated_prompt"]
+
+
+def test_runtime_generated_prompt_contains_public_frame_context():
+    with active_runtime_imports():
+        from runtime.context_packet import build_context_packet
+
+        packet = build_context_packet(
+            _session_stub(),
+            _frame_context_stub(
+                core_context={
+                    "chunks": [{
+                        "id": "chunk",
+                        "section": "section",
+                        "title": "title",
+                        "text": "retrieved public core",
+                        "score": 0.5,
+                    }]
+                },
+            ),
+        )
+
+    prompt = packet["runtime_generated_prompt"]
+    assert "## User input\nintentional user input remains" in prompt
+    assert "## Answer instructions" in prompt
+    assert "Use this packet as the controlling BOIS/SIMA/BORIS frame." in prompt
+    assert "## BOIS frame" in prompt
+    assert '"framework": "BOIS"' in prompt
+    assert "## SIMA signals" in prompt
+    assert '"risk": 0.2' in prompt
+    assert "## BORIS context" in prompt
+    assert '"name": "BORIS"' in prompt
+    assert "## Retrieved core" in prompt
+    assert "retrieved public core" in prompt
+    assert "provide the final answer yourself" in prompt
+
+
+def test_runtime_generated_prompt_uses_sanitized_public_data(monkeypatch):
+    with active_runtime_imports():
+        from runtime.context_packet import build_context_packet
+
+        monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
+        packet = build_context_packet(
+            _session_stub(),
+            _frame_context_stub(
+                bois_frame={
+                    "framework": "BOIS",
+                    "core": {
+                        "safe": "super-secret-test-value",
+                        "system_prompt": "remove",
+                    },
+                    "input": "intentional user input remains",
+                    "constraints": ["safe"],
+                    "raw_prompt": "remove",
+                    "internal_path": "/opt/private",
+                },
+                boris_context={
+                    "name": "BORIS",
+                    "role": "role",
+                    "context": {
+                        "safe": "super-secret-test-value",
+                        "debug_context": "remove",
+                    },
+                    "environment": {"OPENAI_API_KEY": "remove"},
+                    "session": {
+                        "session_id": "session",
+                        "clarification_cycles": 0,
+                        "max_clarification_cycles": 3,
+                        "authorization": "remove",
+                    },
+                },
+                core_context={
+                    "chunks": [{
+                        "id": "chunk",
+                        "section": "section",
+                        "title": "title",
+                        "text": "chunk super-secret-test-value",
+                        "score": 0.5,
+                        "embedding": [1, 2, 3],
+                    }]
+                },
+            ),
+        )
+
+    prompt = packet["runtime_generated_prompt"]
+    for forbidden in (
+        "super-secret-test-value",
+        "system_prompt",
+        "raw_prompt",
+        "debug_context",
+        "OPENAI_API_KEY",
+        "authorization",
+        "embedding",
+        "/opt/private",
+    ):
+        assert forbidden not in prompt
+    assert "[redacted]" in prompt
 
 
 def _chunk(chunk_id, score, text):

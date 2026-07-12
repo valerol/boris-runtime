@@ -177,42 +177,34 @@ prompt payload immediately before the LLM adapter call.
 
 ## MCP Server Adapter
 
-The MCP adapter exposes three tools:
+The public MCP adapter is named `BORIS` and exposes one ChatGPT-visible tool:
 
 ```text
-boris.ask
 boris.frame
-boris.validate
 ```
 
-`boris.ask`: Runtime generates the final answer through its configured LLM
-adapter.
-
 `boris.frame`: Runtime returns a bounded BOIS/SIMA/BORIS context packet without
-calling an LLM. The MCP client model, such as ChatGPT, uses `structuredContent`
-as the controlling frame and generates the final answer itself.
+calling an LLM. The MCP client model, such as ChatGPT, receives the complete
+context packet in `structuredContent` and the full `runtime_generated_prompt`
+in text `content`; ChatGPT should show that prompt to the user and then generate
+the final answer itself.
 
-`boris.validate`: Runtime statelessly validates a ChatGPT-generated answer
-against the complete `boris.frame` packet. It defaults to deterministic
-validation, does not rewrite the answer, and returns the full layered report in
-`structuredContent`. Semantic and hybrid modes may call the Runtime-configured
-validator LLM.
+The internal `boris.ask` and `boris.validate` functions, Runtime client methods,
+and private HTTP endpoints remain available to the project, but they are not
+registered as public MCP tools.
 
-All MCP tools return native MCP `CallToolResult` objects. Complete Runtime
-payloads, context packets, validation reports, and structured error details are
-carried in MCP `structuredContent`. The `content` field contains only concise
-model-visible text, such as the final answer, frame instruction, validation
-verdict summary, or runtime error summary. The MCP adapter does not JSON-wrap
-its own result envelope inside a text content block. Error results set
-`isError: true`.
+MCP results use native MCP `CallToolResult` objects. Complete context packets
+and structured error details are carried in MCP `structuredContent`. The
+`content` field for `boris.frame` contains explicit instructions plus the full
+safe Runtime-generated prompt. The MCP adapter does not JSON-wrap its own result
+envelope inside a text content block. Error results set `isError: true`.
 
 Recommended ChatGPT workflow:
 
 ```text
 boris.frame
+-> ChatGPT shows runtime_generated_prompt
 -> ChatGPT generates answer
--> boris.validate(answer, full context packet)
--> ChatGPT reviews verdict/issues/recommendations
 ```
 
 Run locally with the Runtime HTTP API in one terminal:
@@ -243,25 +235,15 @@ Tool payload:
 Architecture:
 
 ```text
-MCP boris.ask
-  -> HTTP
-POST /runtime/ask
-  ->
-BOISRuntime.run(...)
-
-MCP boris.frame
+public MCP boris.frame
   -> HTTP
 POST /runtime/frame
   ->
 BOISRuntime.frame(...)
   ->
 bounded context packet in structuredContent
-
-MCP boris.validate
-  -> HTTP
-POST /runtime/validate
   ->
-stateless validation report in structuredContent
+runtime_generated_prompt in content
 ```
 
 The MCP server is an adapter only. It does not contain BOIS/SIMA/BORIS logic,

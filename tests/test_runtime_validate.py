@@ -142,6 +142,7 @@ def test_runtime_validate_request_schema_errors_return_422(api_context, payload_
         (lambda p: p.update({"unexpected": True}), "PACKET_UNEXPECTED_FIELD"),
         (lambda p: p.update({"runtime_mode": "answer_provider"}), "RUNTIME_MODE_INVALID"),
         (lambda p: p.update({"llm_called": True}), "LLM_CALLED_INVALID"),
+        (lambda p: p.update({"runtime_generated_prompt": 123}), "RUNTIME_GENERATED_PROMPT_INVALID"),
         (lambda p: p["bois_frame"].update({"raw_prompt": "secret"}), "BOIS_FRAME_INVALID"),
         (lambda p: p["sima"].update({"extra": True}), "SIMA_INVALID"),
         (lambda p: p["boris_context"].update({"authorization": "secret"}), "BORIS_CONTEXT_INVALID"),
@@ -264,6 +265,22 @@ def test_retrieval_metadata_cross_field_limits_are_enforced(api_context):
     assert response.status_code == 200
     assert body["verdict"] == "FAIL"
     assert "RETRIEVAL_METADATA_MISMATCH" in {issue["code"] for issue in body["issues"]}
+
+
+def test_validation_preflight_accepts_runtime_generated_prompt(api_context):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": valid_packet()},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["preflight"]["status"] == "completed"
+    assert "RUNTIME_GENERATED_PROMPT_INVALID" not in {issue["code"] for issue in body["issues"]}
 
 
 def test_preflight_detects_configured_secret_but_not_top_level_input(api_context, monkeypatch):
@@ -671,6 +688,7 @@ def valid_packet():
             "max_total_characters": 12000,
         },
         "answer_instructions": [],
+        "runtime_generated_prompt": "## User input\nExplain BOIS Runtime",
     }
 
 

@@ -103,15 +103,10 @@ def test_boris_frame_calls_runtime_api_client_and_returns_context_packet():
     )
 
     assert response["structuredContent"] == packet
-    assert response["content"] == [
-        {
-            "type": "text",
-            "text": (
-                "BORIS Runtime returned a context frame only. Use structuredContent "
-                "as the controlling BOIS/SIMA/BORIS frame and generate the final answer yourself."
-            ),
-        }
-    ]
+    assert response["content"][0]["type"] == "text"
+    assert response["content"][0]["text"].startswith("Show the user the complete runtime_generated_prompt")
+    assert "Do not hide, shorten, or omit the Runtime-generated prompt." in response["content"][0]["text"]
+    assert "## User input\nExplain BOIS Runtime" in response["content"][0]["text"]
     assert "isError" not in response
     assert client.calls == [
         {
@@ -183,4 +178,5 @@ def _frame_packet():
             "max_total_characters": 12000,
         },
         "answer_instructions": [],
+        "runtime_generated_prompt": "## User input\nExplain BOIS Runtime",
     }

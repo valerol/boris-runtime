@@ -47,26 +47,25 @@ The platform provides UI, transport, authentication, tools, memory, and storage.
 The middleware runtime applies the BOIS / SIMA / BORIS protocol and delegates
 LLM inference to an adapter.
 
-The Runtime now has two public composition-root modes behind the private HTTP
-API:
+The Runtime supports multiple private composition-root modes behind the HTTP
+API, while the public MCP connector exposes only `boris.frame`:
 
 ```text
-MCP boris.ask
-  -> private POST /runtime/ask
+private POST /runtime/ask
   -> BOISRuntime.run(...)
   -> ProtocolEngine.run_turn(...)
   -> configured LLM adapter
   -> Runtime-generated protocol answer
 
-MCP boris.frame
+public MCP boris.frame
   -> private POST /runtime/frame
   -> BOISRuntime.frame(...)
   -> ProtocolEngine.build_frame_context(...)
   -> bounded BOIS/SIMA/BORIS context packet
+  -> runtime_generated_prompt
   -> ChatGPT-generated final answer
 
-MCP boris.validate
-  -> private POST /runtime/validate
+private POST /runtime/validate
   -> RuntimeRegistry.validate(...)
   -> validation engine
   -> layered validation report
@@ -74,7 +73,7 @@ MCP boris.validate
 
 `boris.frame` is context-provider mode. It reuses Runtime SIMA extraction, BOIS
 frame construction, BORIS context construction, and BOIS Core retrieval, but it
-does not build the final raw LLM prompt, call an external LLM, parse LLM output,
+does not call an external LLM, parse LLM output,
 record a final answer, update `last_decision`, update `last_output_type`, add
 asked clarification questions, increment clarification cycles, or write to the
 processed-input cache.
@@ -84,12 +83,11 @@ the MCP server communicates with Runtime only through the HTTP API. The MCP
 server must not import Runtime, ProtocolEngine, Core loader, or LLM adapter
 internals.
 
-MCP tools return native MCP `CallToolResult` objects. Runtime payloads,
-context packets, validation reports, and structured error envelopes are
-delivered through MCP `structuredContent`; concise model-facing text is
-delivered through `content`; and error envelopes set `isError: true`. The MCP
-adapter does not serialize its own `structuredContent`/`content` envelope into a
-JSON text block.
+MCP tools return native MCP `CallToolResult` objects. The public `boris.frame`
+tool delivers the context packet through MCP `structuredContent` and the full
+safe `runtime_generated_prompt` through `content`; error envelopes set
+`isError: true`. The MCP adapter does not serialize its own
+`structuredContent`/`content` envelope into a JSON text block.
 
 `boris.validate` is Phase 4D.1 stateless validation. Its input is the
 ChatGPT-generated answer, the complete `boris.frame` context packet, and an

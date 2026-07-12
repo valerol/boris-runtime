@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from uuid import uuid4
@@ -73,7 +74,7 @@ def build_context_packet(session, frame_context):
     retrieved_core, retrieval_metadata = bound_retrieved_core(
         frame_context.core_context.get("chunks", [])
     )
-    return {
+    packet = {
         "packet_version": PACKET_VERSION,
         "frame_id": str(uuid4()),
         "session_id": session.session_id,
@@ -87,6 +88,40 @@ def build_context_packet(session, frame_context):
         "retrieval_metadata": retrieval_metadata,
         "answer_instructions": list(ANSWER_INSTRUCTIONS),
     }
+    packet["runtime_generated_prompt"] = build_runtime_generated_prompt(packet)
+    return packet
+
+
+def build_runtime_generated_prompt(packet):
+    user_input = redact_known_secrets(packet.get("input", ""))
+    sections = [
+        (
+            "Task",
+            (
+                "You are ChatGPT. Generate the final user-facing answer using the "
+                "public BOIS/SIMA/BORIS context below. Do not call BORIS again for "
+                "this answer."
+            ),
+        ),
+        ("User input", user_input),
+        ("Answer instructions", _stable_json(packet.get("answer_instructions", []))),
+        ("BOIS frame", _stable_json(packet.get("bois_frame", {}))),
+        ("SIMA signals", _stable_json(packet.get("sima", {}))),
+        ("BORIS context", _stable_json(packet.get("boris_context", {}))),
+        ("Retrieved core", _stable_json(packet.get("retrieved_core", []))),
+        (
+            "Final response requirement",
+            (
+                "Use only the public context above as the controlling frame. "
+                "Respect missing fields, risk, uncertainty, ambiguity, constraints, "
+                "and retrieved core. If necessary information is missing, ask a "
+                "necessary non-duplicate clarification question. Otherwise, provide "
+                "the final answer yourself."
+            ),
+        ),
+    ]
+    prompt = "\n\n".join(f"## {title}\n{body}" for title, body in sections)
+    return redact_known_secrets(prompt)
 
 
 def project_public_bois_frame(frame):
@@ -216,6 +251,12 @@ def redact_known_secrets(text):
     for secret in _known_secret_values():
         result = result.replace(secret, "[redacted]")
     return result
+
+
+def _stable_json(value):
+    return redact_known_secrets(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2)
+    )
 
 
 def _sanitize_mapping(value):

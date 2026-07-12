@@ -44,6 +44,7 @@ REQUIRED_PACKET_FIELDS = {
     "retrieved_core",
     "retrieval_metadata",
     "answer_instructions",
+    "runtime_generated_prompt",
 }
 SIMA_FIELDS = {"risk", "uncertainty", "missing_fields", "ambiguity_score"}
 RETRIEVED_CHUNK_FIELDS = {"chunk_id", "section", "title", "text", "relevance"}
@@ -204,6 +205,7 @@ class PacketPreflightValidator:
         issues.extend(self._validate_boris_context(packet.get("boris_context"), packet.get("session_id")))
         issues.extend(self._validate_retrieved_core(packet.get("retrieved_core"), packet.get("retrieval_metadata")))
         issues.extend(self._validate_answer_instructions(packet.get("answer_instructions")))
+        issues.extend(self._validate_runtime_generated_prompt(packet.get("runtime_generated_prompt")))
         issues.extend(self._leakage_issues(packet))
         return {"frame_id": frame_id, "issues": issues}
 
@@ -380,6 +382,11 @@ class PacketPreflightValidator:
             return [_issue("ANSWER_INSTRUCTIONS_INVALID", "high", "answer_instructions must be a list.", "answer_instructions", "preflight", False)]
         if any(not isinstance(item, str) for item in instructions):
             return [_issue("ANSWER_INSTRUCTIONS_INVALID", "high", "Each answer instruction must be a string.", "answer_instructions", "preflight", False)]
+        return []
+
+    def _validate_runtime_generated_prompt(self, prompt):
+        if not _non_empty_string(prompt):
+            return [_issue("RUNTIME_GENERATED_PROMPT_INVALID", "high", "runtime_generated_prompt must be a non-empty string.", "runtime_generated_prompt", "preflight", False)]
         return []
 
     def _leakage_issues(self, packet):

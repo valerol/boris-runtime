@@ -2,9 +2,7 @@
 
 Phase 4C exposes the MCP server as the public adapter boundary while keeping the
 BORIS Runtime HTTP API private. Phase 4D adds `boris.frame`, a context-provider
-tool that still reaches Runtime only through the private HTTP API. Phase 4D.1
-adds `boris.validate`, a stateless validation tool that also reaches Runtime
-only through the private HTTP API.
+tool that still reaches Runtime only through the private HTTP API.
 
 ```text
 ChatGPT / Remote MCP client
@@ -19,16 +17,15 @@ Runtime API 127.0.0.1:8000
 The MCP server is an adapter. It does not contain BOIS/SIMA/BORIS logic, does
 not call OpenAI directly, and does not store memory.
 
-Available MCP tools:
+Available public MCP tools:
 
-- `boris.ask`: calls private `/runtime/ask`; Runtime generates the final answer
-  through its configured LLM adapter.
 - `boris.frame`: calls private `/runtime/frame`; Runtime returns only a bounded
-  BOIS/SIMA/BORIS context packet in `structuredContent`, does not call an LLM,
-  and ChatGPT generates the final answer itself.
-- `boris.validate`: calls private `/runtime/validate`; Runtime validates a
-  ChatGPT-generated answer against the complete `boris.frame` packet, returns a
-  layered report in `structuredContent`, and does not rewrite the answer.
+  BOIS/SIMA/BORIS context packet in `structuredContent`, includes the full safe
+  `runtime_generated_prompt` in text `content`, does not call an LLM, and
+  ChatGPT shows the prompt before generating the final answer itself.
+
+Internal ask and validation Runtime endpoints remain available privately, but
+`boris.ask` and `boris.validate` are not registered as public MCP tools.
 
 ## Mode A - Local Development
 
@@ -145,13 +142,13 @@ https://<domain>/mcp
 Suggested connector name:
 
 ```text
-BORIS Runtime
+BORIS
 ```
 
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS Runtime. Use boris.ask for Runtime-generated answers, boris.frame for LLM-free BOIS/SIMA/BORIS context packets that ChatGPT answers from, and boris.validate to statelessly validate ChatGPT-generated answers.
+Connects ChatGPT to BORIS. Use boris.frame for LLM-free BOIS/SIMA/BORIS context packets and the full Runtime-generated prompt that ChatGPT shows before answering.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.

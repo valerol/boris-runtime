@@ -16,13 +16,13 @@ def main():
     client = OpenAI(api_key=api_key)
     response = client.responses.create(
         model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-        input="Ask BORIS Runtime to explain BOIS Runtime v0",
+        input="Ask BORIS to explain BOIS Runtime v0",
         tools=[
             {
                 "type": "mcp",
-                "server_label": "boris_runtime",
+                "server_label": "BORIS",
                 "server_description": (
-                    "Connects ChatGPT to BORIS Runtime through the BOIS/SIMA/BORIS protocol runtime."
+                    "Connects ChatGPT to BORIS through a BOIS/SIMA/BORIS context frame."
                 ),
                 "server_url": server_url,
                 "require_approval": require_approval,
