@@ -4,6 +4,10 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added roadmap entry for the pending Phase 4E BORIS Semantic Kernel Layer,
+  including semantic manifest, resolver layers, structured context packet v2,
+  retrieval/resolution separation, and validation requirements.
+
 ## 2026-07-11 - MCP Native Structured Content Fix
 
 - Changed MCP tools to return native `CallToolResult`.

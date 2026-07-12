@@ -9,5 +9,6 @@ Current completed phases:
 - PHASE 3 - Protocol Engine
 - PHASE 4A-4D.1 - Runtime API, MCP adapter, context packets, and stateless validation
 
-Next planned phase:
+Next planned phases:
+- BORIS Semantic Kernel Layer
 - Stateful Frame Registry and Packet Authenticity (future; not part of Phase 4D.1)

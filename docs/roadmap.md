@@ -109,6 +109,7 @@ Phase 4 is split into:
 - Phase 4C Remote MCP / ChatGPT Apps readiness: implemented
 - Phase 4D Runtime as Context Provider: implemented
 - Phase 4D.1 Stateless `boris.validate`: implemented
+- Phase 4E BORIS Semantic Kernel Layer: pending
 
 Phase 4A provides a thin FastAPI transport layer over `BOISRuntime.run(...)`.
 The HTTP API owns request validation and in-memory runtime session plumbing only.
@@ -126,6 +127,11 @@ internals.
 Phase 4C adds remote MCP transport suitable for ChatGPT developer-mode connector
 testing. It exposes `/mcp` as the public adapter boundary while keeping
 `/runtime/ask` private.
+
+Phase 4E is the planned architectural transition from using external
+`boris-core` primarily as a retrieval source to resolving it into structured
+rules, protocols, constraints, ontology, and decision requirements before prompt
+construction.
 
 Future Phase 4 hardening remains pending:
 
@@ -212,6 +218,153 @@ Status: pending.
 Not part of Phase 4D.1. Future scope may include packet persistence,
 `frame_id` lookup, packet TTL, cleanup, session ownership, restart persistence,
 HMAC packet signing, signature verification, and tamper detection.
+
+---
+
+# PHASE 4E - BORIS SEMANTIC KERNEL LAYER
+
+Status: pending.
+
+Goal:
+Create an intermediate semantic layer between `boris-core` and Runtime
+execution. The layer transforms canonical core material from retrieved chunks
+into structured decision context for BORIS.
+
+Current limitation:
+Runtime uses `boris-core` mainly as a retrieval source for semantically similar
+fragments. It does not yet treat `boris-core` as a structured rule model.
+
+Target pipeline:
+
+```text
+boris-core
+    |
+    v
+Semantic Kernel Resolver
+    |
+    |-- Rule Resolver
+    |-- Protocol Resolver
+    |-- Constraint Resolver
+    |-- Ontology Resolver
+    `-- Domain Physiology Resolver
+    |
+    v
+BORIS Context Packet
+    |
+    v
+Prompt Builder
+    |
+    v
+LLM
+```
+
+## Semantic Kernel Manifest
+
+- create an explicit manifest for semantic sources inside `boris-core`;
+- classify sources as:
+  - rules;
+  - procedures;
+  - protocols;
+  - constraints;
+  - ontology;
+  - glossary;
+  - priorities;
+  - stop signals;
+- define source priority rules and conflict ordering.
+
+## Rule Resolver Layer
+
+Goal:
+Determine which rules apply to the current user request instead of only finding
+similar text.
+
+Scope:
+- extract applicable `active_rules`;
+- connect the request to rule criteria;
+- pass selected rules into BORIS Context.
+
+## Protocol Resolver Layer
+
+Goal:
+Determine which request-processing protocol is required.
+
+Examples:
+- answer generation;
+- clarification loop;
+- tool execution;
+- risk escalation;
+- validation.
+
+## Constraint Resolution Layer
+
+Goal:
+Resolve limitations and stop conditions before answer generation.
+
+Sources:
+- `stop_signals`;
+- `priorities`;
+- `conflict_policy`.
+
+## Structured BORIS Context Packet v2
+
+Current format:
+
+```json
+{
+  "retrieved_core": []
+}
+```
+
+Target format:
+
+```json
+{
+  "boris_context": {
+    "applicable_rules": [],
+    "active_constraints": [],
+    "selected_protocols": [],
+    "ontology": [],
+    "decision_requirements": []
+  }
+}
+```
+
+## Retrieval vs Semantic Resolution Separation
+
+Architectural rule:
+- Retrieval answers: "Which information is similar to this request?"
+- Semantic Resolver answers: "Which rules and protocols apply now?"
+
+Retrieval and Semantic Resolution must coexist. Retrieval remains useful for
+evidence and recall, while Semantic Resolution governs rule, protocol, and
+constraint selection.
+
+## Validation Requirements
+
+- every applied rule has a source;
+- every constraint has provenance;
+- every protocol step is explainable;
+- Runtime does not modify canonical core;
+- Runtime only interprets canonical core.
+
+## Expected Outcome
+
+After this phase, BORIS Runtime can form a governed semantic layer instead of
+only adding retrieved `boris-core` context.
+
+Expected execution flow:
+
+```text
+Input
+  v
+SIMA analysis
+  v
+Semantic Kernel Resolution
+  v
+BORIS Context
+  v
+LLM
+```
 
 ---
 
