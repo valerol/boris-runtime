@@ -250,6 +250,12 @@ The MCP server is an adapter only. It does not contain BOIS/SIMA/BORIS logic,
 does not call OpenAI directly, does not store memory, does not replace Runtime,
 and communicates with Runtime only through the stabilized HTTP API.
 
+## ChatGPT connector
+
+Connect BORIS to ChatGPT using the public MCP endpoint:
+
+https://boris.valerol.dev/mcp
+
 ## Remote MCP / ChatGPT Apps
 
 For remote MCP clients and ChatGPT developer-mode connectors, run the Runtime API
