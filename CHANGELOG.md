@@ -4,9 +4,49 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-- Added roadmap entry for the pending Phase 4E BORIS Semantic Kernel Layer,
-  including semantic manifest, resolver layers, structured context packet v2,
-  retrieval/resolution separation, and validation requirements.
+- Consolidated the active Phase 4 execution path around
+  `BOISRuntime -> ProtocolEngine -> api.app`; the earlier middleware and
+  FastAPI modules are now compatibility facades instead of parallel engines.
+- Removed the unused earlier prompt/parser/loop implementation and unified the
+  plain and structured LLM boundary, including lazy forwarding and controlled
+  provider errors.
+- Split Core Surface identity into `source_kind`, exact `archive_sha256`,
+  reproducible `content_set_sha256`, and `manifest_sha256`.
+- Added canonical runtime-contract loading, substrate declaration,
+  capability checks, exact-archive OperatorAcceptance, schema-validated
+  RuntimeAttestation, and attestation hashes.
+- Added a fail-closed registry for every package-declared required check;
+  unknown future checks now produce `HOLD` instead of compatibility `PASS`.
+- Preserved deprecated `POST /run` as a compatibility route over the canonical
+  Runtime path.
+- Made an accepted RuntimeAttestation mandatory before semantic calculation
+  and included its reference in every execution trace.
+- Applied canonical GateDecision precedence so material unknowns cannot weaken
+  `STOP` or `REPAIR` to `HOLD`.
+- Applied deterministic deontic constraints so an applicable `PROHIBIT` cannot
+  be accepted as `PASS` by the semantic calculator.
+- Added the isolated Phase 4F Minimal Semantic Executor with immutable semantic
+  input/view/candidate contracts and exact Core Surface references.
+- Added native phase, trigger, and explicit-layer candidate selection from
+  `NORM_PHASE_APPLICABILITY.tsv`.
+- Added three-valued Predicate DSL evaluation, strict structured LLM calculation,
+  deterministic norm-reference verification, conservative gate constraints,
+  and immutable calculation traces.
+- Preserved `norm_type`, modality, operation, predicate, and formulation as
+  separate source fields; unknown source types and inactive candidates now force
+  `HOLD` instead of automatic interpretation.
+- Added an experimental semantic-executor CLI, synthetic boundary tests, and
+  optional real-package v2.18 integration tests.
+- Replaced the planned Phase 4E Semantic Kernel Resolver with the Core Surface
+  Foundation boundary.
+- Added passive package loading from directories and ZIP archives with safe
+  paths, exact inventory, SHA-256, dependency-order, identity, lifecycle, and
+  catalog validation.
+- Added immutable Core Surface and norm records with Base, personal, domain,
+  and candidate layers kept separate.
+- Preserved native norm classifications as opaque source values while the
+  canonical statement-type projection remains an explicit open debt.
+- Added command-line package validation and positive and negative tests.
 
 ## 2026-07-11 - MCP Native Structured Content Fix
 

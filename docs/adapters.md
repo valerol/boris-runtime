@@ -7,11 +7,15 @@ implementations.
 
 Location: `llm/llm_adapter.py`
 
-Base interface for LLM completions. Implementations provide:
+Base interface for the canonical Runtime LLM port. Implementations provide:
 
 ```python
 call(prompt: str) -> str
+call_structured(prompt: str, system_message: str) -> str
 ```
+
+Structured calls must preserve the separate system contract and request JSON
+output. They do not silently fall back to a plain call.
 
 ## MockLLMAdapter
 
@@ -29,8 +33,10 @@ depends on `OPENAI_API_KEY` and optional `OPENAI_MODEL`.
 
 ## Legacy Adapter Boundary Examples
 
-The `adapters/` package retains lightweight boundary examples for memory, tool,
-and platform integration. These are not platform implementations.
+`adapters/llm.py` retains compatibility names backed by the canonical
+`llm/llm_adapter.py` implementation. It is not a second LLM architecture.
+The remaining `adapters/` modules are lightweight boundary examples for memory,
+tool, and platform integration, not platform implementations.
 
 ## MemoryAdapter
 

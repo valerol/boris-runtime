@@ -1,26 +1,3 @@
-from core.protocol import ProtocolResponse
-
-
-class ProtocolLoop:
-    """Compatibility envelope chooser retained for the earlier SDK API."""
-
-    def decide(self, parsed):
-        if parsed.kind == "clarification":
-            return ProtocolResponse("clarification", parsed.content)
-
-        if parsed.kind == "tool":
-            return ProtocolResponse(
-                "tool_call",
-                "",
-                tool_request={
-                    "name": parsed.tool_name,
-                    "arguments": dict(parsed.tool_args),
-                },
-            )
-
-        return ProtocolResponse("final", parsed.content)
-
-
 class ProtocolRuntimeLoop:
     """Compatibility shell that delegates Phase 3 execution to ProtocolEngine."""
 
@@ -34,7 +11,11 @@ class ProtocolRuntimeLoop:
             if output["metadata"].get("exit"):
                 return output
 
-            if output["type"] in {"QUESTION", "GAP"} and input_provider and session.state.can_clarify():
+            if (
+                output["type"] in {"QUESTION", "GAP"}
+                and input_provider
+                and session.state.can_clarify()
+            ):
                 clarification = input_provider(output)
                 if self.protocol_engine.is_exit(clarification):
                     return {

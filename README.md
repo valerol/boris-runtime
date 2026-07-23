@@ -7,6 +7,9 @@
 - Protocol -> [docs/protocol.md](docs/protocol.md)
 - Protocol Engine -> [docs/PROTOCOL_ENGINE.md](docs/PROTOCOL_ENGINE.md)
 - Runtime Session -> [docs/RUNTIME_SESSION.md](docs/RUNTIME_SESSION.md)
+- Core Surface -> [docs/core_surface.md](docs/core_surface.md)
+- Runtime Compatibility -> [docs/runtime_compatibility.md](docs/runtime_compatibility.md)
+- Minimal Semantic Executor -> [docs/semantic_executor.md](docs/semantic_executor.md)
 - SDK API -> [docs/sdk_api.md](docs/sdk_api.md)
 - Adapters -> [docs/adapters.md](docs/adapters.md)
 - Remote MCP Deployment -> [docs/remote_mcp_deployment.md](docs/remote_mcp_deployment.md)
@@ -23,18 +26,21 @@ BOIS / SIMA / BORIS protocol definitions on top of existing LLM platforms.
 ## Current Structure
 
 ```text
-core/          declarative protocol definitions and loader
-runtime/       minimal stateless protocol execution
-protocol/      BOIS, SIMA, and BORIS protocol layers
-prompt/        deterministic prompt construction
-llm/           Phase 1 LLM adapter interface
-adapters/      LLM, memory, tool, and platform boundaries
-cli/           validation CLI
-api/           optional API boundary
-mcp_server/    MCP adapter over the Runtime HTTP API
-examples/      usage examples
-docs/          current documentation set
-archive/       v0 runtime artifacts
+core/                  declarative protocol definitions and loader
+core_surface/          immutable versioned package trust boundary
+runtime_compatibility/ substrate declaration and Runtime attestation
+semantic_executor/     isolated Phase 4F semantic calculation experiment
+runtime/               canonical Runtime composition and session flow
+protocol/              BOIS, SIMA, and BORIS protocol layers
+prompt/                deterministic prompt construction
+llm/                   canonical plain and structured LLM port
+adapters/              compatibility and external capability boundaries
+cli/                   validation CLI
+api/                   canonical FastAPI boundary
+mcp_server/            MCP adapter over the Runtime HTTP API
+examples/              usage examples
+docs/                  current documentation set
+archive/               v0 runtime artifacts
 ```
 
 ## Run CLI

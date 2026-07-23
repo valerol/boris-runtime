@@ -1,6 +1,8 @@
 import os
 import json
 
+from llm.errors import LLMConfigurationError, LLMProviderError
+
 
 class LLMAdapter:
     debug_prompt_enabled = False
@@ -14,6 +16,9 @@ class LLMAdapter:
         print("============================================")
 
     def call(self, prompt: str) -> str:
+        raise NotImplementedError
+
+    def call_structured(self, prompt: str, system_message: str) -> str:
         raise NotImplementedError
 
 
@@ -43,6 +48,9 @@ class MockLLMAdapter(LLMAdapter):
 
         return self._response("ANSWER", f"Protocol answer for: {user_input}")
 
+    def call_structured(self, prompt: str, system_message: str) -> str:
+        return self.call(prompt)
+
     @staticmethod
     def _extract_user_input(prompt):
         marker = "USER_INPUT:"
@@ -67,7 +75,9 @@ class OpenAIAdapter(LLMAdapter):
     def __init__(self, model=None, api_key=None, debug_prompt_enabled=False):
         resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not resolved_api_key:
-            raise RuntimeError("BOIS_LLM=openai requires OPENAI_API_KEY")
+            raise LLMConfigurationError(
+                "BOIS_LLM=openai requires OPENAI_API_KEY"
+            )
 
         from openai import OpenAI
 
@@ -76,10 +86,20 @@ class OpenAIAdapter(LLMAdapter):
         self.debug_prompt_enabled = debug_prompt_enabled
 
     def call(self, prompt: str) -> str:
+        return self._call(
+            prompt,
+            "Return only one JSON object with type, content, and metadata.",
+            json_mode=False,
+        )
+
+    def call_structured(self, prompt: str, system_message: str) -> str:
+        return self._call(prompt, system_message, json_mode=True)
+
+    def _call(self, prompt: str, system_message: str, *, json_mode: bool) -> str:
         messages = [
             {
                 "role": "system",
-                "content": "Return only one JSON object with type, content, and metadata.",
+                "content": system_message,
             },
             {"role": "user", "content": prompt},
         ]
@@ -92,9 +112,22 @@ class OpenAIAdapter(LLMAdapter):
             print(prompt)
             print("============================================")
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0,
-        )
-        return response.choices[0].message.content or ""
+        request = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0,
+        }
+        if json_mode:
+            request["response_format"] = {"type": "json_object"}
+        try:
+            response = self.client.chat.completions.create(
+                **request,
+            )
+            content = response.choices[0].message.content
+        except Exception as exc:
+            raise LLMProviderError("The configured LLM provider call failed.") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise LLMProviderError(
+                "The configured LLM provider returned empty content."
+            )
+        return content
