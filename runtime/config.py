@@ -1,14 +1,11 @@
 import os
 from pathlib import Path
 
+from llm.errors import LLMConfigurationError
 from llm.llm_adapter import MockLLMAdapter, OpenAIAdapter
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-class LLMConfigurationError(RuntimeError):
-    """Raised when the configured external LLM adapter cannot be created."""
 
 
 class LazyLLMAdapter:
@@ -30,6 +27,11 @@ class LazyLLMAdapter:
         if self._adapter is None:
             self._adapter = self._factory()
         return self._adapter.call(prompt)
+
+    def call_structured(self, prompt, system_message):
+        if self._adapter is None:
+            self._adapter = self._factory()
+        return self._adapter.call_structured(prompt, system_message)
 
 
 def load_env_file(path=None):

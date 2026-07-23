@@ -1,35 +1,20 @@
-from pathlib import Path
-import sys
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+"""Compatibility server backed by the canonical BORIS Runtime path."""
 
 from adapters.llm import MockLLMAdapter
+from api.app import app
+from pydantic import BaseModel, Field
 from runtime.engine import MiddlewareEngine
-
-try:
-    from fastapi import FastAPI
-    from pydantic import BaseModel
-except ModuleNotFoundError as exc:
-    raise RuntimeError("FastAPI server requires optional fastapi and pydantic packages.") from exc
 
 
 class Request(BaseModel):
     input: str
-    context: dict = {}
+    context: dict = Field(default_factory=dict)
 
 
-app = FastAPI(title="BOIS Middleware SDK")
 engine = MiddlewareEngine(MockLLMAdapter())
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.post("/run")
+@app.post("/run", deprecated=True)
 def run(request: Request):
     response = engine.run(request.input, context=request.context)
     return {
@@ -39,3 +24,5 @@ def run(request: Request):
         "trace": response.trace,
     }
 
+
+__all__ = ["Request", "app", "run"]

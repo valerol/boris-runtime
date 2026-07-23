@@ -1,12 +1,13 @@
-from core.loader import CoreLoader
-from core.protocol import ProtocolRequest, ProtocolResponse
-from runtime.loop import ProtocolLoop
-from runtime.prompt_builder import PromptBuilder
-from runtime.response_parser import ResponseParser
+"""Compatibility facade for the pre-Phase-4 canonical SDK entrypoint."""
+
+import json
+
+from core.protocol import ProtocolResponse
+from runtime.runtime import BOISRuntime
 
 
 class MiddlewareEngine:
-    """Stateless BOIS / SIMA / BORIS protocol execution engine."""
+    """Deprecated facade that delegates all execution to ``BOISRuntime``."""
 
     def __init__(
         self,
@@ -18,49 +19,86 @@ class MiddlewareEngine:
         memory_adapter=None,
         tool_adapter=None,
     ):
-        self.llm_adapter = llm_adapter
-        self.loader = loader or CoreLoader()
-        self.prompt_builder = prompt_builder or PromptBuilder()
-        self.response_parser = response_parser or ResponseParser()
-        self.protocol_loop = protocol_loop or ProtocolLoop()
-        self.memory_adapter = memory_adapter
-        self.tool_adapter = tool_adapter
+        if any((
+            loader,
+            prompt_builder,
+            response_parser,
+            protocol_loop,
+            memory_adapter,
+            tool_adapter,
+        )):
+            raise ValueError(
+                "Legacy MiddlewareEngine component injection is no longer "
+                "supported; use BOISRuntime composition boundaries."
+            )
+        self.runtime = BOISRuntime(
+            llm_adapter=_canonical_llm_port(llm_adapter),
+        )
 
     def run(self, user_input, context=None):
-        request = ProtocolRequest(user_input=(user_input or "").strip(), context=context or {})
-
-        if not request.user_input:
-            return ProtocolResponse("clarification", "Please provide a request.")
-
-        definitions = self.loader.load()
-        memory_context = self._read_memory(request)
-        prompt = self.prompt_builder.build(definitions, request, memory_context)
-        raw_response = self.llm_adapter.complete(prompt, context=dict(request.context))
-        parsed = self.response_parser.parse(raw_response)
-        response = self.protocol_loop.decide(parsed)
-
-        if response.type == "tool_call" and self.tool_adapter:
-            tool_result = self.tool_adapter.call(
-                response.tool_request["name"],
-                response.tool_request["arguments"],
-            )
+        text = (user_input or "").strip()
+        if not text:
             return ProtocolResponse(
-                "final",
-                str(tool_result),
-                trace={"tool_executed": response.tool_request["name"]},
+                type="clarification",
+                content="Please provide a request.",
+                trace={
+                    "compatibility_facade": True,
+                    "canonical_output_type": None,
+                    "context_received": bool(context),
+                },
             )
+        output = self.runtime.run(text)
+        output_type = output["type"]
+        if output_type in {"QUESTION", "GAP"}:
+            response_type = "clarification"
+        elif output_type == "TOOL_CALL":
+            response_type = "tool_call"
+        else:
+            response_type = "final"
+        return ProtocolResponse(
+            type=response_type,
+            content=output["content"],
+            trace={
+                "compatibility_facade": True,
+                "canonical_output_type": output_type,
+                "context_received": bool(context),
+            },
+        )
 
-        self._write_memory(request, response)
-        return response
 
-    def _read_memory(self, request):
-        if not self.memory_adapter:
-            return None
-        return self.memory_adapter.read(dict(request.context))
+class _CompletePortBridge:
+    def __init__(self, adapter):
+        self.adapter = adapter
+        self.adapter_name = getattr(adapter, "adapter_name", "legacy-complete")
 
-    def _write_memory(self, request, response):
-        if self.memory_adapter:
-            self.memory_adapter.write(
-                {"input": request.user_input, "response": response.content}
-            )
+    def call(self, prompt):
+        raw = self.adapter.complete(prompt)
+        text = (raw or "").strip()
+        prefixes = {
+            "CLARIFY:": "QUESTION",
+            "FINAL:": "ANSWER",
+        }
+        for prefix, output_type in prefixes.items():
+            if text.upper().startswith(prefix):
+                text = text.split(":", 1)[1].strip()
+                break
+        else:
+            output_type = "ANSWER"
+        return json.dumps({
+            "type": output_type,
+            "content": text,
+            "metadata": {"compatibility_adapter": True},
+        })
 
+    def call_structured(self, prompt, system_message):
+        raise NotImplementedError(
+            "Legacy complete()-only adapters cannot provide structured calls."
+        )
+
+
+def _canonical_llm_port(adapter):
+    if hasattr(adapter, "call"):
+        return adapter
+    if hasattr(adapter, "complete"):
+        return _CompletePortBridge(adapter)
+    raise TypeError("LLM adapter must implement call() or legacy complete().")

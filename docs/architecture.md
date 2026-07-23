@@ -6,22 +6,28 @@ The repository is a root-level SDK. There is no nested wrapper directory such as
 ## Root Structure
 
 ```text
-core/       declarative definitions and loaders
-runtime/    active protocol execution pipeline
-protocol/   BOIS, SIMA, and BORIS protocol layers
-prompt/     deterministic prompt construction
-llm/        Phase 1 LLM adapter interface
-adapters/   LLM, memory, tool, and platform boundaries
-cli/        local validation entrypoint
-api/        optional FastAPI boundary
-examples/   minimal SDK usage examples
-docs/       current documentation set
-archive/    legacy/reference artifacts only
+core/                  declarative definitions and loaders
+core_surface/          immutable package loading and trust boundary
+runtime_compatibility/ substrate declaration and Runtime attestation
+semantic_executor/     isolated semantic calculation experiment
+runtime/               active protocol execution pipeline
+protocol/              BOIS, SIMA, and BORIS protocol layers
+prompt/                deterministic prompt construction
+llm/                   canonical plain and structured LLM port
+adapters/              compatibility and external capability boundaries
+cli/                   local validation entrypoint
+api/                   canonical FastAPI boundary
+examples/              minimal SDK usage examples
+docs/                  current documentation set
+archive/               legacy/reference artifacts only
 ```
 
 Active code lives in:
 
 - `core/`
+- `core_surface/`
+- `runtime_compatibility/`
+- `semantic_executor/`
 - `runtime/`
 - `protocol/`
 - `prompt/`
@@ -37,18 +43,18 @@ Legacy code lives only in:
 
 No active runtime code should import from `archive/v0-runtime`.
 
-## Runtime Flow
+## Canonical Runtime Flow
 
 ```text
-User/Platform -> Middleware Runtime -> LLM Adapter -> LLM
+User/Platform -> api.app -> BOISRuntime -> ProtocolEngine -> LLM port -> LLM
 ```
 
 The platform provides UI, transport, authentication, tools, memory, and storage.
 The middleware runtime applies the BOIS / SIMA / BORIS protocol and delegates
 LLM inference to an adapter.
 
-The Runtime supports multiple private composition-root modes behind the HTTP
-API, while the public MCP connector exposes only `boris.frame`:
+The Runtime supports multiple operations through one composition root behind
+the HTTP API, while the public MCP connector exposes adapter-level tools:
 
 ```text
 private POST /runtime/ask
@@ -70,6 +76,48 @@ private POST /runtime/validate
   -> validation engine
   -> layered validation report
 ```
+
+Phase 4F adds a separate experimental semantic path:
+
+```text
+versioned Core package
+  -> immutable Core Surface
+  -> RuntimeCompatibilityVerifier
+  -> RuntimeAttestation
+  -> Semantic View
+  -> LLM semantic calculation
+  -> deterministic validation
+  -> non-executing ExecutionCandidate
+```
+
+The attestation must match the exact archive, manifest, content set, and loaded
+component hashes and must be explicitly accepted for `semantic_evaluation`
+before the calculator is called.
+
+The verifier executes every package-declared required check through a
+fail-closed registry. Unknown or non-passing checks produce `HOLD`; they cannot
+be silently replaced by a smaller Runtime-owned checklist.
+
+This path is not imported by `ProtocolEngine`, the HTTP API, or MCP. It does not
+mutate `RuntimeSession`, admit state transitions, call tools, write memory, or
+activate packages. Its result remains operator-review material until an
+Independent Reviewer and Policy Kernel are implemented.
+
+## Compatibility-only modules
+
+The earlier Phase 1 SDK path is no longer a parallel engine:
+
+- `runtime.engine.MiddlewareEngine` delegates to `BOISRuntime` and rejects
+  injection of the removed earlier prompt/parser/loop components;
+- `api.fastapi_server.app` is the same object as `api.app.app`;
+- deprecated `POST /run` remains on the compatibility server and delegates to
+  the canonical Runtime;
+- `adapters.llm` exposes compatibility names backed by the canonical LLM port;
+- the unused `runtime/prompt_builder.py`, `runtime/response_parser.py`, and
+  earlier `ProtocolLoop` were removed.
+
+`boris.validate` remains stateless answer validation for Phase 4D context
+packets. It is not the future Independent Reviewer and is not reused as one.
 
 `boris.frame` is context-provider mode. It reuses Runtime SIMA extraction, BOIS
 frame construction, BORIS context construction, and BOIS Core retrieval, but it

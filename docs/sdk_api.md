@@ -7,17 +7,8 @@ It does not list planned APIs.
 
 Location: `runtime/runtime.py`
 
-`BOISRuntime` is the Phase 1 CLI MVP composition root. It wires the explicit
-runtime loop with:
-
-- `CoreLoader`
-- `BOIParser`
-- `SIMAAnalyzer`
-- `BORISContext`
-- `PromptBuilder`
-- `LLMAdapter`
-- `ProtocolResponseParser`
-- `DecisionExecutor`
+`BOISRuntime` is the canonical Runtime composition root. It owns one
+`RuntimeSession`, one `ProtocolEngine`, and the clarification loop.
 
 ```python
 from runtime.runtime import BOISRuntime
@@ -28,30 +19,32 @@ print(output["type"])
 print(output["content"])
 ```
 
-The returned object is a dictionary with:
+The returned dictionary contains:
 
-- `type`: `ANSWER`, `QUESTION`, `TOOL_CALL`, or `GAP`
-- `content`: string
-- `metadata`: object
+- `type`: `ANSWER`, `QUESTION`, `TOOL_CALL`, or `GAP`;
+- `content`: string;
+- `metadata`: object.
+
+`BOISRuntime.frame(...)` reuses the same Runtime framing path without calling
+the LLM or advancing conversation state.
 
 ## RuntimeSession
 
 Location: `runtime/session.py`
 
-`RuntimeSession` holds exactly one immutable canonical Core, runtime state,
-session id, and creation timestamp.
+`RuntimeSession` holds one immutable Phase 2 Core, mutable Runtime state, session
+ID, and creation timestamp.
 
-Use `create_runtime_session(core_ref, session_id=None)` to create a session from
-the Phase 2 Core Loader.
+Use `create_runtime_session(core_ref, session_id=None)` to create a session.
+Core Surface and Semantic Executor are deliberately not attached to this
+session in Phase 4F.
 
 ## ProtocolEngine
 
 Location: `protocol/engine.py`
 
-`ProtocolEngine` runs one protocol turn against an existing `RuntimeSession`.
-It does not load files, parse raw core definitions, or classify user questions
-before calling the LLM. Every new non-exit, non-duplicate input calls the LLM
-adapter.
+`ProtocolEngine` runs one canonical protocol turn against an existing
+`RuntimeSession`.
 
 ```python
 from llm.llm_adapter import MockLLMAdapter
@@ -61,93 +54,67 @@ from runtime.session import create_runtime_session
 session = create_runtime_session("core/definitions")
 engine = ProtocolEngine(llm_adapter=MockLLMAdapter())
 output = engine.run_turn(session, "Explain BOIS Runtime")
-print(output["type"])
-print(output["content"])
 ```
 
-## MiddlewareEngine
+## Core Surface
 
-Location: `runtime/engine.py`
-
-`MiddlewareEngine` is the stateless protocol execution engine. It is
-constructed with an LLM adapter and optional loader, prompt builder, response
-parser, protocol loop, memory adapter, and tool adapter.
+Location: `core_surface/`
 
 ```python
-from adapters.llm import MockLLMAdapter
-from runtime.engine import MiddlewareEngine
+from core_surface import load_core_surface
 
-engine = MiddlewareEngine(MockLLMAdapter())
-response = engine.run("Explain BOIS Runtime")
-print(response.type)
-print(response.content)
+surface = load_core_surface("/path/to/core.zip", purpose="evaluation")
 ```
 
-## MiddlewareEngine.run(user_input, context=None)
+The immutable result separates exact archive, content-set, and manifest hashes.
+It loads and validates passive package data but does not calculate semantics.
 
-Runs one protocol execution. `user_input` is normalized to a stripped string.
-`context` is optional caller-provided metadata.
+## Runtime Compatibility
 
-Returns a `ProtocolResponse`.
+Location: `runtime_compatibility/`
 
-If `user_input` is empty, the engine returns a clarification response without
-calling the LLM adapter.
+`RuntimeCompatibilityVerifier.verify(...)` reads the package's runtime schemas,
+templates, and validation specification and returns a substrate declaration,
+operator decision, specification checks, and RuntimeAttestation.
 
-## CoreLoader
+An attestation accepted for `semantic_evaluation` is mandatory before the
+Semantic Executor calculator can be called.
 
-Location: `core/loader.py`
+## SemanticExecutor
 
-Loads BOIS, SIMA, and BORIS definition files from `core/definitions/` by
-default and returns `ProtocolDefinitions`.
+Location: `semantic_executor/`
 
-## PromptBuilder
+`SemanticExecutor(surface, calculator, compatibility)` returns a non-executing
+`ExecutionCandidate`. It is isolated from `ProtocolEngine`, Runtime sessions,
+tools, memory, HTTP, and MCP.
 
-Location: `runtime/prompt_builder.py`
+See [semantic_executor.md](semantic_executor.md) for the complete contract.
 
-Builds the prompt passed to the LLM adapter by combining protocol definitions,
-request data, and optional memory adapter context.
+## Canonical LLM port
 
-## ResponseParser
+Location: `llm/llm_adapter.py`
 
-Location: `runtime/response_parser.py`
+Adapters implement:
 
-Parses model output into `ParsedResponse`. It recognizes `FINAL:`,
-`CLARIFY:`, and `TOOL:` prefixes.
+```python
+call(prompt: str) -> str
+call_structured(prompt: str, system_message: str) -> str
+```
 
-## ProtocolLoop
+`runtime.config.LazyLLMAdapter` forwards both operations without losing the
+structured system contract or JSON mode.
 
-Location: `runtime/loop.py`
+## Compatibility facades
 
-Converts `ParsedResponse` into `ProtocolResponse` with one of the current
-outcomes: `final`, `clarification`, or `tool_call`.
+The following imports remain available for earlier SDK callers, but they are no
+longer independent execution paths:
 
-## ProtocolRequest
+- `runtime.engine.MiddlewareEngine` delegates to `BOISRuntime`;
+- `api.fastapi_server.app` is an alias of `api.app.app`;
+- legacy `POST /run` remains available there as a deprecated compatibility
+  route and delegates through `MiddlewareEngine`;
+- `adapters.llm` names are backed by the canonical `llm` implementations.
 
-Location: `core/protocol.py`
-
-Dataclass containing:
-
-- `user_input`
-- `context`
-
-## ProtocolResponse
-
-Location: `core/protocol.py`
-
-Dataclass containing:
-
-- `type`
-- `content`
-- `trace`
-- `tool_request`
-
-## ParsedResponse
-
-Location: `core/protocol.py`
-
-Dataclass containing:
-
-- `kind`
-- `content`
-- `tool_name`
-- `tool_args`
+Legacy component injection into `MiddlewareEngine` is rejected. The earlier
+`runtime.prompt_builder`, `runtime.response_parser`, and `ProtocolLoop` were
+removed during Phase 4R.
