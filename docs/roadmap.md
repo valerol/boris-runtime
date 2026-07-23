@@ -109,7 +109,7 @@ Phase 4 is split into:
 - Phase 4C Remote MCP / ChatGPT Apps readiness: implemented
 - Phase 4D Runtime as Context Provider: implemented
 - Phase 4D.1 Stateless `boris.validate`: implemented
-- Phase 4E BORIS Semantic Kernel Layer: pending
+- Phase 4E Core Surface Foundation: in progress / isolated foundation implemented
 
 Phase 4A provides a thin FastAPI transport layer over `BOISRuntime.run(...)`.
 The HTTP API owns request validation and in-memory runtime session plumbing only.
@@ -128,10 +128,9 @@ Phase 4C adds remote MCP transport suitable for ChatGPT developer-mode connector
 testing. It exposes `/mcp` as the public adapter boundary while keeping
 `/runtime/ask` private.
 
-Phase 4E is the planned architectural transition from using external
-`boris-core` primarily as a retrieval source to resolving it into structured
-rules, protocols, constraints, ontology, and decision requirements before prompt
-construction.
+Phase 4E introduces a stable, version-independent trust boundary for loading,
+checking, and exposing a canonical core package. Runtime does not select
+applicable rules or calculate philosophical meaning inside this boundary.
 
 Future Phase 4 hardening remains pending:
 
@@ -221,150 +220,122 @@ HMAC packet signing, signature verification, and tamper detection.
 
 ---
 
-# PHASE 4E - BORIS SEMANTIC KERNEL LAYER
+# PHASE 4E - CORE SURFACE FOUNDATION
 
-Status: pending.
+Status: in progress / isolated foundation implemented.
 
 Goal:
-Create an intermediate semantic layer between `boris-core` and Runtime
-execution. The layer transforms canonical core material from retrieved chunks
-into structured decision context for BORIS.
+Prepare Runtime for a final Base Core through a stable, version-independent
+boundary while the canon continues to evolve.
 
-Current limitation:
-Runtime uses `boris-core` mainly as a retrieval source for semantically similar
-fragments. It does not yet treat `boris-core` as a structured rule model.
-
-Target pipeline:
+Target dependency flow:
 
 ```text
-boris-core
+Versioned Core Package
     |
     v
-Semantic Kernel Resolver
-    |
-    |-- Rule Resolver
-    |-- Protocol Resolver
-    |-- Constraint Resolver
-    |-- Ontology Resolver
-    `-- Domain Physiology Resolver
+Core Surface Adapter
     |
     v
-BORIS Context Packet
+Immutable Core Surface
     |
     v
-Prompt Builder
+Semantic Executor
     |
     v
-LLM
+Independent Reviewer
+    |
+    v
+Policy Kernel
 ```
 
-## Semantic Kernel Manifest
+Only the first three nodes belong to Phase 4E. Semantic Executor, Independent
+Reviewer, and Policy Kernel are subsequent consumers and must not be simulated
+inside Core Surface.
 
-- create an explicit manifest for semantic sources inside `boris-core`;
-- classify sources as:
-  - rules;
-  - procedures;
-  - protocols;
-  - constraints;
-  - ontology;
-  - glossary;
-  - priorities;
-  - stop signals;
-- define source priority rules and conflict ordering.
+## Layer Boundaries
 
-## Rule Resolver Layer
-
-Goal:
-Determine which rules apply to the current user request instead of only finding
-similar text.
-
-Scope:
-- extract applicable `active_rules`;
-- connect the request to rule criteria;
-- pass selected rules into BORIS Context.
-
-## Protocol Resolver Layer
-
-Goal:
-Determine which request-processing protocol is required.
-
-Examples:
-- answer generation;
-- clarification loop;
-- tool execution;
-- risk escalation;
-- validation.
-
-## Constraint Resolution Layer
-
-Goal:
-Resolve limitations and stop conditions before answer generation.
-
-Sources:
-- `stop_signals`;
-- `priorities`;
-- `conflict_policy`.
-
-## Structured BORIS Context Packet v2
-
-Current format:
-
-```json
-{
-  "retrieved_core": []
-}
-```
-
-Target format:
-
-```json
-{
-  "boris_context": {
-    "applicable_rules": [],
-    "active_constraints": [],
-    "selected_protocols": [],
-    "ontology": [],
-    "decision_requirements": []
-  }
-}
-```
-
-## Retrieval vs Semantic Resolution Separation
-
-Architectural rule:
-- Retrieval answers: "Which information is similar to this request?"
-- Semantic Resolver answers: "Which rules and protocols apply now?"
-
-Retrieval and Semantic Resolution must coexist. Retrieval remains useful for
-evidence and recall, while Semantic Resolution governs rule, protocol, and
-constraint selection.
-
-## Validation Requirements
-
-- every applied rule has a source;
-- every constraint has provenance;
-- every protocol step is explainable;
-- Runtime does not modify canonical core;
-- Runtime only interprets canonical core.
-
-## Expected Outcome
-
-After this phase, BORIS Runtime can form a governed semantic layer instead of
-only adding retrieved `boris-core` context.
-
-Expected execution flow:
+Core Surface exposes Base Core without merging it with other physiology:
 
 ```text
-Input
-  v
-SIMA analysis
-  v
-Semantic Kernel Resolution
-  v
-BORIS Context
-  v
-LLM
+Base Core      -> universal canonical surface
+Personal      -> versioned physiology for one machine
+Domain        -> versioned subject-area physiology
+Memory        -> mutable experience and evidence
 ```
+
+Personal and domain layers may reference Base Core IDs. They do not amend Base
+Core, and memory records do not become norms automatically.
+
+## Delivered Foundation
+
+- safe loading from a package directory or ZIP archive;
+- exact package identity, version, status, inventory, size, and SHA-256 checks;
+- complete checksum reproduction;
+- dependency coverage and topological order validation;
+- immutable package and norm records;
+- separation by the package's native `layer` field;
+- evaluation-only loading for candidate packages;
+- command-line validation independent of Runtime, LLM, retriever, and adapters;
+- synthetic positive and negative tests.
+
+The current v2.18 package is an evaluation fixture. Loading it does not activate
+it, publish it, authorize action, or claim semantic compatibility.
+
+## Open Debt - Statement Type Projection
+
+The human-readable canon distinguishes:
+
+- definition;
+- invariant;
+- mandatory rule;
+- conditional rule;
+- permission;
+- recommendation;
+- ground;
+- example;
+- note.
+
+The current machine catalog exposes three `norm_type` values and carries
+modality and operation in separate fields. Their complete canonical mapping is
+not fixed in Runtime.
+
+This debt is intentionally non-blocking for the foundation. Core Surface:
+
+- preserves `norm_type`, modality, operation, and all other supplied fields;
+- does not reduce them to a Runtime enum;
+- accepts unknown future source values as opaque data;
+- does not execute an unknown value as a rule.
+
+The debt is revisited only when semantic execution encounters a material
+ambiguity that changes the result or when the canon publishes an authoritative
+projection.
+
+## Boundaries
+
+Phase 4E does not:
+
+- repair or supplement canonical ontology;
+- use the discarded Claim runtime ontology;
+- select applicable norms, protocols, constraints, HOLD, or STOP;
+- infer conflict priority;
+- call an LLM;
+- activate a candidate package;
+- merge personal or domain physiology into Base Core;
+- replace retrieval before an actual Semantic Executor exists.
+
+`RuntimeSession` integration is deferred until a consumer uses exact Core
+Surface IDs, version, and hash. Attaching an unused surface to a session would
+be decorative rather than executable.
+
+## Acceptance
+
+- the v2.18 archive loads for evaluation with its exact archive SHA-256;
+- Base and non-Base norms remain separately addressable;
+- unknown source classifications survive unchanged;
+- a changed byte, missing component, unsafe path, duplicate norm ID, invalid
+  dependency order, or candidate activation attempt is rejected;
+- existing Runtime tests and boot paths remain unchanged.
 
 ---
 

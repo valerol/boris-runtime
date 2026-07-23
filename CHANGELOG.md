@@ -4,9 +4,16 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-- Added roadmap entry for the pending Phase 4E BORIS Semantic Kernel Layer,
-  including semantic manifest, resolver layers, structured context packet v2,
-  retrieval/resolution separation, and validation requirements.
+- Replaced the planned Phase 4E Semantic Kernel Resolver with the Core Surface
+  Foundation boundary.
+- Added passive package loading from directories and ZIP archives with safe
+  paths, exact inventory, SHA-256, dependency-order, identity, lifecycle, and
+  catalog validation.
+- Added immutable Core Surface and norm records with Base, personal, domain,
+  and candidate layers kept separate.
+- Preserved native norm classifications as opaque source values while the
+  canonical statement-type projection remains an explicit open debt.
+- Added command-line package validation and positive and negative tests.
 
 ## 2026-07-11 - MCP Native Structured Content Fix
 

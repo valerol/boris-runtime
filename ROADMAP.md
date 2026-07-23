@@ -10,5 +10,5 @@ Current completed phases:
 - PHASE 4A-4D.1 - Runtime API, MCP adapter, context packets, and stateless validation
 
 Next planned phases:
-- BORIS Semantic Kernel Layer
+- Core Surface Foundation
 - Stateful Frame Registry and Packet Authenticity (future; not part of Phase 4D.1)

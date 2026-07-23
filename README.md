@@ -7,6 +7,7 @@
 - Protocol -> [docs/protocol.md](docs/protocol.md)
 - Protocol Engine -> [docs/PROTOCOL_ENGINE.md](docs/PROTOCOL_ENGINE.md)
 - Runtime Session -> [docs/RUNTIME_SESSION.md](docs/RUNTIME_SESSION.md)
+- Core Surface -> [docs/core_surface.md](docs/core_surface.md)
 - SDK API -> [docs/sdk_api.md](docs/sdk_api.md)
 - Adapters -> [docs/adapters.md](docs/adapters.md)
 - Remote MCP Deployment -> [docs/remote_mcp_deployment.md](docs/remote_mcp_deployment.md)
