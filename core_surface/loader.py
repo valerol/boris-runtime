@@ -25,6 +25,7 @@ MAX_FILE_COUNT = 256
 MAX_FILE_SIZE = 32 * 1024 * 1024
 MAX_PACKAGE_SIZE = 64 * 1024 * 1024
 PURPOSES = {"evaluation", "active"}
+IGNORED_DIRECTORY_NAMES = {".git"}
 
 
 def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
@@ -153,6 +154,8 @@ def _read_directory(path: Path) -> tuple[str, dict[str, bytes]]:
     total_size = 0
 
     for candidate in sorted(root.rglob("*")):
+        if _is_ignored_directory_entry(candidate, root):
+            continue
         if candidate.is_symlink():
             raise PackageLayoutError(f"Package symlink is not allowed: {candidate}")
         if not candidate.is_file():
@@ -169,6 +172,14 @@ def _read_directory(path: Path) -> tuple[str, dict[str, bytes]]:
     if not payloads or len(payloads) > MAX_FILE_COUNT:
         raise PackageLayoutError("Package file count is empty or exceeds the safety limit.")
     return root.name, payloads
+
+
+def _is_ignored_directory_entry(candidate: Path, root: Path) -> bool:
+    try:
+        relative_parts = candidate.relative_to(root).parts
+    except ValueError:
+        return False
+    return bool(relative_parts and relative_parts[0] in IGNORED_DIRECTORY_NAMES)
 
 
 def _resolve_directory_root(path: Path) -> Path:

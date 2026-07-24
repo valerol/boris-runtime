@@ -45,6 +45,21 @@ def test_candidate_cannot_be_loaded_for_active_use(tmp_path):
         load_core_surface(package_root, purpose="active")
 
 
+def test_directory_loader_ignores_git_checkout_metadata(tmp_path):
+    package_root = build_package(tmp_path)
+    pristine = load_core_surface(package_root)
+
+    git_pack = package_root / ".git" / "objects" / "pack"
+    git_pack.mkdir(parents=True)
+    (package_root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git_pack / "pack-test.pack").write_bytes(b"not package data")
+
+    checkout = load_core_surface(package_root)
+
+    assert checkout.content_set_sha256 == pristine.content_set_sha256
+    assert checkout.summary()["component_count"] == pristine.summary()["component_count"]
+
+
 def test_zip_loads_without_extraction_and_reports_archive_hash(tmp_path):
     package_root = build_package(tmp_path)
     archive_path = tmp_path / "core.zip"
