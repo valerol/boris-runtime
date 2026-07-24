@@ -253,6 +253,7 @@ def to_call_tool_result(envelope, call_tool_result_cls, text_content_cls):
 def create_mcp_server(config: MCPServerConfig | None = None):
     try:
         from mcp.server.fastmcp import FastMCP
+        from mcp.server.transport_security import TransportSecuritySettings
         from mcp.types import CallToolResult, TextContent, ToolAnnotations
         from starlette.responses import JSONResponse
     except ModuleNotFoundError as exc:
@@ -262,12 +263,14 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         ) from exc
 
     resolved_config = config or load_config()
+    transport_security = _transport_security_settings(resolved_config, TransportSecuritySettings)
     mcp = FastMCP(
         "BORIS",
         instructions=SERVER_INSTRUCTIONS,
         host=resolved_config.host,
         port=resolved_config.port,
         streamable_http_path=resolved_config.path,
+        transport_security=transport_security,
     )
 
     @mcp.tool(
@@ -312,6 +315,22 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         )
 
     return mcp
+
+
+def _transport_security_settings(config, settings_cls):
+    if not config.allowed_hosts and not config.allowed_origins:
+        return None
+
+    allowed_hosts = list(config.allowed_hosts)
+    for host in ("127.0.0.1:*", "localhost:*", "[::1]:*"):
+        if host not in allowed_hosts:
+            allowed_hosts.append(host)
+
+    return settings_cls(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=list(config.allowed_origins),
+    )
 
 
 def create_remote_app(config: MCPServerConfig | None = None):

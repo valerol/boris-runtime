@@ -8,6 +8,8 @@ DEFAULT_TRANSPORT = "stdio"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9000
 DEFAULT_PATH = "/mcp"
+DEFAULT_ALLOWED_HOSTS = ()
+DEFAULT_ALLOWED_ORIGINS = ()
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,8 @@ class MCPServerConfig:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     path: str = DEFAULT_PATH
+    allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS
+    allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS
 
 
 def load_config():
@@ -28,7 +32,14 @@ def load_config():
         host=os.getenv("BORIS_MCP_HOST", DEFAULT_HOST),
         port=_int_env("BORIS_MCP_PORT", DEFAULT_PORT),
         path=_path_env("BORIS_MCP_PATH", DEFAULT_PATH),
+        allowed_hosts=_csv_env("BORIS_MCP_ALLOWED_HOSTS"),
+        allowed_origins=_csv_env("BORIS_MCP_ALLOWED_ORIGINS"),
     )
+
+
+def _csv_env(name):
+    raw = os.getenv(name, "")
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
 def _float_env(name, default):
