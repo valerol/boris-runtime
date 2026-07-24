@@ -37,13 +37,17 @@ provider = ContextProvider()
 packet = provider.frame(
     "Explain the applicable BOIS constraints",
     session_id="correlation-id",
+    mode="developer",
 )
 ```
 
 The default provider reads `BORIS_CORE_PACKAGE` and loads the package through
 Core Surface. The former `BORIS_CORE_PATH` alias is not supported.
 
-`frame()` is stateless and never calls an LLM.
+`frame()` is stateless and never calls an LLM. Modes `default` and `production`
+return the compact `boris-context/2.0` packet. Mode `developer` additionally
+returns a sanitized `developer_trace` with Core Surface metadata and complete
+projection selection diagnostics.
 
 ## ValidationEngine
 

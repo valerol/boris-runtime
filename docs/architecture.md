@@ -86,6 +86,23 @@ so `core_surface` remains passive and query-independent.
 - bounds output to six chunks, 3000 characters per chunk, and 12000 total
   projected characters.
 
+The frame request supports `default`, `production`, and `developer` modes.
+`default` and `production` have the same compact wire output. `developer` adds
+`developer_trace` (`boris-projection-trace/1.0`) with:
+
+- verified package identity and non-secret package/component metadata;
+- query tokens and all canonical norm candidates;
+- selected and excluded norms with scores, matched terms, and reasons;
+- projection limits, fallback state, truncation, and stage timings;
+- an explicit capability ledger showing that Semantic Executor, Independent
+  Reviewer, Policy Kernel, Cycle Guard, and LLM inference were not invoked.
+
+The trace is structured observability, not model chain-of-thought. It passes
+through the same public-value sanitizer as the context packet and excludes
+secrets, hidden prompts, environment data, stack traces, and absolute source
+paths. Selected objects include their bounded projected chunks; excluded
+objects expose metadata rather than duplicating the full Core content.
+
 If the configured Core package is absent or invalid, the API returns
 `core_surface_unavailable` with HTTP 503. It does not fall back to local
 definitions.

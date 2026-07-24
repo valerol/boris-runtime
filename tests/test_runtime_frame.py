@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAX_CHUNKS = 6
 MAX_CHUNK_CHARACTERS = 3000
@@ -54,6 +56,60 @@ def test_context_provider_is_stateless_between_frames():
     assert first["session_id"] == second["session_id"] == "frame-readonly"
     assert first["frame_id"] != second["frame_id"]
     assert first["projected_core"] == second["projected_core"]
+
+
+def test_developer_mode_exposes_safe_projection_trace():
+    with active_runtime_imports():
+        from application.context_provider import ContextProvider
+
+        provider = ContextProvider(surface_provider=_StaticSurfaceProvider())
+        packet = provider.frame(
+            "Explain BOIS",
+            session_id="frame-developer",
+            mode="developer",
+        )
+
+    trace = packet["developer_trace"]
+    assert trace["trace_version"] == "boris-projection-trace/1.0"
+    assert trace["core_surface"]["verification"] == "loaded_by_verified_core_surface"
+    assert trace["projection"]["projection_kind"] == "bounded_lexical"
+    assert trace["projection"]["semantic_routing"] is False
+    assert trace["projection"]["candidate_count"] == 1
+    assert trace["projection"]["selected_count"] == 1
+    assert trace["selected_objects"][0]["object_id"] == "N-BASE-001"
+    assert trace["selected_objects"][0]["reason"] == "lexical_match"
+    assert trace["selected_objects"][0]["projected_chunk"]["text"]
+    assert trace["excluded_objects"] == []
+    assert trace["runtime_capabilities"]["semantic_executor"] == "not_invoked"
+    assert trace["runtime_capabilities"]["llm"] == "not_called"
+    assert set(trace["stage_timings_ms"]) == {
+        "core_surface_load",
+        "context_projection",
+        "packet_build",
+        "total",
+    }
+    assert all(value >= 0 for value in trace["stage_timings_ms"].values())
+
+
+def test_default_and_production_modes_do_not_expose_developer_trace():
+    with active_runtime_imports():
+        from application.context_provider import ContextProvider
+
+        provider = ContextProvider(surface_provider=_StaticSurfaceProvider())
+        default = provider.frame("Explain BOIS", mode="default")
+        production = provider.frame("Explain BOIS", mode="production")
+
+    assert "developer_trace" not in default
+    assert "developer_trace" not in production
+
+
+def test_context_provider_rejects_unknown_mode():
+    with active_runtime_imports():
+        from application.context_provider import ContextProvider
+
+        provider = ContextProvider(surface_provider=_StaticSurfaceProvider())
+        with pytest.raises(ValueError, match="Unsupported frame mode"):
+            provider.frame("Explain BOIS", mode="debug")
 
 
 def test_bound_projected_core_limits_count_dedupes_and_preserves_rank():

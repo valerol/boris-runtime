@@ -73,7 +73,13 @@ SECRET_ENV_NAME_PATTERN = re.compile(
 MIN_SECRET_VALUE_LENGTH = 8
 
 
-def build_context_packet(session_id, frame_context):
+def build_context_packet(
+    session_id,
+    frame_context,
+    *,
+    developer_mode=False,
+    stage_timings_ms=None,
+):
     resolved_session_id = getattr(session_id, "session_id", session_id)
     projected_core, projection_metadata = bound_projected_core(
         frame_context.core_projection.get("chunks", [])
@@ -92,8 +98,81 @@ def build_context_packet(session_id, frame_context):
         "projection_metadata": projection_metadata,
         "answer_instructions": list(ANSWER_INSTRUCTIONS),
     }
+    if developer_mode:
+        packet["developer_trace"] = build_developer_trace(
+            frame_context,
+            projected_core,
+            projection_metadata,
+            stage_timings_ms=stage_timings_ms,
+        )
     packet["runtime_generated_prompt"] = build_runtime_generated_prompt(packet)
     return packet
+
+
+def build_developer_trace(
+    frame_context,
+    projected_core,
+    projection_metadata,
+    *,
+    stage_timings_ms=None,
+):
+    projection = frame_context.core_projection
+    metadata = projection.get("metadata", {})
+    diagnostics = projection.get("diagnostics", {})
+    identity = frame_context.bois_frame.get("core", {})
+    surface_diagnostics = diagnostics.get("core_surface", {})
+    selected_by_id = {
+        item.get("chunk_id"): item
+        for item in projected_core
+    }
+    selected_objects = []
+    for item in diagnostics.get("selected_objects", []):
+        public_item = sanitize_public_value(item)
+        chunk_id = f"core-surface:norm:{item.get('object_id', '')}"
+        if chunk_id in selected_by_id:
+            public_item["projected_chunk"] = selected_by_id[chunk_id]
+        selected_objects.append(public_item)
+
+    return sanitize_public_value({
+        "trace_version": "boris-projection-trace/1.0",
+        "core_surface": {
+            "package_identity": identity.get("package_identity", {}),
+            "status": identity.get("status"),
+            "purpose": identity.get("purpose"),
+            "content_set_sha256": identity.get("content_set_sha256"),
+            "manifest_sha256": identity.get("manifest_sha256"),
+            "verification": "loaded_by_verified_core_surface",
+            "package_metadata": surface_diagnostics,
+        },
+        "projection": {
+            "projection_kind": metadata.get("projection_kind"),
+            "semantic_routing": metadata.get("semantic_routing", False),
+            "query": frame_context.user_input,
+            "query_tokens": diagnostics.get("query_tokens", []),
+            "candidate_count": diagnostics.get("candidate_count", 0),
+            "eligible_count": diagnostics.get("eligible_count", 0),
+            "selected_count": diagnostics.get("selected_count", 0),
+            "excluded_count": diagnostics.get("excluded_count", 0),
+            "fallback_used": diagnostics.get("fallback_used", False),
+            "limits": dict(projection_metadata),
+        },
+        "selected_objects": selected_objects,
+        "excluded_objects": diagnostics.get("excluded_objects", []),
+        "runtime_capabilities": {
+            "core_surface": "invoked",
+            "context_projector": "invoked",
+            "semantic_executor": "not_invoked",
+            "independent_reviewer": "not_implemented",
+            "policy_kernel": "not_implemented",
+            "cycle_guard": "not_implemented",
+            "llm": "not_called",
+        },
+        "stage_timings_ms": dict(stage_timings_ms or {}),
+        "warnings": [
+            "Projection is lexical and does not establish semantic applicability.",
+            "Selected objects are context candidates, not admitted executable norms.",
+        ],
+    })
 
 
 def build_runtime_generated_prompt(packet):

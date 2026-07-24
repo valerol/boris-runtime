@@ -4,6 +4,11 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added an explicit `developer` mode to `/runtime/frame` and `boris.frame`.
+  It exposes the sanitized `boris-projection-trace/1.0` envelope with Core
+  Surface package metadata, all selection candidates, selected/excluded
+  reasons, lexical scores, limits, timings, warnings, and invoked capabilities.
+  Default and production responses remain compact.
 - Moved request-specific Core context selection from `core_surface` to
   `application.context_projection`, keeping Core Surface passive and
   query-independent.

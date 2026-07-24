@@ -63,6 +63,27 @@ def test_boris_frame_surfaces_runtime_error_payload():
     }
 
 
+def test_developer_frame_instructs_chatgpt_to_show_projection_trace():
+    packet = _frame_packet()
+    packet["developer_trace"] = {
+        "trace_version": "boris-projection-trace/1.0",
+        "projection": {"selected_count": 1},
+    }
+    client = FakeRuntimeClient(response=packet)
+
+    response = run_boris_frame(
+        input="Explain BOIS Runtime",
+        mode="developer",
+        client=client,
+    )
+
+    text = response["content"][0]["text"]
+    assert text.startswith("Developer mode is active.")
+    assert "Show the complete developer_trace as formatted JSON" in text
+    assert '"trace_version": "boris-projection-trace/1.0"' in text
+    assert response["structuredContent"]["developer_trace"] == packet["developer_trace"]
+
+
 def test_mcp_adapter_does_not_import_runtime_internals():
     forbidden = (
         "application.context_provider",
