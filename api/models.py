@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, constr
 class RuntimeFrameRequest(BaseModel):
     input: constr(strip_whitespace=True, min_length=1)
     session_id: str | None = None
-    mode: str = "default"
+    mode: Literal["default", "production", "developer"] = "default"
     context: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -46,6 +46,7 @@ class RuntimeFrameResponse(BaseModel):
     boris_context: dict[str, Any] = Field(default_factory=dict)
     projected_core: list[RuntimeProjectedCoreChunk] = Field(default_factory=list)
     projection_metadata: RuntimeProjectionMetadata
+    developer_trace: dict[str, Any] | None = None
     answer_instructions: list[str] = Field(default_factory=list)
     runtime_generated_prompt: str
 

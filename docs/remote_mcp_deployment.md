@@ -160,6 +160,12 @@ Connects ChatGPT to BORIS. Use boris.frame for LLM-free BOIS/SIMA/BORIS context 
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
 
+Use `"mode":"developer"` in a frame request to return `developer_trace`.
+Through MCP, developer mode also instructs ChatGPT to display the complete
+formatted trace before the Runtime-generated prompt and its own answer. The
+trace contains projection scores and decisions, not model chain-of-thought or
+server secrets.
+
 Local smoke tests:
 
 ```bash

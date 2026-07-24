@@ -60,6 +60,7 @@ def _safe_error_detail(detail):
 @app.post(
     "/runtime/frame",
     response_model=RuntimeFrameResponse,
+    response_model_exclude_none=True,
     responses={
         500: {"model": RuntimeErrorResponse},
         503: {"model": RuntimeErrorResponse},
@@ -68,7 +69,11 @@ def _safe_error_detail(detail):
 def frame_runtime(request: RuntimeFrameRequest):
     session_id = request.session_id or str(uuid4())
     try:
-        return context_provider.frame(request.input, session_id=session_id)
+        return context_provider.frame(
+            request.input,
+            session_id=session_id,
+            mode=request.mode,
+        )
     except CoreSurfaceUnavailable as exc:
         return _error_response(
             503,

@@ -185,6 +185,25 @@ def test_preflight_failures_return_200_fail(api_context, mutate, code):
     assert code in {issue["code"] for issue in body["issues"]}
 
 
+def test_preflight_accepts_optional_sanitized_developer_trace(api_context):
+    app, runtime_registry = api_context
+    runtime_registry.clear()
+    packet = valid_packet()
+    packet["developer_trace"] = {
+        "trace_version": "boris-projection-trace/1.0",
+        "projection": {"selected_count": 0},
+    }
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime/validate",
+        json={"answer": "BOIS Runtime answer", "context_packet": packet},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["preflight"]["status"] == "completed"
+
+
 @pytest.mark.parametrize(
     "mutate,code",
     [

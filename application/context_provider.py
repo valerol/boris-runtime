@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from time import perf_counter
 from threading import Lock
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from core_surface import CoreSurfaceError, load_core_surface
 
 
 DEFAULT_CORE_SURFACE_SOURCE = "/opt/boris-core"
+FRAME_MODES = {"default", "production", "developer"}
 
 
 class CoreSurfaceUnavailable(RuntimeError):
@@ -69,13 +71,27 @@ class ContextProvider:
     def __init__(self, surface_provider=None):
         self.surface_provider = surface_provider or CoreSurfaceProvider()
 
-    def frame(self, user_input: str, session_id: str | None = None) -> dict:
+    def frame(
+        self,
+        user_input: str,
+        session_id: str | None = None,
+        mode: str = "default",
+    ) -> dict:
         text = str(user_input or "").strip()
         if not text:
             raise ValueError("Context frame input must not be empty.")
+        if mode not in FRAME_MODES:
+            raise ValueError(
+                "Unsupported frame mode. Use default, production, or developer."
+            )
         resolved_session_id = session_id or str(uuid4())
+        started = perf_counter()
+        surface_started = perf_counter()
         surface = self.surface_provider.get()
+        surface_ms = _elapsed_ms(surface_started)
+        projection_started = perf_counter()
         core_projection = project_core_context(surface, text)
+        projection_ms = _elapsed_ms(projection_started)
         frame_context = FrameContext(
             user_input=text,
             sima=_sima_signals(text),
@@ -83,7 +99,26 @@ class ContextProvider:
             boris_context=_boris_context(surface, resolved_session_id),
             core_projection=core_projection,
         )
-        return build_context_packet(resolved_session_id, frame_context)
+        packet_started = perf_counter()
+        packet = build_context_packet(
+            resolved_session_id,
+            frame_context,
+            developer_mode=mode == "developer",
+            stage_timings_ms={
+                "core_surface_load": surface_ms,
+                "context_projection": projection_ms,
+            },
+        )
+        if "developer_trace" in packet:
+            packet["developer_trace"]["stage_timings_ms"]["packet_build"] = (
+                _elapsed_ms(packet_started)
+            )
+            packet["developer_trace"]["stage_timings_ms"]["total"] = _elapsed_ms(started)
+        return packet
+
+
+def _elapsed_ms(started: float) -> float:
+    return round((perf_counter() - started) * 1000, 3)
 
 
 def _sima_signals(user_input: str) -> dict:

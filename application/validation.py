@@ -46,6 +46,7 @@ REQUIRED_PACKET_FIELDS = {
     "answer_instructions",
     "runtime_generated_prompt",
 }
+OPTIONAL_PACKET_FIELDS = {"developer_trace"}
 SIMA_FIELDS = {"risk", "uncertainty", "missing_fields", "ambiguity_score"}
 PROJECTED_CHUNK_FIELDS = {"chunk_id", "section", "title", "text", "relevance"}
 PROJECTION_METADATA_FIELDS = {
@@ -173,7 +174,9 @@ class PacketPreflightValidator:
             except (TypeError, ValueError):
                 frame_id = None
 
-        unexpected = sorted(set(packet) - REQUIRED_PACKET_FIELDS)
+        unexpected = sorted(
+            set(packet) - REQUIRED_PACKET_FIELDS - OPTIONAL_PACKET_FIELDS
+        )
         missing = sorted(REQUIRED_PACKET_FIELDS - set(packet))
         for field in missing:
             issues.append(_issue("PACKET_MISSING_FIELD", "critical", f"The context packet is missing required field '{field}'.", field, "preflight", False))

@@ -100,6 +100,11 @@ conversation. The response uses `packet_version: "boris-context/2.0"` and
 contains a bounded Core Surface projection plus a safe
 `runtime_generated_prompt`.
 
+Set `mode` to `developer` to add a safe `developer_trace` containing package
+metadata, projection candidates, selected and excluded norms, lexical scores
+and match terms, limits, stage timings, warnings, and the actual Runtime
+capabilities invoked. `default` and `production` omit this trace.
+
 `/runtime/validate` checks a ChatGPT-generated answer against a supplied context
 packet. Deterministic, semantic, and hybrid modes remain available. Validation
 does not create a Runtime session or claim packet authenticity.
@@ -120,6 +125,10 @@ python -m mcp_server.server
 The MCP server exposes one public read-only tool: `boris.frame`. It communicates
 with the private API over HTTP and does not import Runtime internals, load Core
 packages, call LLMs, or store memory.
+
+For an observable developer response, call `boris.frame` with
+`mode: "developer"`. The MCP result instructs ChatGPT to display the complete
+safe `developer_trace` before the Runtime-generated prompt and final answer.
 
 ## Core Surface and Semantic Executor
 

@@ -1,3 +1,6 @@
+import json
+from typing import Literal
+
 from pydantic import ValidationError
 
 from mcp_server.config import MCPServerConfig, load_config
@@ -8,7 +11,8 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 SERVER_INSTRUCTIONS = (
     "BORIS exposes one public tool: boris.frame. Use it to obtain a bounded "
     "BOIS/SIMA/BORIS context frame and the complete Runtime-generated prompt "
-    "that ChatGPT must show to the user before generating its own answer. "
+    "that ChatGPT must show to the user before generating its own answer. Use "
+    "mode=developer to show the safe Core Surface projection trace. "
     "The MCP server is an adapter and does not store memory or call LLMs directly."
 )
 
@@ -90,13 +94,25 @@ def normalize_frame_tool_result(payload):
         return normalize_error_result(payload)
 
     runtime_prompt = str(payload.get("runtime_generated_prompt", ""))
+    developer_trace = payload.get("developer_trace")
+    developer_instruction = ""
+    if developer_trace is not None:
+        developer_instruction = (
+            "Developer mode is active. Show the complete developer_trace as "
+            "formatted JSON before the runtime_generated_prompt; do not hide, "
+            "shorten, or omit its projection diagnostics.\n\n"
+            "developer_trace:\n"
+            f"{json.dumps(developer_trace, ensure_ascii=False, sort_keys=True, indent=2)}"
+            "\n\n"
+        )
     return {
         "structuredContent": dict(payload),
         "content": [
             {
                 "type": "text",
                 "text": (
-                    "Show the user the complete runtime_generated_prompt below, then "
+                    developer_instruction
+                    + "Show the user the complete runtime_generated_prompt below, then "
                     "generate your own answer from it. Do not hide, shorten, or omit "
                     "the Runtime-generated prompt.\n\n"
                     f"{runtime_prompt}"
@@ -150,10 +166,10 @@ def create_mcp_server(config: MCPServerConfig | None = None):
     def tool_boris_frame(
         input: str,
         session_id: str | None = None,
-        mode: str = "default",
+        mode: Literal["default", "production", "developer"] = "default",
         context: dict | None = None,
     ) -> CallToolResult:
-        """Context-only BOIS/SIMA/BORIS frame. BORIS does not generate a final answer or call an external LLM; ChatGPT must show runtime_generated_prompt and then answer itself."""
+        """Context-only BOIS/SIMA/BORIS frame. Use mode='developer' to expose and display full safe Core Surface projection diagnostics. BORIS does not generate a final answer or call an external LLM."""
         try:
             envelope = boris_frame(input=input, session_id=session_id, mode=mode, context=context)
         except ValidationError as exc:

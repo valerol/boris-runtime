@@ -12,8 +12,8 @@ class FakeContextProvider:
         self.error = error
         self.calls = []
 
-    def frame(self, user_input, session_id=None):
-        self.calls.append((user_input, session_id))
+    def frame(self, user_input, session_id=None, mode="default"):
+        self.calls.append((user_input, session_id, mode))
         if self.error:
             raise self.error
         return frame_packet(user_input, session_id)
@@ -51,7 +51,7 @@ def test_runtime_frame_delegates_to_context_provider(monkeypatch):
     assert body["input"] == "Explain BOIS Runtime"
     assert body["runtime_mode"] == "context_provider"
     assert body["llm_called"] is False
-    assert provider.calls == [("Explain BOIS Runtime", "frame-test")]
+    assert provider.calls == [("Explain BOIS Runtime", "frame-test", "default")]
 
 
 def test_runtime_frame_generates_session_id(monkeypatch):
@@ -63,10 +63,33 @@ def test_runtime_frame_generates_session_id(monkeypatch):
     assert response.status_code == 200
     assert response.json()["session_id"]
     assert provider.calls[0][1]
+    assert provider.calls[0][2] == "default"
 
 
 def test_runtime_frame_empty_input_returns_validation_error():
     response = client.post("/runtime/frame", json={"input": "   "})
+
+    assert response.status_code == 422
+
+
+def test_runtime_frame_passes_developer_mode(monkeypatch):
+    provider = FakeContextProvider()
+    monkeypatch.setattr(app_module, "context_provider", provider)
+
+    response = client.post(
+        "/runtime/frame",
+        json={"input": "Explain BOIS", "mode": "developer"},
+    )
+
+    assert response.status_code == 200
+    assert provider.calls[0][2] == "developer"
+
+
+def test_runtime_frame_rejects_unknown_mode():
+    response = client.post(
+        "/runtime/frame",
+        json={"input": "Explain BOIS", "mode": "debug"},
+    )
 
     assert response.status_code == 422
 
