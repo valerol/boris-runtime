@@ -159,6 +159,30 @@ class RuntimeCompatibilityResult:
     checks: tuple[SpecificationCheck, ...]
     attestation_sha256: str
     schema_validated: bool
+    package_identity: Mapping[str, str] = field(
+        default_factory=dict,
+        repr=False,
+    )
+    package_identity_sha256: str = ""
+    canonical_records: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict,
+        repr=False,
+    )
+
+    def __post_init__(self):
+        object.__setattr__(
+            self,
+            "package_identity",
+            MappingProxyType(dict(self.package_identity)),
+        )
+        object.__setattr__(
+            self,
+            "canonical_records",
+            MappingProxyType({
+                name: MappingProxyType(dict(record))
+                for name, record in self.canonical_records.items()
+            }),
+        )
 
     @property
     def eligible_for_semantic_execution(self) -> bool:
@@ -172,6 +196,20 @@ class RuntimeCompatibilityResult:
         )
 
     def require_semantic_evaluation(self, surface: CoreSurface) -> None:
+        if self.package_identity:
+            actual_package_identity = dict(surface.package_identity)
+            if dict(self.package_identity) != actual_package_identity:
+                raise RuntimeAttestationError(
+                    "Runtime compatibility result does not match the loaded "
+                    "release and normative package identity."
+                )
+            if (
+                canonical_sha256(dict(self.package_identity))
+                != self.package_identity_sha256
+            ):
+                raise RuntimeAttestationError(
+                    "Runtime compatibility package identity hash is invalid."
+                )
         expected_identity = (
             surface.package_id,
             surface.artifact_version,
@@ -237,7 +275,7 @@ class RuntimeCompatibilityResult:
             )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "declaration": self.declaration.to_dict(),
             "operator_acceptance": self.operator_acceptance.to_dict(),
             "attestation": self.attestation.to_dict(),
@@ -246,3 +284,12 @@ class RuntimeCompatibilityResult:
             "eligible_for_semantic_execution": self.eligible_for_semantic_execution,
             "checks": [check.to_dict() for check in self.checks],
         }
+        if self.package_identity:
+            result["package_identity"] = dict(self.package_identity)
+            result["package_identity_sha256"] = self.package_identity_sha256
+        if self.canonical_records:
+            result["canonical_records"] = {
+                name: dict(record)
+                for name, record in self.canonical_records.items()
+            }
+        return result

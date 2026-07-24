@@ -4,6 +4,14 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added fail-closed support for both legacy Core manifests and the release
+  envelope manifest dialect with separate release and normative identities.
+- Added release-envelope verification for `CHECKSUMS.json`,
+  `BUILD_DEPENDENCY_DAG.tsv`, validation-envelope hashes, release schema
+  constants, normative counts, and exact archive inventory.
+- Added release runtime-contract adaptation for canonical final substrate,
+  operator acceptance, specification receipt, and RuntimeAttestation records;
+  unsupported Predicate DSL capabilities still produce `HOLD`.
 - Consolidated the active Phase 4 execution path around
   `BOISRuntime -> ProtocolEngine -> api.app`; the earlier middleware and
   FastAPI modules are now compatibility facades instead of parallel engines.

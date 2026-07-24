@@ -48,7 +48,10 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
         raise PackageLayoutError("MANIFEST.json is missing from the package root.")
 
     manifest = parse_manifest(payloads[MANIFEST_PATH])
-    if manifest.root_directory != root_directory:
+    if (
+        manifest.root_directory is not None
+        and manifest.root_directory != root_directory
+    ):
         raise PackageLayoutError(
             f"Root directory mismatch: manifest={manifest.root_directory!r}, "
             f"source={root_directory!r}"
@@ -56,9 +59,24 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
 
     _validate_lifecycle(manifest.status, purpose)
     validate_integrity(manifest, payloads)
-    machine_canon = validate_identity(manifest, payloads)
+    machine_canon = validate_identity(
+        manifest,
+        payloads,
+        archive_sha256=archive_hash,
+    )
+    release_flavor = manifest.release_flavor or machine_canon.get(
+        "release_flavor"
+    )
+    if not isinstance(release_flavor, str) or not release_flavor.strip():
+        raise PackageLayoutError(
+            "The package does not expose a non-empty release flavor."
+        )
     norms_by_layer, norm_index = _load_norm_catalog(payloads)
-    _validate_catalog_counts(manifest.raw.get("catalog_counts"), norm_index, norms_by_layer)
+    declared_counts = manifest.raw.get(
+        "catalog_counts",
+        manifest.raw.get("normative_counts"),
+    )
+    _validate_catalog_counts(declared_counts, norm_index, norms_by_layer)
 
     return CoreSurface(
         source=str(path),
@@ -66,7 +84,7 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
         package_id=manifest.package_id,
         artifact_version=manifest.artifact_version,
         status=manifest.status,
-        release_flavor=manifest.release_flavor,
+        release_flavor=release_flavor.strip(),
         purpose=purpose,
         root_directory=root_directory,
         archive_sha256=archive_hash,
@@ -78,6 +96,12 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
         norms_by_layer=norms_by_layer,
         _norm_index=norm_index,
         _payloads=payloads,
+        manifest_dialect=manifest.manifest_dialect,
+        release_package_id=manifest.release_package_id,
+        release_version=manifest.release_version,
+        normative_package_id=manifest.normative_package_id,
+        normative_content_version=manifest.normative_content_version,
+        transport=manifest.transport,
     )
 
 
@@ -232,6 +256,21 @@ def _validate_catalog_counts(
         ),
         "active": sum(
             record.fields.get("card_status") == "ACTIVE"
+            for record in norm_index.values()
+        ),
+        "active_for_application": sum(
+            record.fields.get("available_for_application") == "TRUE"
+            for record in norm_index.values()
+        ),
+        "personal_active": sum(
+            record.layer == "PERSONAL"
+            and record.fields.get("card_status") == "ACTIVE"
+            for record in norm_index.values()
+        ),
+        "publication_candidate_inactive": sum(
+            record.layer == "PUBLICATION_CANDIDATE"
+            and record.fields.get("card_status") == "CANDIDATE"
+            and record.fields.get("available_for_application") == "FALSE"
             for record in norm_index.values()
         ),
         "personal_ids": sum(

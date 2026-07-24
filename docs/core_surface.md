@@ -17,6 +17,10 @@ surface = load_core_surface("/path/to/core-package.zip", purpose="evaluation")
 
 print(surface.package_id)
 print(surface.artifact_version)
+print(surface.release_package_id)
+print(surface.release_version)
+print(surface.normative_package_id)
+print(surface.normative_content_version)
 print(surface.source_kind)
 print(surface.archive_sha256)
 print(surface.content_set_sha256)
@@ -30,6 +34,13 @@ enum.
 
 Identity fields are intentionally separate:
 
+- `manifest_dialect` identifies the recognized manifest contract;
+- `release_package_id` and `release_version` identify the immutable transport
+  release;
+- `normative_package_id` and `normative_content_version` identify the
+  normative content carried by that release;
+- compatibility aliases `package_id` and `artifact_version` refer to the
+  normative identity and never replace the release identity;
 - `source_kind` is `archive` or `directory`;
 - `archive_sha256` is present only when the original ZIP was loaded;
 - `content_set_sha256` is the deterministic hash of relative paths and payload
@@ -38,6 +49,23 @@ Identity fields are intentionally separate:
 
 A directory hash is never presented as an archive hash. Canonical Runtime
 attestation therefore requires the original ZIP.
+
+## Manifest dialects
+
+The loader recognizes two explicit dialects and rejects partial, mixed, or
+unknown identities:
+
+- legacy manifests with `package_id`, `artifact_version`, `release_flavor`,
+  and `root_directory`;
+- release-envelope manifests with `release_package_id`, `release_version`,
+  `normative_package_id`, `normative_content_version`, `transport`, and
+  `validation_envelope`.
+
+Release-envelope manifests do not synthesize `root_directory` or collapse the
+two version axes. The observed archive/directory root remains a transport
+property. `INTERNAL_STATIC_PASS` proves the package's declared static boundary;
+it is not `ACTIVE`, Runtime compatibility, OperatorAcceptance, or permission to
+execute.
 
 ## Command-line validation
 
@@ -59,12 +87,15 @@ package status and does not activate a package.
   oversized payloads;
 - exact manifest inventory;
 - component sizes and SHA-256 values;
-- complete `SHA256SUMS.txt` reproduction;
-- dependency coverage and topological load order;
+- complete legacy `SHA256SUMS.txt` or release `CHECKSUMS.json` reproduction;
+- legacy `DEPENDENCY_DAG.tsv` or release `BUILD_DEPENDENCY_DAG.tsv` coverage
+  and topological load order;
+- release validation-envelope hashes and
+  `RELEASE_ENVELOPE_SCHEMA.json` identity constants;
 - package identity and version agreement across manifest, machine canon, and
   final verification;
 - unique norm IDs;
-- declared catalog counts;
+- declared legacy catalog or release normative counts;
 - explicit grouping by native package layer.
 
 ## Deliberately deferred

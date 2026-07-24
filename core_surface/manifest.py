@@ -9,7 +9,9 @@ from core_surface.models import ComponentRecord, ManifestRecord
 
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-REQUIRED_FIELDS = {
+LEGACY_MANIFEST_DIALECT = "legacy-v1"
+RELEASE_MANIFEST_DIALECT = "release-envelope-v1"
+LEGACY_REQUIRED_FIELDS = {
     "package_id",
     "artifact_version",
     "status",
@@ -17,6 +19,19 @@ REQUIRED_FIELDS = {
     "root_directory",
     "components",
     "loading_order",
+}
+RELEASE_REQUIRED_FIELDS = {
+    "release_package_id",
+    "release_version",
+    "normative_package_id",
+    "normative_content_version",
+    "status",
+    "transport",
+    "executable_code",
+    "component_count",
+    "components",
+    "loading_order",
+    "validation_envelope",
 }
 
 
@@ -29,22 +44,93 @@ def parse_manifest(payload: bytes) -> ManifestRecord:
     if not isinstance(raw, dict):
         raise ManifestError("MANIFEST.json must contain an object.")
 
-    missing = REQUIRED_FIELDS - set(raw)
+    has_legacy_identity = {"package_id", "artifact_version"} <= set(raw)
+    has_release_identity = {
+        "release_package_id",
+        "release_version",
+        "normative_package_id",
+        "normative_content_version",
+    } <= set(raw)
+    if has_legacy_identity and has_release_identity:
+        raise ManifestError(
+            "MANIFEST.json mixes legacy and release-envelope identity fields."
+        )
+    if has_legacy_identity:
+        dialect = LEGACY_MANIFEST_DIALECT
+        required_fields = LEGACY_REQUIRED_FIELDS
+    elif has_release_identity:
+        dialect = RELEASE_MANIFEST_DIALECT
+        required_fields = RELEASE_REQUIRED_FIELDS
+    else:
+        raise ManifestError(
+            "Unknown manifest dialect: neither complete legacy nor "
+            "release-envelope identity fields are present."
+        )
+
+    missing = required_fields - set(raw)
     if missing:
-        raise ManifestError(f"Missing manifest fields: {sorted(missing)}")
+        raise ManifestError(
+            f"Missing {dialect} manifest fields: {sorted(missing)}"
+        )
 
     components = _parse_components(raw["components"])
     loading_order = _parse_loading_order(raw["loading_order"])
-    root_directory = _required_text(raw, "root_directory")
-    if "/" in root_directory or "\\" in root_directory:
-        raise ManifestError("root_directory must be one directory name.")
+    status = _required_text(raw, "status")
+
+    if dialect == LEGACY_MANIFEST_DIALECT:
+        package_id = _required_text(raw, "package_id")
+        artifact_version = _required_text(raw, "artifact_version")
+        release_package_id = package_id
+        release_version = artifact_version
+        normative_package_id = package_id
+        normative_content_version = artifact_version
+        release_flavor = _required_text(raw, "release_flavor")
+        root_directory = _required_text(raw, "root_directory")
+        transport = None
+        validation_envelope = ()
+        if "/" in root_directory or "\\" in root_directory:
+            raise ManifestError("root_directory must be one directory name.")
+    else:
+        release_package_id = _required_text(raw, "release_package_id")
+        release_version = _required_text(raw, "release_version")
+        normative_package_id = _required_text(raw, "normative_package_id")
+        normative_content_version = _required_text(
+            raw,
+            "normative_content_version",
+        )
+        package_id = normative_package_id
+        artifact_version = normative_content_version
+        release_flavor = None
+        root_directory = None
+        transport = _required_text(raw, "transport")
+        validation_envelope = _parse_validation_envelope(
+            raw["validation_envelope"]
+        )
+        if raw["executable_code"] is not False:
+            raise ManifestError(
+                "Release-envelope packages must declare executable_code=false."
+            )
+        component_count = raw["component_count"]
+        if not isinstance(component_count, int) or component_count < 1:
+            raise ManifestError("component_count must be a positive integer.")
+        if component_count != len(components):
+            raise ManifestError(
+                "component_count does not match the component inventory."
+            )
 
     return ManifestRecord(
-        package_id=_required_text(raw, "package_id"),
-        artifact_version=_required_text(raw, "artifact_version"),
-        status=_required_text(raw, "status"),
-        release_flavor=_required_text(raw, "release_flavor"),
+        manifest_dialect=dialect,
+        package_id=package_id,
+        artifact_version=artifact_version,
+        status=status,
+        release_flavor=release_flavor,
         root_directory=root_directory,
+        release_package_id=release_package_id,
+        release_version=release_version,
+        normative_package_id=normative_package_id,
+        normative_content_version=normative_content_version,
+        transport=transport,
+        validation_envelope=validation_envelope,
         components=components,
         loading_order=loading_order,
         raw=raw,
@@ -84,11 +170,20 @@ def _parse_components(value) -> tuple[ComponentRecord, ...]:
         if not isinstance(size_bytes, int) or size_bytes < 0:
             raise ManifestError(f"Invalid size_bytes for component: {path}")
 
+        required = item.get("required", True)
+        if not isinstance(required, bool):
+            raise ManifestError(f"Invalid required flag for component: {path}")
+        if required is not True:
+            raise ManifestError(
+                f"Optional manifest components are not supported: {path}"
+            )
+
         result.append(ComponentRecord(
             path=path,
             role=str(item.get("role", "")).strip(),
             sha256=sha256,
             size_bytes=size_bytes,
+            required=required,
         ))
 
     return tuple(result)
@@ -100,6 +195,15 @@ def _parse_loading_order(value) -> tuple[str, ...]:
     result = tuple(validate_relative_path(path) for path in value)
     if len(result) != len(set(result)):
         raise ManifestError("loading_order contains duplicate paths.")
+    return result
+
+
+def _parse_validation_envelope(value) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise ManifestError("validation_envelope must be a non-empty array.")
+    result = tuple(validate_relative_path(path) for path in value)
+    if len(result) != len(set(result)):
+        raise ManifestError("validation_envelope contains duplicate paths.")
     return result
 
 

@@ -27,15 +27,23 @@ class ComponentRecord:
     role: str
     sha256: str
     size_bytes: int
+    required: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class ManifestRecord:
+    manifest_dialect: str
     package_id: str
     artifact_version: str
     status: str
-    release_flavor: str
-    root_directory: str
+    release_flavor: str | None
+    root_directory: str | None
+    release_package_id: str
+    release_version: str
+    normative_package_id: str
+    normative_content_version: str
+    transport: str | None
+    validation_envelope: tuple[str, ...]
     components: tuple[ComponentRecord, ...]
     loading_order: tuple[str, ...]
     raw: Mapping[str, Any] = field(repr=False)
@@ -74,6 +82,12 @@ class CoreSurface:
     norms_by_layer: Mapping[str, tuple[NormRecord, ...]] = field(repr=False)
     _norm_index: Mapping[str, NormRecord] = field(repr=False)
     _payloads: Mapping[str, bytes] = field(repr=False)
+    manifest_dialect: str = "legacy-v1"
+    release_package_id: str | None = None
+    release_version: str | None = None
+    normative_package_id: str | None = None
+    normative_content_version: str | None = None
+    transport: str | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "machine_canon", freeze_value(dict(self.machine_canon)))
@@ -122,17 +136,37 @@ class CoreSurface:
             for component in self.components
         })
 
+    @property
+    def package_identity(self) -> Mapping[str, str]:
+        return MappingProxyType({
+            "manifest_dialect": self.manifest_dialect,
+            "release_package_id": self.release_package_id or self.package_id,
+            "release_version": self.release_version or self.artifact_version,
+            "normative_package_id": self.normative_package_id or self.package_id,
+            "normative_content_version": (
+                self.normative_content_version or self.artifact_version
+            ),
+        })
+
     def summary(self) -> dict[str, Any]:
         norm_type_counts: dict[str, int] = {}
         for record in self._norm_index.values():
             norm_type_counts[record.norm_type] = norm_type_counts.get(record.norm_type, 0) + 1
 
         return {
+            "manifest_dialect": self.manifest_dialect,
             "package_id": self.package_id,
             "artifact_version": self.artifact_version,
+            "release_package_id": self.release_package_id or self.package_id,
+            "release_version": self.release_version or self.artifact_version,
+            "normative_package_id": self.normative_package_id or self.package_id,
+            "normative_content_version": (
+                self.normative_content_version or self.artifact_version
+            ),
             "status": self.status,
             "purpose": self.purpose,
             "release_flavor": self.release_flavor,
+            "transport": self.transport,
             "source_kind": self.source_kind,
             "archive_sha256": self.archive_sha256,
             "content_set_sha256": self.content_set_sha256,

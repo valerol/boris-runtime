@@ -85,6 +85,48 @@ def test_zip_path_traversal_is_rejected(tmp_path):
         load_core_surface(archive_path)
 
 
+def test_release_manifest_preserves_release_and_normative_identity(tmp_path):
+    package_root = build_release_package(tmp_path)
+    archive_path = tmp_path / "release-core.zip"
+    write_zip(package_root, archive_path)
+
+    surface = load_core_surface(archive_path)
+
+    assert surface.manifest_dialect == "release-envelope-v1"
+    assert surface.package_id == "BOIS_TEST_NORMATIVE_V2"
+    assert surface.artifact_version == "2.0"
+    assert surface.release_package_id == "BOIS_TEST_RELEASE_V3"
+    assert surface.release_version == "3.0"
+    assert surface.normative_package_id == "BOIS_TEST_NORMATIVE_V2"
+    assert surface.normative_content_version == "2.0"
+    assert surface.status == "INTERNAL_STATIC_PASS"
+    assert surface.transport == "SINGLE_PASSIVE_DATA_ZIP"
+    assert surface.release_flavor == "PASSIVE_DATA_ONLY"
+    assert dict(surface.package_identity) == {
+        "manifest_dialect": "release-envelope-v1",
+        "release_package_id": "BOIS_TEST_RELEASE_V3",
+        "release_version": "3.0",
+        "normative_package_id": "BOIS_TEST_NORMATIVE_V2",
+        "normative_content_version": "2.0",
+    }
+
+
+def test_release_static_pass_does_not_authorize_active_use(tmp_path):
+    package_root = build_release_package(tmp_path)
+
+    with pytest.raises(LifecycleError, match="cannot be loaded for active use"):
+        load_core_surface(package_root, purpose="active")
+
+
+def test_release_validation_envelope_tampering_is_rejected(tmp_path):
+    package_root = build_release_package(tmp_path)
+    receipt = package_root / "assurance" / "VALIDATION_RECEIPT.json"
+    receipt.write_text('{"checks":{}}', encoding="utf-8")
+
+    with pytest.raises(IntegrityError, match="CHECKSUMS.json"):
+        load_core_surface(package_root)
+
+
 def build_package(tmp_path: Path, *, duplicate_norm=False) -> Path:
     root = tmp_path / "bois-test-core"
     files = {
@@ -158,6 +200,153 @@ def build_package(tmp_path: Path, *, duplicate_norm=False) -> Path:
     return root
 
 
+def build_release_package(tmp_path: Path) -> Path:
+    root = tmp_path / "bois-release-core"
+    release_package_id = "BOIS_TEST_RELEASE_V3"
+    release_version = "3.0"
+    normative_package_id = "BOIS_TEST_NORMATIVE_V2"
+    normative_version = "2.0"
+    status = "INTERNAL_STATIC_PASS"
+
+    component_files = {
+        "machine/CORE_CANON.json": json_bytes({
+            "package_id": normative_package_id,
+            "artifact_version": normative_version,
+            "release_flavor": "PASSIVE_DATA_ONLY",
+            "executable": False,
+        }),
+        "schema/RELEASE_ENVELOPE_SCHEMA.json": json_bytes({
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "release_package_id",
+                "release_version",
+                "normative_package_id",
+                "normative_content_version",
+                "status",
+            ],
+            "properties": {
+                "release_package_id": {"const": release_package_id},
+                "release_version": {"const": release_version},
+                "normative_package_id": {"const": normative_package_id},
+                "normative_content_version": {"const": normative_version},
+                "status": {"type": "string"},
+            },
+        }),
+        "assurance/NORM_CATALOG.tsv": (
+            "norm_id\tlayer\tnorm_type\tcard_status\t"
+            "available_for_application\ttitle\n"
+            "N-BASE-001\tBASE\tINVARIANT\tACTIVE\tTRUE\tBase\n"
+        ).encode("utf-8"),
+    }
+    envelope_files = {
+        "assurance/SELF_CONSISTENCY_REPORT.json": json_bytes({
+            "release_package_id": release_package_id,
+            "release_version": release_version,
+            "result": "PASS",
+        }),
+        "assurance/VALIDATION_RECEIPT.json": json_bytes({
+            "checks": {
+                "TEST-RELEASE-INTEGRITY": {
+                    "result": "PASS",
+                    "trace_sha256": "a" * 64,
+                },
+            },
+        }),
+    }
+    dependency_path = "assurance/BUILD_DEPENDENCY_DAG.tsv"
+    loading_order = [
+        "machine/CORE_CANON.json",
+        "schema/RELEASE_ENVELOPE_SCHEMA.json",
+        "assurance/NORM_CATALOG.tsv",
+        dependency_path,
+        "assurance/SELF_CONSISTENCY_REPORT.json",
+        "assurance/VALIDATION_RECEIPT.json",
+    ]
+    component_files[dependency_path] = release_dependency_bytes(loading_order)
+
+    components = [
+        {
+            "path": path,
+            "required": True,
+            "role": "TEST_COMPONENT",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        }
+        for path, payload in component_files.items()
+    ]
+    validation_envelope = [
+        "assurance/VALIDATION_RECEIPT.json",
+        "assurance/SELF_CONSISTENCY_REPORT.json",
+        "CHECKSUMS.json",
+        "FINAL_VERIFICATION.json",
+    ]
+    manifest = {
+        "release_package_id": release_package_id,
+        "release_version": release_version,
+        "normative_package_id": normative_package_id,
+        "normative_content_version": normative_version,
+        "status": status,
+        "transport": "SINGLE_PASSIVE_DATA_ZIP",
+        "executable_code": False,
+        "component_count": len(components),
+        "components": components,
+        "loading_order": loading_order,
+        "validation_envelope": validation_envelope,
+        "normative_counts": {
+            "total": 1,
+            "base": 1,
+            "active_for_application": 1,
+        },
+    }
+
+    files = {**component_files, **envelope_files}
+    files["MANIFEST.json"] = json_bytes(manifest)
+    checksum_entries = {
+        path: {
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        }
+        for path, payload in files.items()
+    }
+    checksums = {
+        "algorithm": "SHA-256",
+        "count": len(checksum_entries),
+        "entries": checksum_entries,
+        "release_package_id": release_package_id,
+        "release_version": release_version,
+        "scope": (
+            "Every package file except CHECKSUMS.json and "
+            "FINAL_VERIFICATION.json."
+        ),
+    }
+    files["CHECKSUMS.json"] = json_bytes(checksums)
+    files["FINAL_VERIFICATION.json"] = json_bytes({
+        "release_package_id": release_package_id,
+        "release_version": release_version,
+        "normative_package_id": normative_package_id,
+        "normative_content_version": normative_version,
+        "status": status,
+        "archive_sha256": "EXTERNAL_AFTER_PACKAGING",
+        "checksums_sha256": hashlib.sha256(
+            files["CHECKSUMS.json"]
+        ).hexdigest(),
+        "manifest_sha256": hashlib.sha256(files["MANIFEST.json"]).hexdigest(),
+        "self_consistency_report_sha256": hashlib.sha256(
+            files["assurance/SELF_CONSISTENCY_REPORT.json"]
+        ).hexdigest(),
+        "validation_receipt_sha256": hashlib.sha256(
+            files["assurance/VALIDATION_RECEIPT.json"]
+        ).hexdigest(),
+    })
+
+    for relative, payload in files.items():
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+    return root
+
+
 def dependency_bytes(paths):
     rows = [
         "node_id\tpath\trole\tdepends_on\trequired\tfailure_result\tload_order"
@@ -168,6 +357,17 @@ def dependency_bytes(paths):
             f"DEP-{index:03d}\t{path}\tTEST\t"
             f"{json.dumps(dependencies, separators=(',', ':'))}\t"
             f"TRUE\tSTOP-PACKAGE-INCOMPLETE\t{index}"
+        )
+    return ("\n".join(rows) + "\n").encode("utf-8")
+
+
+def release_dependency_bytes(paths):
+    rows = ["node_id\tpath\tdepends_on\tdependency_kind\treason"]
+    for index, path in enumerate(paths, start=1):
+        dependency = "" if index == 1 else paths[index - 2]
+        rows.append(
+            f"DAG-{index:03d}\t{path}\t{dependency}\t"
+            "LOAD_BEFORE\tDeterministic test load order"
         )
     return ("\n".join(rows) + "\n").encode("utf-8")
 

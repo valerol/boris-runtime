@@ -133,6 +133,9 @@ testing. It exposes `/mcp` as the public adapter boundary while keeping
 Phase 4E introduces a stable, version-independent trust boundary for loading,
 checking, and exposing a canonical core package. Runtime does not select
 applicable rules or calculate philosophical meaning inside this boundary.
+It supports both the legacy manifest contract and the release-envelope contract
+with distinct release and normative identity axes. Package static pass remains
+separate from Runtime compatibility, operator acceptance, and activation.
 
 Future Phase 4 hardening remains pending:
 
