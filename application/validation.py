@@ -1,8 +1,7 @@
 import re
 from uuid import UUID
 
-from runtime.config import LLMConfigurationError
-from runtime.context_packet import (
+from application.context_packet import (
     BORIS_CONTEXT_PUBLIC_FIELDS,
     BORIS_SESSION_PUBLIC_FIELDS,
     BOIS_FRAME_PUBLIC_FIELDS,
@@ -15,10 +14,11 @@ from runtime.context_packet import (
     _known_secret_values,
     _normalize_public_key,
 )
-from runtime.semantic_validation import (
+from application.semantic_validation import (
     SemanticAnswerValidator,
     SemanticValidationOutputError,
 )
+from llm.errors import LLMConfigurationError
 
 
 VALIDATION_VERSION = "boris-validation/1.0"
@@ -41,14 +41,14 @@ REQUIRED_PACKET_FIELDS = {
     "bois_frame",
     "sima",
     "boris_context",
-    "retrieved_core",
-    "retrieval_metadata",
+    "projected_core",
+    "projection_metadata",
     "answer_instructions",
     "runtime_generated_prompt",
 }
 SIMA_FIELDS = {"risk", "uncertainty", "missing_fields", "ambiguity_score"}
-RETRIEVED_CHUNK_FIELDS = {"chunk_id", "section", "title", "text", "relevance"}
-RETRIEVAL_METADATA_FIELDS = {
+PROJECTED_CHUNK_FIELDS = {"chunk_id", "section", "title", "text", "relevance"}
+PROJECTION_METADATA_FIELDS = {
     "returned_chunks",
     "total_characters",
     "truncated",
@@ -203,7 +203,12 @@ class PacketPreflightValidator:
         issues.extend(self._validate_bois_frame(packet.get("bois_frame"), packet.get("input")))
         issues.extend(self._validate_sima(packet.get("sima")))
         issues.extend(self._validate_boris_context(packet.get("boris_context"), packet.get("session_id")))
-        issues.extend(self._validate_retrieved_core(packet.get("retrieved_core"), packet.get("retrieval_metadata")))
+        issues.extend(
+            self._validate_projected_core(
+                packet.get("projected_core"),
+                packet.get("projection_metadata"),
+            )
+        )
         issues.extend(self._validate_answer_instructions(packet.get("answer_instructions")))
         issues.extend(self._validate_runtime_generated_prompt(packet.get("runtime_generated_prompt")))
         issues.extend(self._leakage_issues(packet))
@@ -300,19 +305,19 @@ class PacketPreflightValidator:
             issues.append(_issue("CLARIFICATION_CYCLES_INVALID", "high", "clarification_cycles cannot exceed max_clarification_cycles.", "boris_context.session.clarification_cycles", "preflight", False))
         return issues
 
-    def _validate_retrieved_core(self, retrieved_core, metadata):
+    def _validate_projected_core(self, projected_core, metadata):
         issues = []
-        if not isinstance(retrieved_core, list):
-            return [_issue("RETRIEVED_CORE_INVALID", "critical", "retrieved_core must be a list.", "retrieved_core", "preflight", False)]
+        if not isinstance(projected_core, list):
+            return [_issue("PROJECTED_CORE_INVALID", "critical", "projected_core must be a list.", "projected_core", "preflight", False)]
         if not isinstance(metadata, dict):
-            return [_issue("RETRIEVAL_METADATA_INVALID", "critical", "retrieval_metadata must be a JSON object.", "retrieval_metadata", "preflight", False)]
+            return [_issue("PROJECTION_METADATA_INVALID", "critical", "projection_metadata must be a JSON object.", "projection_metadata", "preflight", False)]
 
-        unexpected = sorted(set(metadata) - RETRIEVAL_METADATA_FIELDS)
-        missing = sorted(RETRIEVAL_METADATA_FIELDS - set(metadata))
+        unexpected = sorted(set(metadata) - PROJECTION_METADATA_FIELDS)
+        missing = sorted(PROJECTION_METADATA_FIELDS - set(metadata))
         for field in missing:
-            issues.append(_issue("RETRIEVAL_METADATA_INVALID", "critical", f"retrieval_metadata is missing '{field}'.", f"retrieval_metadata.{field}", "preflight", False))
+            issues.append(_issue("PROJECTION_METADATA_INVALID", "critical", f"projection_metadata is missing '{field}'.", f"projection_metadata.{field}", "preflight", False))
         for field in unexpected:
-            issues.append(_issue("RETRIEVAL_METADATA_INVALID", "critical", f"retrieval_metadata contains unexpected field '{field}'.", f"retrieval_metadata.{field}", "preflight", False))
+            issues.append(_issue("PROJECTION_METADATA_INVALID", "critical", f"projection_metadata contains unexpected field '{field}'.", f"projection_metadata.{field}", "preflight", False))
         if missing or unexpected:
             return issues
 
@@ -323,58 +328,58 @@ class PacketPreflightValidator:
         }
         for field, expected in expected_limits.items():
             if not _is_strict_int(metadata.get(field)):
-                issues.append(_issue("RETRIEVAL_METADATA_TYPE_INVALID", "critical", f"retrieval_metadata.{field} must be an integer.", f"retrieval_metadata.{field}", "preflight", False))
+                issues.append(_issue("PROJECTION_METADATA_TYPE_INVALID", "critical", f"projection_metadata.{field} must be an integer.", f"projection_metadata.{field}", "preflight", False))
             elif metadata.get(field) != expected:
-                issues.append(_issue("RETRIEVAL_LIMIT_INVALID", "critical", f"retrieval_metadata.{field} must be {expected}.", f"retrieval_metadata.{field}", "preflight", False))
+                issues.append(_issue("PROJECTION_LIMIT_INVALID", "critical", f"projection_metadata.{field} must be {expected}.", f"projection_metadata.{field}", "preflight", False))
         for field in ("returned_chunks", "total_characters"):
             value = metadata.get(field)
             if not _is_strict_int(value):
-                issues.append(_issue("RETRIEVAL_METADATA_TYPE_INVALID", "critical", f"retrieval_metadata.{field} must be an integer.", f"retrieval_metadata.{field}", "preflight", False))
+                issues.append(_issue("PROJECTION_METADATA_TYPE_INVALID", "critical", f"projection_metadata.{field} must be an integer.", f"projection_metadata.{field}", "preflight", False))
             elif value < 0:
-                issues.append(_issue("RETRIEVAL_METADATA_TYPE_INVALID", "critical", f"retrieval_metadata.{field} must be non-negative.", f"retrieval_metadata.{field}", "preflight", False))
+                issues.append(_issue("PROJECTION_METADATA_TYPE_INVALID", "critical", f"projection_metadata.{field} must be non-negative.", f"projection_metadata.{field}", "preflight", False))
         if not isinstance(metadata.get("truncated"), bool):
-            issues.append(_issue("RETRIEVAL_METADATA_INVALID", "high", "retrieval_metadata.truncated must be a boolean.", "retrieval_metadata.truncated", "preflight", False))
-        if len(retrieved_core) > MAX_CHUNKS:
-            issues.append(_issue("RETRIEVAL_LIMIT_EXCEEDED", "critical", "retrieved_core contains more than 6 chunks.", "retrieved_core", "preflight", False))
+            issues.append(_issue("PROJECTION_METADATA_INVALID", "high", "projection_metadata.truncated must be a boolean.", "projection_metadata.truncated", "preflight", False))
+        if len(projected_core) > MAX_CHUNKS:
+            issues.append(_issue("PROJECTION_LIMIT_EXCEEDED", "critical", "projected_core contains more than 6 chunks.", "projected_core", "preflight", False))
 
         total = 0
         chunk_ids = set()
-        for index, chunk in enumerate(retrieved_core):
-            path = f"retrieved_core.{index}"
+        for index, chunk in enumerate(projected_core):
+            path = f"projected_core.{index}"
             if not isinstance(chunk, dict):
-                issues.append(_issue("RETRIEVED_CHUNK_INVALID", "critical", "Each retrieved_core item must be a JSON object.", path, "preflight", False))
+                issues.append(_issue("PROJECTED_CHUNK_INVALID", "critical", "Each projected_core item must be a JSON object.", path, "preflight", False))
                 continue
-            for field in sorted(set(chunk) - RETRIEVED_CHUNK_FIELDS):
-                issues.append(_issue("RETRIEVED_CHUNK_INVALID", "critical", f"Retrieved chunk contains unexpected field '{field}'.", f"{path}.{field}", "preflight", False))
+            for field in sorted(set(chunk) - PROJECTED_CHUNK_FIELDS):
+                issues.append(_issue("PROJECTED_CHUNK_INVALID", "critical", f"Projected chunk contains unexpected field '{field}'.", f"{path}.{field}", "preflight", False))
             chunk_id = chunk.get("chunk_id")
             if not _non_empty_string(chunk_id):
-                issues.append(_issue("RETRIEVED_CHUNK_ID_INVALID", "critical", "Retrieved chunk IDs must be non-empty strings.", f"{path}.chunk_id", "preflight", False))
+                issues.append(_issue("PROJECTED_CHUNK_ID_INVALID", "critical", "Projected chunk IDs must be non-empty strings.", f"{path}.chunk_id", "preflight", False))
             elif chunk_id in chunk_ids:
-                issues.append(_issue("DUPLICATE_CHUNK_ID", "critical", "Retrieved chunk IDs must be unique.", f"{path}.chunk_id", "preflight", False))
+                issues.append(_issue("DUPLICATE_CHUNK_ID", "critical", "Projected chunk IDs must be unique.", f"{path}.chunk_id", "preflight", False))
             else:
                 chunk_ids.add(chunk_id)
             text = chunk.get("text")
             for field in ("section", "title"):
                 if not isinstance(chunk.get(field), str):
-                    issues.append(_issue("RETRIEVED_CHUNK_TYPE_INVALID", "critical", f"Retrieved chunk {field} must be a string.", f"{path}.{field}", "preflight", False))
+                    issues.append(_issue("PROJECTED_CHUNK_TYPE_INVALID", "critical", f"Projected chunk {field} must be a string.", f"{path}.{field}", "preflight", False))
             if not isinstance(text, str):
-                issues.append(_issue("RETRIEVED_CHUNK_TYPE_INVALID", "critical", "Retrieved chunk text must be a string.", f"{path}.text", "preflight", False))
+                issues.append(_issue("PROJECTED_CHUNK_TYPE_INVALID", "critical", "Projected chunk text must be a string.", f"{path}.text", "preflight", False))
             else:
                 total += len(text)
                 if len(text) > MAX_CHUNK_CHARACTERS:
-                    issues.append(_issue("RETRIEVAL_LIMIT_EXCEEDED", "critical", "Retrieved chunk text exceeds 3000 characters.", f"{path}.text", "preflight", False))
+                    issues.append(_issue("PROJECTION_LIMIT_EXCEEDED", "critical", "Projected chunk text exceeds 3000 characters.", f"{path}.text", "preflight", False))
             if not _is_strict_number(chunk.get("relevance")):
-                issues.append(_issue("RETRIEVED_CHUNK_TYPE_INVALID", "critical", "Retrieved chunk relevance must be a number.", f"{path}.relevance", "preflight", False))
+                issues.append(_issue("PROJECTED_CHUNK_TYPE_INVALID", "critical", "Projected chunk relevance must be a number.", f"{path}.relevance", "preflight", False))
         if total > MAX_TOTAL_CHARACTERS:
-            issues.append(_issue("RETRIEVAL_LIMIT_EXCEEDED", "critical", "Retrieved chunk text exceeds the 12000 character total limit.", "retrieved_core", "preflight", False))
-        if metadata.get("returned_chunks") != len(retrieved_core):
-            issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.returned_chunks does not match retrieved_core length.", "retrieval_metadata.returned_chunks", "preflight", False))
+            issues.append(_issue("PROJECTION_LIMIT_EXCEEDED", "critical", "Projected chunk text exceeds the 12000 character total limit.", "projected_core", "preflight", False))
+        if metadata.get("returned_chunks") != len(projected_core):
+            issues.append(_issue("PROJECTION_METADATA_MISMATCH", "critical", "projection_metadata.returned_chunks does not match projected_core length.", "projection_metadata.returned_chunks", "preflight", False))
         if metadata.get("total_characters") != total:
-            issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.total_characters does not match retrieved chunk text length.", "retrieval_metadata.total_characters", "preflight", False))
+            issues.append(_issue("PROJECTION_METADATA_MISMATCH", "critical", "projection_metadata.total_characters does not match projected chunk text length.", "projection_metadata.total_characters", "preflight", False))
         if _is_strict_int(metadata.get("returned_chunks")) and _is_strict_int(metadata.get("max_chunks")) and metadata["returned_chunks"] > metadata["max_chunks"]:
-            issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.returned_chunks cannot exceed max_chunks.", "retrieval_metadata.returned_chunks", "preflight", False))
+            issues.append(_issue("PROJECTION_METADATA_MISMATCH", "critical", "projection_metadata.returned_chunks cannot exceed max_chunks.", "projection_metadata.returned_chunks", "preflight", False))
         if _is_strict_int(metadata.get("total_characters")) and _is_strict_int(metadata.get("max_total_characters")) and metadata["total_characters"] > metadata["max_total_characters"]:
-            issues.append(_issue("RETRIEVAL_METADATA_MISMATCH", "critical", "retrieval_metadata.total_characters cannot exceed max_total_characters.", "retrieval_metadata.total_characters", "preflight", False))
+            issues.append(_issue("PROJECTION_METADATA_MISMATCH", "critical", "projection_metadata.total_characters cannot exceed max_total_characters.", "projection_metadata.total_characters", "preflight", False))
         return issues
 
     def _validate_answer_instructions(self, instructions):
@@ -534,10 +539,10 @@ def _add_alignment_checks(checks, issues, packet, answer):
     else:
         checks.append(_check("BORIS_ALIGNMENT_REQUIRES_SEMANTIC", "PASS", "medium", "No BORIS context or definition was supplied for semantic alignment.", "boris_context", False))
 
-    if packet.get("retrieved_core"):
-        _add_check(checks, issues, "CORE_ALIGNMENT_REQUIRES_SEMANTIC", "INDETERMINATE", "medium", "Semantic verification is required to confirm retrieved core usage.", "retrieved_core", True)
+    if packet.get("projected_core"):
+        _add_check(checks, issues, "CORE_ALIGNMENT_REQUIRES_SEMANTIC", "INDETERMINATE", "medium", "Semantic verification is required to confirm projected core usage.", "projected_core", True)
     else:
-        checks.append(_check("CORE_ALIGNMENT_REQUIRES_SEMANTIC", "PASS", "medium", "No retrieved core chunks were supplied for semantic alignment.", "retrieved_core", False))
+        checks.append(_check("CORE_ALIGNMENT_REQUIRES_SEMANTIC", "PASS", "medium", "No projected core chunks were supplied for semantic alignment.", "projected_core", False))
 
 
 def _deterministic_verdict(checks, issues, sima):

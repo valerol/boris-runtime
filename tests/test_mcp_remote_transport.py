@@ -7,7 +7,6 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from mcp_server.config import MCPServerConfig
-from mcp_server.runtime_client import RuntimeAPIError
 from mcp_server.server import TOOL_ANNOTATIONS, create_mcp_server, create_remote_app, main
 
 
@@ -95,7 +94,7 @@ async def test_streamable_http_client_receives_native_structured_content(monkeyp
     assert tool_names == ["boris.frame"]
     assert frame_result.isError is False
     assert frame_result.structuredContent is not None
-    assert frame_result.structuredContent["packet_version"] == "boris-context/1.0"
+    assert frame_result.structuredContent["packet_version"] == "boris-context/2.0"
     assert frame_result.structuredContent["runtime_mode"] == "context_provider"
     assert frame_result.structuredContent["llm_called"] is False
     assert frame_result.structuredContent["runtime_generated_prompt"]
@@ -116,37 +115,16 @@ class FakeRuntimeAPIClient:
     def __exit__(self, exc_type, exc, traceback):
         return None
 
-    def ask(self, input, session_id=None, mode="default", context=None):
-        if input == "trigger error":
-            raise RuntimeAPIError(
-                "HTTP 500",
-                status_code=500,
-                payload={
-                    "error": "runtime_error",
-                    "detail": "failed",
-                    "session_id": session_id,
-                },
-            )
-        return {
-            "session_id": session_id or "generated",
-            "type": "ANSWER",
-            "content": "ok",
-            "metadata": {},
-        }
-
     def frame(self, input, session_id=None, mode="default", context=None):
         packet = frame_packet()
         packet["session_id"] = session_id or packet["session_id"]
         packet["input"] = input
         return packet
 
-    def validate(self, answer, context_packet, validation_mode="deterministic"):
-        return validation_report(context_packet.get("frame_id"))
-
 
 def frame_packet():
     return {
-        "packet_version": "boris-context/1.0",
+        "packet_version": "boris-context/2.0",
         "frame_id": "00000000-0000-4000-8000-000000000000",
         "session_id": "mcp-native-frame",
         "input": "Explain BOIS Runtime",
@@ -160,8 +138,8 @@ def frame_packet():
             "ambiguity_score": 0.1,
         },
         "boris_context": {},
-        "retrieved_core": [],
-        "retrieval_metadata": {
+        "projected_core": [],
+        "projection_metadata": {
             "returned_chunks": 0,
             "total_characters": 0,
             "truncated": False,
@@ -171,30 +149,4 @@ def frame_packet():
         },
         "answer_instructions": [],
         "runtime_generated_prompt": "## User input\nExplain BOIS Runtime",
-    }
-
-
-def validation_report(frame_id):
-    return {
-        "validation_version": "boris-validation/1.0",
-        "frame_id": frame_id,
-        "validation_mode": "deterministic",
-        "verdict": "PASS",
-        "llm_called": False,
-        "preflight": {"status": "completed", "issues": []},
-        "deterministic": {
-            "status": "completed",
-            "verdict": "PASS",
-            "checks": [],
-            "issues": [],
-            "recommendations": [],
-        },
-        "semantic": {
-            "status": "not_run",
-            "verdict": "INDETERMINATE",
-            "issues": [],
-            "recommendations": [],
-        },
-        "issues": [],
-        "recommendations": [],
     }

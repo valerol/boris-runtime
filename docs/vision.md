@@ -1,23 +1,25 @@
 # Vision
 
-`boris-runtime` is the repository for the BOIS / SIMA / BORIS Middleware SDK.
-It exists to provide a lightweight protocol execution layer that can sit on top
-of existing LLM platforms without becoming a platform itself.
+`boris-runtime` is an operator-governed philosophical orchestration substrate
+for BOIS/SIMA/BORIS.
 
-The project is not an AI platform, chatbot product, UI, memory system, vector
-database, or agent framework. It is an SDK that loads declarative protocol
-definitions, builds prompts, calls an LLM through an adapter, parses the model
-response, and returns a protocol-shaped result.
+The Base Core supplies immutable canonical objects, norms, procedures, and
+constraints. LLMs may calculate semantic meaning and independently review that
+calculation. Deterministic Runtime layers retain authority over compatibility,
+operator decisions, state admission, and external consequences.
 
-## Responsibility Model
+The intended cycle is:
 
-- BOIS = declarative cognitive framework
-- SIMA = analytical uncertainty, risk, and structure layer
-- BORIS = operator or domain specialization
-- Runtime = protocol executor
-- Platform = external UI, tools, memory, auth, and storage
+```text
+phenomenon
+  -> verified Core Surface
+  -> semantic calculation
+  -> independent review
+  -> Policy Kernel decision
+  -> admitted State Event
+  -> evidence and next cycle
+```
 
-The runtime does not own user experience, persistence, authentication, tool
-execution, or long-term memory. Those concerns belong to the host platform and
-enter the SDK only through adapters.
-
+The current repository implements the verified surface, compatibility
+attestation, semantic calculation candidate, and stateless ChatGPT context
+projection. It does not yet implement the final three authority-bearing stages.

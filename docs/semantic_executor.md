@@ -4,8 +4,8 @@
 immutable `CoreSurface` and returns a non-executing `ExecutionCandidate`.
 
 It proves that Runtime can perform a grounded semantic calculation over a real
-versioned package without attaching the experiment to `ProtocolEngine`,
-changing Runtime session state, activating a package, or authorizing an external
+versioned package without attaching the experiment to the stateless application
+services, changing state, activating a package, or authorizing an external
 action.
 
 ## Boundary

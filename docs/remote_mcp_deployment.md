@@ -17,6 +17,14 @@ Runtime API 127.0.0.1:8000
 The MCP server is an adapter. It does not contain BOIS/SIMA/BORIS logic, does
 not call OpenAI directly, and does not store memory.
 
+The private Runtime process must be configured with a package source:
+
+```bash
+BORIS_CORE_PACKAGE=/opt/boris-core
+```
+
+The path must identify a package directory or ZIP accepted by Core Surface.
+
 Available public MCP tools:
 
 - `boris.frame`: calls private `/runtime/frame`; Runtime returns only a bounded
@@ -24,8 +32,8 @@ Available public MCP tools:
   `runtime_generated_prompt` in text `content`, does not call an LLM, and
   ChatGPT shows the prompt before generating the final answer itself.
 
-Internal ask and validation Runtime endpoints remain available privately, but
-`boris.ask` and `boris.validate` are not registered as public MCP tools.
+Answer validation remains available through the private Runtime API. It is not
+registered as a public MCP tool.
 
 ## Mode A - Local Development
 
@@ -89,17 +97,16 @@ location /mcp {
 }
 ```
 
-Do not expose `/runtime/ask`, `/runtime/frame`, or `/runtime/validate` directly
-to the public internet. The public boundary is `/mcp`; the internal execution
-boundaries are `http://127.0.0.1:8000/runtime/ask`,
-`http://127.0.0.1:8000/runtime/frame`, and
+Do not expose `/runtime/frame` or `/runtime/validate` directly to the public
+internet. The public boundary is `/mcp`; the internal boundaries are
+`http://127.0.0.1:8000/runtime/frame` and
 `http://127.0.0.1:8000/runtime/validate`.
 
 `/runtime/frame` returns packets with `packet_version:
-"boris-context/1.0"`, `runtime_mode: "context_provider"`, `llm_called: false`,
-and retrieval bounded to 6 chunks, 3000 characters per chunk, and 12000 total
-retrieved-core characters. The operation is non-mutating with respect to
-protocol conversation state.
+"boris-context/2.0"`, `runtime_mode: "context_provider"`, `llm_called: false`,
+and Core Surface projection bounded to 6 chunks, 3000 characters per chunk,
+and 12000 total projected-core characters. The operation has no server-side
+conversation state.
 
 `/runtime/validate` accepts `answer`, the full `context_packet`, and optional
 `validation_mode` (`deterministic`, `semantic`, or `hybrid`; default
@@ -156,10 +163,6 @@ After updating tool metadata, refresh connector metadata in ChatGPT.
 Local smoke tests:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/runtime/ask \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"ask-test","input":"Explain BOIS Runtime","mode":"default","context":{"source":"curl"}}'
-
 curl -s -X POST http://127.0.0.1:8000/runtime/frame \
   -H "Content-Type: application/json" \
   -d '{"session_id":"frame-test","input":"Explain BOIS Runtime as a context provider","mode":"default","context":{"source":"curl"}}'
@@ -169,7 +172,7 @@ curl -s -X POST http://127.0.0.1:8000/runtime/validate \
   -d '{
     "answer": "The ChatGPT-generated answer",
     "context_packet": {
-      "packet_version": "boris-context/1.0",
+      "packet_version": "boris-context/2.0",
       "frame_id": "00000000-0000-4000-8000-000000000000",
       "session_id": "validate-test",
       "input": "Explain BOIS Runtime",
@@ -183,8 +186,8 @@ curl -s -X POST http://127.0.0.1:8000/runtime/validate \
         "ambiguity_score": 0.1
       },
       "boris_context": {},
-      "retrieved_core": [],
-      "retrieval_metadata": {
+      "projected_core": [],
+      "projection_metadata": {
         "returned_chunks": 0,
         "total_characters": 0,
         "truncated": false,
@@ -192,7 +195,8 @@ curl -s -X POST http://127.0.0.1:8000/runtime/validate \
         "max_chunk_characters": 3000,
         "max_total_characters": 12000
       },
-      "answer_instructions": []
+      "answer_instructions": [],
+      "runtime_generated_prompt": "## User input\nExplain BOIS Runtime"
     },
     "validation_mode": "deterministic"
   }'

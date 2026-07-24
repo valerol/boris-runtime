@@ -4,7 +4,7 @@ import re
 from uuid import uuid4
 
 
-PACKET_VERSION = "boris-context/1.0"
+PACKET_VERSION = "boris-context/2.0"
 RUNTIME_MODE = "context_provider"
 MAX_CHUNKS = 6
 MAX_CHUNK_CHARACTERS = 3000
@@ -13,7 +13,10 @@ ANSWER_INSTRUCTIONS = [
     "Use this packet as the controlling BOIS/SIMA/BORIS frame.",
     "Generate the final answer yourself.",
     "Respect SIMA risk, uncertainty, ambiguity, and missing fields.",
-    "Apply the BOIS frame, BORIS context, and retrieved BOIS Core.",
+    "Use the BOIS frame, BORIS context, and projected BOIS Core records.",
+    "Treat projected Core Surface records as passive canonical context.",
+    "Respect each record's card status and application availability.",
+    "Do not claim that the Core package is activated or Runtime-compatible.",
     "Do not invent missing facts.",
     "Ask only necessary and non-duplicate clarification questions.",
 ]
@@ -70,22 +73,23 @@ SECRET_ENV_NAME_PATTERN = re.compile(
 MIN_SECRET_VALUE_LENGTH = 8
 
 
-def build_context_packet(session, frame_context):
-    retrieved_core, retrieval_metadata = bound_retrieved_core(
-        frame_context.core_context.get("chunks", [])
+def build_context_packet(session_id, frame_context):
+    resolved_session_id = getattr(session_id, "session_id", session_id)
+    projected_core, projection_metadata = bound_projected_core(
+        frame_context.core_projection.get("chunks", [])
     )
     packet = {
         "packet_version": PACKET_VERSION,
         "frame_id": str(uuid4()),
-        "session_id": session.session_id,
+        "session_id": str(resolved_session_id),
         "input": frame_context.user_input,
         "runtime_mode": RUNTIME_MODE,
         "llm_called": False,
         "bois_frame": project_public_bois_frame(frame_context.bois_frame),
         "sima": _sanitize_sima(frame_context.sima),
         "boris_context": project_public_boris_context(frame_context.boris_context),
-        "retrieved_core": retrieved_core,
-        "retrieval_metadata": retrieval_metadata,
+        "projected_core": projected_core,
+        "projection_metadata": projection_metadata,
         "answer_instructions": list(ANSWER_INSTRUCTIONS),
     }
     packet["runtime_generated_prompt"] = build_runtime_generated_prompt(packet)
@@ -108,13 +112,13 @@ def build_runtime_generated_prompt(packet):
         ("BOIS frame", _stable_json(packet.get("bois_frame", {}))),
         ("SIMA signals", _stable_json(packet.get("sima", {}))),
         ("BORIS context", _stable_json(packet.get("boris_context", {}))),
-        ("Retrieved core", _stable_json(packet.get("retrieved_core", []))),
+        ("Projected core", _stable_json(packet.get("projected_core", []))),
         (
             "Final response requirement",
             (
                 "Use only the public context above as the controlling frame. "
                 "Respect missing fields, risk, uncertainty, ambiguity, constraints, "
-                "and retrieved core. If necessary information is missing, ask a "
+                "and projected core. If necessary information is missing, ask a "
                 "necessary non-duplicate clarification question. Otherwise, provide "
                 "the final answer yourself."
             ),
@@ -158,7 +162,7 @@ def project_public_boris_session(session):
     return projected
 
 
-def bound_retrieved_core(chunks):
+def bound_projected_core(chunks):
     ranked = list(chunks or [])
     deduped = []
     seen = set()

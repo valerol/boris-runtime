@@ -101,7 +101,7 @@ Its limitations are explicit:
 - no Independent Reviewer;
 - no Policy Kernel transition;
 - no external action;
-- no RuntimeSession integration.
+- no stateful orchestration-cycle integration.
 
 These limitations do not disappear when the specification checks pass.
 

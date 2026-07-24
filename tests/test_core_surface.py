@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from application.context_projection import project_core_context
+from application.context_provider import CoreSurfaceProvider, CoreSurfaceUnavailable
 from core_surface import (
     CatalogError,
     IntegrityError,
@@ -116,6 +118,49 @@ def test_release_static_pass_does_not_authorize_active_use(tmp_path):
 
     with pytest.raises(LifecycleError, match="cannot be loaded for active use"):
         load_core_surface(package_root, purpose="active")
+
+
+def test_context_projection_uses_verified_surface_records(tmp_path):
+    surface = load_core_surface(build_package(tmp_path))
+
+    projection = project_core_context(surface, "Personal")
+
+    assert projection["mode"] == "core_surface_projection"
+    assert projection["metadata"]["core_source"] == "core_surface"
+    assert projection["metadata"]["semantic_routing"] is False
+    assert projection["chunks"][0]["id"] == "core-surface:identity"
+    assert projection["chunks"][1]["id"] == "core-surface:norm:T-N-001"
+
+
+def test_context_projection_falls_back_only_to_available_base_norms(tmp_path):
+    surface = load_core_surface(build_package(tmp_path))
+
+    projection = project_core_context(surface, "unmatched-query-token")
+
+    assert [chunk["id"] for chunk in projection["chunks"]] == [
+        "core-surface:identity",
+        "core-surface:norm:N-BASE-001",
+    ]
+
+
+def test_application_provider_caches_one_verified_surface(tmp_path):
+    package_root = build_package(tmp_path)
+    provider = CoreSurfaceProvider(source=str(package_root))
+
+    first = provider.get()
+    second = provider.get()
+
+    assert first is second
+    assert first.package_id == "BOIS_TEST_CORE_V1"
+
+
+def test_application_provider_rejects_legacy_machine_json(tmp_path):
+    machine_json = tmp_path / "CORE_CANON.json"
+    machine_json.write_text("{}", encoding="utf-8")
+    provider = CoreSurfaceProvider(source=str(machine_json))
+
+    with pytest.raises(CoreSurfaceUnavailable):
+        provider.get()
 
 
 def test_release_validation_envelope_tampering_is_rejected(tmp_path):

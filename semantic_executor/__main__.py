@@ -9,7 +9,8 @@ from runtime_compatibility import (
     RuntimeCompatibilityError,
     RuntimeCompatibilityVerifier,
 )
-from runtime.config import LLMConfigurationError, build_llm_adapter, load_env_file
+from llm.config import build_llm_adapter, load_env_file
+from llm.errors import LLMConfigurationError
 from semantic_executor import (
     LLMSemanticCalculator,
     SemanticExecutor,

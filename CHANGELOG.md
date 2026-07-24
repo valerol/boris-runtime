@@ -4,6 +4,15 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Moved request-specific Core context selection from `core_surface` to
+  `application.context_projection`, keeping Core Surface passive and
+  query-independent.
+- Replaced the legacy `boris-context/1.0` retrieval vocabulary with the
+  `boris-context/2.0` fields `projected_core` and `projection_metadata`.
+- Removed the obsolete `BORIS_CORE_PATH` environment alias; package loading is
+  configured only through `BORIS_CORE_PACKAGE`.
+- Removed the unused `sentence-transformers` and `numpy` dependencies after
+  deleting the embedding retriever.
 - Added fail-closed support for both legacy Core manifests and the release
   envelope manifest dialect with separate release and normative identities.
 - Added release-envelope verification for `CHECKSUMS.json`,
@@ -12,12 +21,10 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 - Added release runtime-contract adaptation for canonical final substrate,
   operator acceptance, specification receipt, and RuntimeAttestation records;
   unsupported Predicate DSL capabilities still produce `HOLD`.
-- Consolidated the active Phase 4 execution path around
-  `BOISRuntime -> ProtocolEngine -> api.app`; the earlier middleware and
-  FastAPI modules are now compatibility facades instead of parallel engines.
-- Removed the unused earlier prompt/parser/loop implementation and unified the
-  plain and structured LLM boundary, including lazy forwarding and controlled
-  provider errors.
+- Consolidated the active architecture around Core Surface, Runtime
+  compatibility, Semantic Executor, and stateless application services.
+- Removed the former `BOISRuntime`, `ProtocolEngine`, prompt/parser/loop
+  implementation, and compatibility facades.
 - Split Core Surface identity into `source_kind`, exact `archive_sha256`,
   reproducible `content_set_sha256`, and `manifest_sha256`.
 - Added canonical runtime-contract loading, substrate declaration,
@@ -25,8 +32,7 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   RuntimeAttestation, and attestation hashes.
 - Added a fail-closed registry for every package-declared required check;
   unknown future checks now produce `HOLD` instead of compatibility `PASS`.
-- Preserved deprecated `POST /run` as a compatibility route over the canonical
-  Runtime path.
+- Removed deprecated `POST /run` and the stateful Runtime API.
 - Made an accepted RuntimeAttestation mandatory before semantic calculation
   and included its reference in every execution trace.
 - Applied canonical GateDecision precedence so material unknowns cannot weaken
@@ -52,8 +58,8 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   catalog validation.
 - Added immutable Core Surface and norm records with Base, personal, domain,
   and candidate layers kept separate.
-- Preserved native norm classifications as opaque source values while the
-  canonical statement-type projection remains an explicit open debt.
+- Preserved native norm classifications as opaque source values instead of
+  inventing a canonical statement-type mapping.
 - Added command-line package validation and positive and negative tests.
 
 ## 2026-07-11 - MCP Native Structured Content Fix

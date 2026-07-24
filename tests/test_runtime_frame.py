@@ -6,29 +6,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE_ROOT = PROJECT_ROOT / "archive" / "v0-runtime"
 MAX_CHUNKS = 6
 MAX_CHUNK_CHARACTERS = 3000
 MAX_TOTAL_CHARACTERS = 12000
 
 
-class ForbiddenLLMAdapter:
-    adapter_name = "forbidden"
-
-    def call(self, *args, **kwargs):
-        raise AssertionError("LLM adapter must not be called by frame()")
-
-
-def test_runtime_frame_does_not_call_injected_llm(monkeypatch):
+def test_context_provider_projects_verified_surface_without_llm():
     with active_runtime_imports():
-        from runtime.runtime import BOISRuntime
+        from application.context_provider import ContextProvider
 
-        monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
-        runtime = BOISRuntime(session_id="frame-unit", llm_adapter=ForbiddenLLMAdapter())
+        provider = ContextProvider(surface_provider=_StaticSurfaceProvider())
+        packet = provider.frame("Explain BOIS", session_id="frame-unit")
 
-        packet = runtime.frame("Explain BOIS")
-
-    assert packet["packet_version"] == "boris-context/1.0"
+    assert packet["packet_version"] == "boris-context/2.0"
     assert packet["session_id"] == "frame-unit"
     assert packet["runtime_mode"] == "context_provider"
     assert packet["llm_called"] is False
@@ -43,86 +33,32 @@ def test_runtime_frame_does_not_call_injected_llm(monkeypatch):
         "bois_frame",
         "sima",
         "boris_context",
-        "retrieved_core",
-        "retrieval_metadata",
+        "projected_core",
+        "projection_metadata",
         "answer_instructions",
         "runtime_generated_prompt",
     }
+    assert packet["bois_frame"]["core"]["projection"] == "core_surface"
+    assert packet["projected_core"][0]["chunk_id"] == "core-surface:identity"
+    assert packet["projected_core"][1]["chunk_id"] == "core-surface:norm:N-BASE-001"
 
 
-def test_runtime_frame_does_not_mutate_protocol_session_state(monkeypatch):
+def test_context_provider_is_stateless_between_frames():
     with active_runtime_imports():
-        from runtime.runtime import BOISRuntime
+        from application.context_provider import ContextProvider
 
-        monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "false")
-        runtime = BOISRuntime(session_id="frame-readonly", llm_adapter=ForbiddenLLMAdapter())
-        runtime.session.state.last_output_type = "QUESTION"
-        runtime.session.state.last_decision = {
-            "type": "QUESTION",
-            "content": "Which target?",
-            "metadata": {"gap_key": "target"},
-        }
-        runtime.session.state.asked_questions.append({
-            "field": "target",
-            "gap_key": "target",
-            "question": "Which target?",
-        })
-        before = (
-            runtime.session.state.snapshot(),
-            runtime.session.state.current_input,
-            dict(runtime.session.state.processed_inputs),
-        )
+        provider = ContextProvider(surface_provider=_StaticSurfaceProvider())
+        first = provider.frame("Explain BOIS", session_id="frame-readonly")
+        second = provider.frame("Explain BOIS", session_id="frame-readonly")
 
-        runtime.frame("The runtime target")
-
-        after = (
-            runtime.session.state.snapshot(),
-            runtime.session.state.current_input,
-            dict(runtime.session.state.processed_inputs),
-        )
-    assert after == before
+    assert first["session_id"] == second["session_id"] == "frame-readonly"
+    assert first["frame_id"] != second["frame_id"]
+    assert first["projected_core"] == second["projected_core"]
 
 
-def test_frame_context_reuses_ask_pre_llm_framing(monkeypatch):
+def test_bound_projected_core_limits_count_dedupes_and_preserves_rank():
     with active_runtime_imports():
-        from runtime.runtime import BOISRuntime
-
-        chunks = [{
-            "id": "core:one",
-            "section": "core",
-            "title": "Core One",
-            "text": "SIMA mechanism chunk",
-            "score": 0.9,
-        }]
-
-        monkeypatch.setenv("BORIS_CORE_RETRIEVER_ENABLED", "true")
-        monkeypatch.setattr(
-            "prompt.prompt_builder.retrieve_core_context",
-            lambda query: {
-                "mode": "external",
-                "chunks": chunks,
-                "manifest": {"source_sha256": "abc123", "chunks_count": 1},
-                "rendered": "SIMA mechanism chunk",
-            },
-        )
-        runtime = BOISRuntime(session_id="frame-parity", llm_adapter=ForbiddenLLMAdapter())
-
-        shared_context = runtime.engine.build_frame_context(
-            runtime.session,
-            "Explain SIMA",
-            mutate_state=False,
-        )
-        packet = runtime.frame("Explain SIMA")
-
-    assert packet["sima"] == shared_context.sima
-    assert packet["bois_frame"] == shared_context.bois_frame
-    assert packet["boris_context"] == shared_context.boris_context
-    assert packet["retrieved_core"][0]["chunk_id"] == chunks[0]["id"]
-
-
-def test_bound_retrieved_core_limits_count_dedupes_and_preserves_rank():
-    with active_runtime_imports():
-        from runtime.context_packet import bound_retrieved_core
+        from application.context_packet import bound_projected_core
 
     chunks = [
         _chunk("a", 0.9, "A"),
@@ -135,7 +71,7 @@ def test_bound_retrieved_core_limits_count_dedupes_and_preserves_rank():
         _chunk("g", 0.2, "G"),
     ]
 
-    returned, metadata = bound_retrieved_core(chunks)
+    returned, metadata = bound_projected_core(chunks)
 
     assert [chunk["chunk_id"] for chunk in returned] == ["a", "b", "c", "d", "e", "f"]
     assert metadata["returned_chunks"] == MAX_CHUNKS
@@ -143,9 +79,9 @@ def test_bound_retrieved_core_limits_count_dedupes_and_preserves_rank():
     assert metadata["truncated"] is True
 
 
-def test_bound_retrieved_core_truncates_chunk_and_total_budget():
+def test_bound_projected_core_truncates_chunk_and_total_budget():
     with active_runtime_imports():
-        from runtime.context_packet import bound_retrieved_core
+        from application.context_packet import bound_projected_core
 
     chunks = [
         _chunk("one", 1.0, "x" * (MAX_CHUNK_CHARACTERS + 20)),
@@ -155,7 +91,7 @@ def test_bound_retrieved_core_truncates_chunk_and_total_budget():
         _chunk("five", 0.6, "r" * MAX_CHUNK_CHARACTERS),
     ]
 
-    returned, metadata = bound_retrieved_core(chunks)
+    returned, metadata = bound_projected_core(chunks)
 
     assert len(returned[0]["text"]) == MAX_CHUNK_CHARACTERS
     assert metadata["total_characters"] == MAX_TOTAL_CHARACTERS
@@ -163,9 +99,9 @@ def test_bound_retrieved_core_truncates_chunk_and_total_budget():
     assert metadata["truncated"] is True
 
 
-def test_bound_retrieved_core_mandatory_chunks_do_not_bypass_limits():
+def test_bound_projected_core_mandatory_chunks_do_not_bypass_limits():
     with active_runtime_imports():
-        from runtime.context_packet import bound_retrieved_core
+        from application.context_packet import bound_projected_core
 
     chunks = [
         {
@@ -175,7 +111,7 @@ def test_bound_retrieved_core_mandatory_chunks_do_not_bypass_limits():
         for index in range(MAX_CHUNKS + 2)
     ]
 
-    returned, metadata = bound_retrieved_core(chunks)
+    returned, metadata = bound_projected_core(chunks)
 
     assert len(returned) == MAX_CHUNKS
     assert metadata["truncated"] is True
@@ -183,7 +119,7 @@ def test_bound_retrieved_core_mandatory_chunks_do_not_bypass_limits():
 
 def test_bois_frame_public_projection_uses_top_level_allowlist():
     with active_runtime_imports():
-        from runtime.context_packet import project_public_bois_frame
+        from application.context_packet import project_public_bois_frame
 
         projected = project_public_bois_frame({
             "framework": "BOIS",
@@ -206,7 +142,7 @@ def test_bois_frame_public_projection_uses_top_level_allowlist():
 
 def test_boris_context_public_projection_uses_top_level_and_session_allowlists():
     with active_runtime_imports():
-        from runtime.context_packet import project_public_boris_context
+        from application.context_packet import project_public_boris_context
 
         projected = project_public_boris_context({
             "name": "BORIS",
@@ -238,7 +174,7 @@ def test_boris_context_public_projection_uses_top_level_and_session_allowlists()
 
 def test_recursive_forbidden_key_removal_preserves_safe_nested_values():
     with active_runtime_imports():
-        from runtime.context_packet import project_public_boris_context
+        from application.context_packet import project_public_boris_context
 
         projected = project_public_boris_context({
             "context": {
@@ -270,7 +206,7 @@ def test_recursive_forbidden_key_removal_preserves_safe_nested_values():
 
 def test_known_secret_values_are_redacted_without_mutating_source(monkeypatch):
     with active_runtime_imports():
-        from runtime.context_packet import project_public_boris_context
+        from application.context_packet import project_public_boris_context
 
         monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
         source = {
@@ -291,7 +227,7 @@ def test_known_secret_values_are_redacted_without_mutating_source(monkeypatch):
 
 def test_sima_projection_omits_unexpected_keys():
     with active_runtime_imports():
-        from runtime.context_packet import build_context_packet
+        from application.context_packet import build_context_packet
 
         packet = build_context_packet(
             _session_stub(),
@@ -314,9 +250,9 @@ def test_sima_projection_omits_unexpected_keys():
     }
 
 
-def test_retrieved_chunk_allowlist_and_secret_redaction(monkeypatch):
+def test_projected_chunk_allowlist_and_secret_redaction(monkeypatch):
     with active_runtime_imports():
-        from runtime.context_packet import bound_retrieved_core
+        from application.context_packet import bound_projected_core
 
         monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
         chunks = [{
@@ -332,7 +268,7 @@ def test_retrieved_chunk_allowlist_and_secret_redaction(monkeypatch):
             "debug_context": {"remove": True},
         }]
 
-        returned, metadata = bound_retrieved_core(chunks)
+        returned, metadata = bound_projected_core(chunks)
 
     assert returned == [{
         "chunk_id": "chunk",
@@ -349,7 +285,7 @@ def test_retrieved_chunk_allowlist_and_secret_redaction(monkeypatch):
 
 def test_packet_wide_leakage_assertion(monkeypatch):
     with active_runtime_imports():
-        from runtime.context_packet import build_context_packet
+        from application.context_packet import build_context_packet
 
         monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
         packet = build_context_packet(
@@ -383,7 +319,7 @@ def test_packet_wide_leakage_assertion(monkeypatch):
                     "environment": {"OPENAI_API_KEY": "remove"},
                     "runtime_internal": {"path": "/opt/private"},
                 },
-                core_context={
+                core_projection={
                     "chunks": [{
                         "id": "chunk",
                         "section": "section",
@@ -409,12 +345,12 @@ def test_packet_wide_leakage_assertion(monkeypatch):
         assert forbidden not in serialized
     assert "[redacted]" in serialized
     assert packet["input"] == "intentional user input remains"
-    assert packet["packet_version"] == "boris-context/1.0"
+    assert packet["packet_version"] == "boris-context/2.0"
 
 
 def test_normal_packet_still_contains_expected_public_fields():
     with active_runtime_imports():
-        from runtime.context_packet import build_context_packet
+        from application.context_packet import build_context_packet
 
         packet = build_context_packet(_session_stub(), _frame_context_stub())
 
@@ -427,8 +363,8 @@ def test_normal_packet_still_contains_expected_public_fields():
     assert "context" in packet["boris_context"]
     assert "session" in packet["boris_context"]
     assert "sima" in packet
-    assert "retrieved_core" in packet
-    assert "retrieval_metadata" in packet
+    assert "projected_core" in packet
+    assert "projection_metadata" in packet
     assert "answer_instructions" in packet
     assert "runtime_generated_prompt" in packet
     assert packet["runtime_generated_prompt"]
@@ -436,17 +372,17 @@ def test_normal_packet_still_contains_expected_public_fields():
 
 def test_runtime_generated_prompt_contains_public_frame_context():
     with active_runtime_imports():
-        from runtime.context_packet import build_context_packet
+        from application.context_packet import build_context_packet
 
         packet = build_context_packet(
             _session_stub(),
             _frame_context_stub(
-                core_context={
+                core_projection={
                     "chunks": [{
                         "id": "chunk",
                         "section": "section",
                         "title": "title",
-                        "text": "retrieved public core",
+                        "text": "projected public core",
                         "score": 0.5,
                     }]
                 },
@@ -463,14 +399,14 @@ def test_runtime_generated_prompt_contains_public_frame_context():
     assert '"risk": 0.2' in prompt
     assert "## BORIS context" in prompt
     assert '"name": "BORIS"' in prompt
-    assert "## Retrieved core" in prompt
-    assert "retrieved public core" in prompt
+    assert "## Projected core" in prompt
+    assert "projected public core" in prompt
     assert "provide the final answer yourself" in prompt
 
 
 def test_runtime_generated_prompt_uses_sanitized_public_data(monkeypatch):
     with active_runtime_imports():
-        from runtime.context_packet import build_context_packet
+        from application.context_packet import build_context_packet
 
         monkeypatch.setenv("OPENAI_API_KEY", "super-secret-test-value")
         packet = build_context_packet(
@@ -502,7 +438,7 @@ def test_runtime_generated_prompt_uses_sanitized_public_data(monkeypatch):
                         "authorization": "remove",
                     },
                 },
-                core_context={
+                core_projection={
                     "chunks": [{
                         "id": "chunk",
                         "section": "section",
@@ -548,7 +484,7 @@ def _frame_context_stub(
     bois_frame=None,
     sima=None,
     boris_context=None,
-    core_context=None,
+    core_projection=None,
 ):
     return SimpleNamespace(
         user_input="intentional user input remains",
@@ -574,13 +510,52 @@ def _frame_context_stub(
                 "max_clarification_cycles": 3,
             },
         },
-        core_context=core_context or {"chunks": []},
+        core_projection=core_projection or {"chunks": []},
     )
+
+
+class _StaticSurfaceProvider:
+    def __init__(self):
+        norm = SimpleNamespace(
+            norm_id="N-BASE-001",
+            layer="BASE",
+            norm_type="INVARIANT",
+            fields={
+                "card_status": "ACTIVE",
+                "available_for_application": "TRUE",
+                "title": "BOIS principle",
+                "formulation": "Explain BOIS without inventing facts.",
+            },
+        )
+        self.surface = SimpleNamespace(
+            package_id="BOIS_TEST_CORE",
+            artifact_version="1.0",
+            release_package_id="BOIS_TEST_RELEASE",
+            release_version="1.1",
+            status="INTERNAL_STATIC_PASS",
+            purpose="evaluation",
+            release_flavor="PASSIVE_DATA_ONLY",
+            content_set_sha256="a" * 64,
+            manifest_sha256="b" * 64,
+            package_identity={
+                "manifest_dialect": "release-envelope-v1",
+                "release_package_id": "BOIS_TEST_RELEASE",
+                "release_version": "1.1",
+                "normative_package_id": "BOIS_TEST_CORE",
+                "normative_content_version": "1.0",
+            },
+            norm_ids=(norm.norm_id,),
+            base_norms=(norm,),
+            get_norm=lambda norm_id: norm,
+        )
+
+    def get(self):
+        return self.surface
 
 
 @contextmanager
 def active_runtime_imports():
-    prefixes = ("api", "core", "llm", "prompt", "protocol", "runtime")
+    prefixes = ("api", "application", "core_surface", "llm")
     saved_path = list(sys.path)
     saved_modules = {
         name: module
@@ -588,8 +563,6 @@ def active_runtime_imports():
         if _matches_prefix(name, prefixes)
     }
 
-    if str(ARCHIVE_ROOT) in sys.path:
-        sys.path.remove(str(ARCHIVE_ROOT))
     if str(PROJECT_ROOT) in sys.path:
         sys.path.remove(str(PROJECT_ROOT))
     sys.path.insert(0, str(PROJECT_ROOT))

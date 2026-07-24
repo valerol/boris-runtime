@@ -1,258 +1,162 @@
-# Architecture
+# BORIS Runtime Architecture
 
-The repository is a root-level SDK. There is no nested wrapper directory such as
-`bois-middleware/` or another `boris-runtime/` inside the repository.
+## Current boundary
 
-## Root Structure
+The repository has one canonical Core representation: `CoreSurface`.
 
 ```text
-core/                  declarative definitions and loaders
-core_surface/          immutable package loading and trust boundary
-runtime_compatibility/ substrate declaration and Runtime attestation
-semantic_executor/     isolated semantic calculation experiment
-runtime/               active protocol execution pipeline
-protocol/              BOIS, SIMA, and BORIS protocol layers
-prompt/                deterministic prompt construction
-llm/                   canonical plain and structured LLM port
-adapters/              compatibility and external capability boundaries
-cli/                   local validation entrypoint
-api/                   canonical FastAPI boundary
-examples/              minimal SDK usage examples
-docs/                  current documentation set
-archive/               legacy/reference artifacts only
+release package
+  -> CoreSurfaceLoader
+  -> immutable CoreSurface
+     -> Runtime compatibility verification
+
+immutable CoreSurface
+  -> application Context Projector
+  -> bounded context projection
 ```
 
-Active code lives in:
+The loader validates package layout, inventory, hashes, identity, dependency
+order, lifecycle status, and norm catalog before any consumer sees canonical
+records. No active component reads the former local definition folders or an
+unverified machine JSON directly.
 
-- `core/`
-- `core_surface/`
-- `runtime_compatibility/`
-- `semantic_executor/`
-- `runtime/`
-- `protocol/`
-- `prompt/`
-- `llm/`
-- `adapters/`
-- `cli/`
-- `api/`
-- `examples/`
+## Active modules
 
-Legacy code lives only in:
+| Module | Responsibility | Explicit exclusions |
+|---|---|---|
+| `core_surface` | Verify and expose the passive, query-independent canonical package | Query selection, semantic calculation, state mutation, activation |
+| `runtime_compatibility` | Declare substrate capabilities, execute package-required checks, create attestation | Meaning creation, activation, external action |
+| `semantic_executor` | Produce a non-executing `ExecutionCandidate` | Independent review, state admission, tools, memory |
+| `application` | Build stateless ChatGPT frames and validate supplied answers | Conversation state, semantic authorization, tool execution |
+| `llm` | Canonical structured/unstructured inference port | Policy decisions |
+| `api` | Private HTTP transport | Core or semantic logic |
+| `mcp_server` | Public read-only `boris.frame` transport | Direct Core access, LLM calls, memory |
+| `cli` | Local context-frame transport | Alternative engine |
 
-- `archive/v0-runtime/`
-
-No active runtime code should import from `archive/v0-runtime`.
-
-## Canonical Runtime Flow
+## Semantic path
 
 ```text
-User/Platform -> api.app -> BOISRuntime -> ProtocolEngine -> LLM port -> LLM
-```
-
-The platform provides UI, transport, authentication, tools, memory, and storage.
-The middleware runtime applies the BOIS / SIMA / BORIS protocol and delegates
-LLM inference to an adapter.
-
-The Runtime supports multiple operations through one composition root behind
-the HTTP API, while the public MCP connector exposes adapter-level tools:
-
-```text
-private POST /runtime/ask
-  -> BOISRuntime.run(...)
-  -> ProtocolEngine.run_turn(...)
-  -> configured LLM adapter
-  -> Runtime-generated protocol answer
-
-public MCP boris.frame
-  -> private POST /runtime/frame
-  -> BOISRuntime.frame(...)
-  -> ProtocolEngine.build_frame_context(...)
-  -> bounded BOIS/SIMA/BORIS context packet
-  -> runtime_generated_prompt
-  -> ChatGPT-generated final answer
-
-private POST /runtime/validate
-  -> RuntimeRegistry.validate(...)
-  -> validation engine
-  -> layered validation report
-```
-
-Phase 4F adds a separate experimental semantic path:
-
-```text
-versioned Core package
-  -> immutable Core Surface
+Core ZIP
+  -> CoreSurface
   -> RuntimeCompatibilityVerifier
   -> RuntimeAttestation
-  -> Semantic View
-  -> LLM semantic calculation
-  -> deterministic validation
-  -> non-executing ExecutionCandidate
+  -> SemanticViewBuilder
+  -> semantic calculator
+  -> deterministic validation and gate constraints
+  -> ExecutionCandidate
 ```
 
-The attestation must match the exact archive, manifest, content set, and loaded
-component hashes and must be explicitly accepted for `semantic_evaluation`
-before the calculator is called.
+Semantic execution requires an accepted attestation for
+`semantic_evaluation`. The result is candidate material only. It cannot mutate
+Runtime or Core state.
 
-The verifier executes every package-declared required check through a
-fail-closed registry. Unknown or non-passing checks produce `HOLD`; they cannot
-be silently replaced by a smaller Runtime-owned checklist.
+## ChatGPT context path
 
-This path is not imported by `ProtocolEngine`, the HTTP API, or MCP. It does not
-mutate `RuntimeSession`, admit state transitions, call tools, write memory, or
-activate packages. Its result remains operator-review material until an
-Independent Reviewer and Policy Kernel are implemented.
-
-## Compatibility-only modules
-
-The earlier Phase 1 SDK path is no longer a parallel engine:
-
-- `runtime.engine.MiddlewareEngine` delegates to `BOISRuntime` and rejects
-  injection of the removed earlier prompt/parser/loop components;
-- `api.fastapi_server.app` is the same object as `api.app.app`;
-- deprecated `POST /run` remains on the compatibility server and delegates to
-  the canonical Runtime;
-- `adapters.llm` exposes compatibility names backed by the canonical LLM port;
-- the unused `runtime/prompt_builder.py`, `runtime/response_parser.py`, and
-  earlier `ProtocolLoop` were removed.
-
-`boris.validate` remains stateless answer validation for Phase 4D context
-packets. It is not the future Independent Reviewer and is not reused as one.
-
-`boris.frame` is context-provider mode. It reuses Runtime SIMA extraction, BOIS
-frame construction, BORIS context construction, and BOIS Core retrieval, but it
-does not call an external LLM, parse LLM output,
-record a final answer, update `last_decision`, update `last_output_type`, add
-asked clarification questions, increment clarification cycles, or write to the
-processed-input cache.
-
-The Runtime API remains private. MCP remains the public adapter boundary, and
-the MCP server communicates with Runtime only through the HTTP API. The MCP
-server must not import Runtime, ProtocolEngine, Core loader, or LLM adapter
-internals.
-
-MCP tools return native MCP `CallToolResult` objects. The public `boris.frame`
-tool delivers the context packet through MCP `structuredContent` and the full
-safe `runtime_generated_prompt` through `content`; error envelopes set
-`isError: true`. The MCP adapter does not serialize its own
-`structuredContent`/`content` envelope into a JSON text block.
-
-`boris.validate` is Phase 4D.1 stateless validation. Its input is the
-ChatGPT-generated answer, the complete `boris.frame` context packet, and an
-optional validation mode. The default mode is `deterministic`; `semantic` and
-`hybrid` are also supported. Validation does not rewrite the answer, does not
-create or mutate Runtime sessions, does not persist packets, does not look up
-`frame_id`, does not enforce packet TTL, and does not verify packet ownership or
-HMAC signatures. The supplied `frame_id` is used only for report correlation,
-and Runtime does not claim that a supplied packet is authentic or unchanged.
-
-The validation report uses `validation_version: "boris-validation/1.0"` and the
-public verdicts `PASS`, `REVISE`, `FAIL`, and `INDETERMINATE`. A mandatory
-preflight layer validates packet structure, public field allowlists, retrieval
-metadata invariants, bounded retrieved core content, answer instructions, and
-the centralized Phase 4D leakage policy before any answer validation layer runs.
-Readable but invalid packets return a normal validation report with verdict
-`FAIL`; request schema errors remain HTTP 422.
-
-Preflight also validates public field types and structural consistency. Boolean
-values do not pass integer or numeric checks: counters must be strict integers,
-and SIMA scores must be strict numbers. SIMA `risk`, `uncertainty`, and
-`ambiguity_score` are constrained to `0.0 <= value <= 1.0`. `bois_frame`
-allowed fields are type-checked, `bois_frame.framework` must be `BOIS`, and
-`bois_frame.input` must match packet `input` when present. `boris_context`
-allowed fields and session fields are type-checked, `boris_context.name` must
-be `BORIS` when present, nested session IDs must match packet `session_id`, and
-clarification cycles must be non-negative and cannot exceed the configured
-maximum. Retrieved chunks require non-empty string IDs, string section/title/text
-fields, and strict numeric relevance. Relevance is not capped at 1.0 because the
-current retriever may add lexical boosts to normalized similarity scores.
-Retrieval metadata requires strict integer counts and limits, an actual boolean
-`truncated`, and cross-field consistency between declared counts/character
-totals and returned chunks.
-
-These checks establish structural consistency, logical consistency, and public
-contract compatibility only. They do not establish packet authenticity, packet
-immutability, server origin, or tamper resistance.
-
-Deterministic validation performs explainable non-LLM checks only and reports
-whether each check requires semantic validation. It uses SIMA pass thresholds of
-0.30 for risk, uncertainty, and ambiguity. Semantic validation is a dedicated
-lazy validator adapter with strict JSON output parsing; it treats both the
-packet and answer as untrusted validation data and never returns a rewritten
-answer. `BORIS_VALIDATOR_LLM` and `BORIS_VALIDATOR_MODEL` may override the main
-LLM settings; otherwise the validator falls back to `BOIS_LLM` and
-`OPENAI_MODEL`. In pure semantic mode, unavailable validator configuration
-returns HTTP 503 and invalid validator output returns HTTP 502. In hybrid mode,
-deterministic structural and security findings remain authoritative, semantic
-escalation is selective, and unavailable or invalid semantic validation yields
-HTTP 200 with verdict `INDETERMINATE` while preserving deterministic findings.
-
-Validation input-size gates run after packet preflight and before mode dispatch,
-including pure semantic and hybrid modes. `MAX_ANSWER_CHARACTERS` bounds the
-answer. `MAX_PACKET_TEXT_CHARACTERS` counts all string values in the supplied
-context packet, including top-level `input`, because those values are included
-in the semantic validation payload. Oversized answers return a normal report
-with verdict `REVISE`; oversized packets return verdict `FAIL` and require a
-new bounded frame. In both cases `llm_called` remains false and the semantic
-adapter is not constructed.
-
-The context packet is explicit and bounded:
-
-```json
-{
-  "packet_version": "boris-context/1.0",
-  "frame_id": "uuid",
-  "session_id": "session-id",
-  "input": "effective user input",
-  "runtime_mode": "context_provider",
-  "llm_called": false,
-  "bois_frame": {},
-  "sima": {
-    "risk": 0.0,
-    "uncertainty": 0.0,
-    "missing_fields": [],
-    "ambiguity_score": 0.0
-  },
-  "boris_context": {},
-  "retrieved_core": [],
-  "retrieval_metadata": {
-    "returned_chunks": 0,
-    "total_characters": 0,
-    "truncated": false,
-    "max_chunks": 6,
-    "max_chunk_characters": 3000,
-    "max_total_characters": 12000
-  },
-  "answer_instructions": []
-}
+```text
+Core package
+  -> CoreSurface
+  -> application Context Projector
+  -> bounded lexical projection
+  -> ContextProvider
+  -> /runtime/frame
+  -> boris.frame
+  -> ChatGPT-generated answer
 ```
 
-The packet is also an explicit public projection. `bois_frame` exposes only
-`framework`, `core`, `input`, and `constraints`. `boris_context` exposes only
-`name`, `role`, `context`, `definition`, and `session`; inside `session`, only
-`session_id`, `clarification_cycles`, and `max_clarification_cycles` are public.
+The lexical projection is not semantic routing. It exposes:
 
-Flexible canonical containers such as `bois_frame.core`,
-`boris_context.context`, and `boris_context.definition` are recursively filtered
-instead of serialized wholesale. Secret-like and internal keys are removed with
-a normalized case-insensitive key policy, including prompt payloads,
-authorization data, credentials, environment fields, tracebacks, vectors, debug
-contexts, and internal filesystem path fields. Configured secret values from
-secret-like environment variables are redacted as `[redacted]` when they appear
-inside allowed internal frame/context fields or retrieved chunk text. The
-top-level packet `input` remains intentional model-visible user content and is
-not globally rewritten.
+- exact release and normative identity;
+- content-set and manifest hashes;
+- a bounded set of immutable norm records selected by lexical overlap;
+- Base norms as a deterministic fallback when no overlap exists.
 
-## Separation Of Concerns
+The `boris-context/2.0` wire contract exposes the projection as
+`projected_core` with `projection_metadata`. Version 1 field names
+`retrieved_core` and `retrieval_metadata` are intentionally unsupported. The
+producer consumes verified Core Surface records but belongs to `application`,
+so `core_surface` remains passive and query-independent.
 
-- BOIS is declarative and lives under `core/definitions/`.
-- SIMA is declarative analytical guidance and lives under `core/definitions/`.
-- BORIS is declarative operator/domain specialization and lives under
-  `core/definitions/`.
-- Runtime code executes protocol boundaries only.
-- Adapter code defines external integration boundaries.
-- Platform-specific systems are external to the core SDK.
+`boris.frame`:
 
-The historical reset rationale is retained in
-[architecture_reset.md](architecture_reset.md) as Phase 0 context. It is not the
-main architecture document.
+- does not call an LLM;
+- does not create or mutate a server-side session;
+- treats `session_id` as correlation data only;
+- does not create RuntimeAttestation;
+- does not claim package activation or semantic applicability;
+- bounds output to six chunks, 3000 characters per chunk, and 12000 total
+  projected characters.
+
+If the configured Core package is absent or invalid, the API returns
+`core_surface_unavailable` with HTTP 503. It does not fall back to local
+definitions.
+
+## Answer validation path
+
+`POST /runtime/validate` is a stateless Phase 4D service. It validates a
+caller-supplied answer and complete context packet through:
+
+1. packet preflight and leakage checks;
+2. deterministic answer checks;
+3. optional semantic validation;
+4. deterministic/semantic merge in hybrid mode.
+
+This service is not the future Independent Reviewer. It does not establish
+packet authenticity, retain packets, rewrite answers, admit state changes, or
+apply an `ExecutionCandidate`.
+
+## Removed architecture
+
+The following top-level packages were deleted:
+
+- `core/` — Phase 2 local definition loader;
+- `core_retriever/` — direct machine-JSON embedding path;
+- `runtime/`, `protocol/`, `prompt/` — Phase 3 prompt middleware, sessions, and
+  clarification loop;
+- `adapters/` — unused stubs and LLM compatibility facade;
+- `archive/` — embedded v0 source copy.
+
+The private `/runtime/ask`, `/runtime/reset`, `/runtime/session/{id}`, legacy
+`/run`, `MiddlewareEngine`, `BOISRuntime`, and `ProtocolEngine` contracts were
+removed with those paths.
+
+## Kernel boundary
+
+The former proposed monolithic `bois_kernel` is not an active package. Its
+semantic-calculation portion now belongs to `semantic_executor`; its passive
+registry belongs to `core_surface`.
+
+The following responsibilities remain intentionally unimplemented and must not
+be absorbed by the Semantic Executor:
+
+- `IndependentReviewer`;
+- deterministic `PolicyKernel`;
+- authority and operator-decision enforcement beyond compatibility acceptance;
+- state-event admission;
+- Cycle Guard;
+- domain physiology;
+- long-term memory;
+- tool and external action execution.
+
+The future cycle is:
+
+```text
+SemanticCalculation
+  -> IndependentReview
+  -> KernelDecision
+  -> StateEvent
+```
+
+Only the first contract is implemented. The current `ExecutionCandidate`
+packages its result for later review; it is not a `KernelDecision`.
+
+## Dependency rules
+
+- `core_surface` imports no application, API, MCP, LLM, compatibility, or
+  executor code.
+- `runtime_compatibility` may read immutable Core Surface data.
+- `semantic_executor` may consume Core Surface and compatibility records.
+- `application` may consume Core Surface and the LLM port, but not Semantic
+  Executor internals.
+- `api` may import `application`, never the inverse.
+- `mcp_server` communicates with `api` only through HTTP.
+- no active module may import a removed top-level package.

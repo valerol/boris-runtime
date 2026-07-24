@@ -1,110 +1,108 @@
-import sys
-from contextlib import contextmanager
+import ast
 from pathlib import Path
-
-import pytest
-from fastapi.testclient import TestClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE_ROOT = PROJECT_ROOT / "archive" / "v0-runtime"
-ACTIVE_PREFIXES = ("adapters", "api", "core", "llm", "prompt", "protocol", "runtime")
+REMOVED_TOP_LEVEL_PACKAGES = {
+    "adapters",
+    "archive",
+    "core",
+    "core_retriever",
+    "prompt",
+    "protocol",
+    "runtime",
+}
+ACTIVE_PACKAGES = {
+    "api",
+    "application",
+    "cli",
+    "core_surface",
+    "llm",
+    "mcp_server",
+    "runtime_compatibility",
+    "semantic_executor",
+}
 
 
-def test_old_fastapi_module_exports_the_canonical_app():
-    with activate_runtime_imports():
-        from api.app import app as canonical_app
-        from api.fastapi_server import app as compatibility_app
-
-        assert compatibility_app is canonical_app
-
-
-def test_old_run_endpoint_delegates_to_canonical_runtime():
-    with activate_runtime_imports():
-        from api.fastapi_server import app
-
-        response = TestClient(app).post(
-            "/run",
-            json={
-                "input": "Use the canonical Runtime path.",
-                "context": {"source": "legacy-client"},
-            },
-        )
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["type"] == "final"
-        assert payload["trace"]["compatibility_facade"] is True
-        assert payload["trace"]["context_received"] is True
-
-
-def test_middleware_engine_is_only_a_bois_runtime_compatibility_facade():
-    with activate_runtime_imports():
-        from adapters.llm import MockLLMAdapter
-        from runtime.engine import MiddlewareEngine
-        from runtime.runtime import BOISRuntime
-
-        engine = MiddlewareEngine(MockLLMAdapter())
-
-        response = engine.run("Use the canonical Runtime path.")
-
-        assert isinstance(engine.runtime, BOISRuntime)
-        assert response.type == "final"
-        assert response.trace["compatibility_facade"] is True
-        assert response.trace["canonical_output_type"] == "ANSWER"
-
-        empty = engine.run("   ")
-        assert empty.type == "clarification"
-        assert empty.content == "Please provide a request."
-
-
-def test_middleware_engine_rejects_parallel_component_injection():
-    with activate_runtime_imports():
-        from adapters.llm import MockLLMAdapter
-        from runtime.engine import MiddlewareEngine
-
-        with pytest.raises(ValueError, match="no longer supported"):
-            MiddlewareEngine(
-                MockLLMAdapter(),
-                prompt_builder=object(),
-            )
-
-
-@contextmanager
-def activate_runtime_imports():
-    saved_path = list(sys.path)
-    saved_modules = {
-        name: module
-        for name, module in sys.modules.items()
-        if (
-            name in ACTIVE_PREFIXES
-            or name.startswith(
-                tuple(f"{prefix}." for prefix in ACTIVE_PREFIXES)
-            )
-        )
+def test_legacy_top_level_packages_are_absent():
+    existing = {
+        path.name
+        for path in PROJECT_ROOT.iterdir()
+        if path.is_dir() and not path.name.startswith(".")
     }
-    for path in (str(ARCHIVE_ROOT), str(PROJECT_ROOT)):
-        if path in sys.path:
-            sys.path.remove(path)
-    sys.path.insert(0, str(PROJECT_ROOT))
-    for name in list(sys.modules):
-        if (
-            name in ACTIVE_PREFIXES
-            or name.startswith(
-                tuple(f"{prefix}." for prefix in ACTIVE_PREFIXES)
-            )
-        ):
-            sys.modules.pop(name, None)
-    try:
-        yield
-    finally:
-        for name in list(sys.modules):
-            if (
-                name in ACTIVE_PREFIXES
-                or name.startswith(
-                    tuple(f"{prefix}." for prefix in ACTIVE_PREFIXES)
+
+    assert not (REMOVED_TOP_LEVEL_PACKAGES & existing)
+    assert ACTIVE_PACKAGES <= existing
+
+
+def test_active_python_modules_do_not_import_removed_packages():
+    violations = []
+    for package in sorted(ACTIVE_PACKAGES):
+        for path in (PROJECT_ROOT / package).rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                imported = _imported_top_level(node)
+                if imported in REMOVED_TOP_LEVEL_PACKAGES:
+                    violations.append(
+                        f"{path.relative_to(PROJECT_ROOT)} imports {imported}"
+                    )
+
+    assert violations == []
+
+
+def test_core_surface_is_the_only_canonical_core_source():
+    provider_source = (
+        PROJECT_ROOT / "application" / "context_provider.py"
+    ).read_text(encoding="utf-8")
+    projector_source = (
+        PROJECT_ROOT / "application" / "context_projection.py"
+    ).read_text(encoding="utf-8")
+
+    assert "load_core_surface" in provider_source
+    assert "project_core_context" in provider_source
+    assert "CoreSurface" in projector_source
+    assert "BORIS_CORE_RETRIEVER" not in provider_source
+    assert "core/definitions" not in provider_source
+
+
+def test_core_surface_remains_query_independent():
+    assert not (PROJECT_ROOT / "core_surface" / "context.py").exists()
+
+    violations = []
+    for path in (PROJECT_ROOT / "core_surface").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            imported = _imported_top_level(node)
+            if imported in {
+                "api",
+                "application",
+                "llm",
+                "mcp_server",
+                "runtime_compatibility",
+                "semantic_executor",
+            }:
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT)} imports {imported}"
                 )
-            ):
-                sys.modules.pop(name, None)
-        sys.modules.update(saved_modules)
-        sys.path[:] = saved_path
+
+    assert violations == []
+
+
+def test_context_packet_v2_has_no_retriever_field_names():
+    source = (
+        PROJECT_ROOT / "application" / "context_packet.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'PACKET_VERSION = "boris-context/2.0"' in source
+    assert '"projected_core"' in source
+    assert '"projection_metadata"' in source
+    assert "retrieved_core" not in source
+    assert "retrieval_metadata" not in source
+
+
+def _imported_top_level(node):
+    if isinstance(node, ast.Import) and node.names:
+        return node.names[0].name.split(".", 1)[0]
+    if isinstance(node, ast.ImportFrom) and node.module:
+        return node.module.split(".", 1)[0]
+    return None

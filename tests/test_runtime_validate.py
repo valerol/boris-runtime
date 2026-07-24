@@ -1,17 +1,14 @@
-import copy
 import importlib
 import json
 import sys
 from pathlib import Path
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE_ROOT = PROJECT_ROOT / "archive" / "v0-runtime"
-ACTIVE_RUNTIME_PREFIXES = ("api", "core", "llm", "prompt", "protocol", "runtime")
+ACTIVE_RUNTIME_PREFIXES = ("api", "application", "core_surface", "llm")
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -24,8 +21,6 @@ def _matches_active_runtime(module_name):
 
 
 def active_module(module_name):
-    if str(ARCHIVE_ROOT) in sys.path:
-        sys.path.remove(str(ARCHIVE_ROOT))
     if str(PROJECT_ROOT) in sys.path:
         sys.path.remove(str(PROJECT_ROOT))
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -52,10 +47,10 @@ def api_context():
         if _matches_active_runtime(module_name):
             sys.modules.pop(module_name, None)
 
-    from api.app import app, runtime_registry
+    from api.app import app
 
     try:
-        yield app, runtime_registry
+        yield app, _StatelessApplication()
     finally:
         for module_name in list(sys.modules):
             if _matches_active_runtime(module_name):
@@ -64,6 +59,16 @@ def api_context():
         sys.path[:] = saved_path
         if str(PROJECT_ROOT) not in sys.path:
             sys.path.insert(0, str(PROJECT_ROOT))
+
+
+class _StatelessApplication:
+    _handles = {}
+
+    def clear(self):
+        return None
+
+    def get(self, _session_id):
+        return None
 
 
 class ForbiddenAdapterFactory:
@@ -136,6 +141,7 @@ def test_runtime_validate_request_schema_errors_return_422(api_context, payload_
 @pytest.mark.parametrize(
     "mutate,code",
     [
+        (lambda p: p.update({"packet_version": "boris-context/1.0"}), "PACKET_VERSION_UNSUPPORTED"),
         (lambda p: p.update({"packet_version": "boris-context/9.9"}), "PACKET_VERSION_UNSUPPORTED"),
         (lambda p: p.update({"frame_id": "not-a-uuid"}), "FRAME_ID_INVALID"),
         (lambda p: p.pop("sima"), "PACKET_MISSING_FIELD"),
@@ -147,13 +153,13 @@ def test_runtime_validate_request_schema_errors_return_422(api_context, payload_
         (lambda p: p["sima"].update({"extra": True}), "SIMA_INVALID"),
         (lambda p: p["boris_context"].update({"authorization": "secret"}), "BORIS_CONTEXT_INVALID"),
         (lambda p: p["boris_context"].setdefault("session", {}).update({"last_decision": "secret"}), "BORIS_SESSION_INVALID"),
-        (lambda p: p["retrieved_core"].append({"chunk_id": "a", "section": "s", "title": "t", "text": "x", "relevance": 1.0, "embedding": [1]}), "RETRIEVED_CHUNK_INVALID"),
-        (lambda p: p["retrieved_core"].extend([chunk("a", "x"), chunk("a", "y")]) or p["retrieval_metadata"].update({"returned_chunks": 2, "total_characters": 2}), "DUPLICATE_CHUNK_ID"),
-        (lambda p: p["retrieved_core"].extend([chunk(str(i), "x") for i in range(7)]) or p["retrieval_metadata"].update({"returned_chunks": 7, "total_characters": 7}), "RETRIEVAL_LIMIT_EXCEEDED"),
-        (lambda p: p["retrieved_core"].append(chunk("long", "x" * 3001)) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 3001}), "RETRIEVAL_LIMIT_EXCEEDED"),
-        (lambda p: p["retrieval_metadata"].update({"returned_chunks": 99}), "RETRIEVAL_METADATA_MISMATCH"),
-        (lambda p: p["retrieval_metadata"].update({"total_characters": 99}), "RETRIEVAL_METADATA_MISMATCH"),
-        (lambda p: p["retrieval_metadata"].update({"max_chunks": 7}), "RETRIEVAL_LIMIT_INVALID"),
+        (lambda p: p["projected_core"].append({"chunk_id": "a", "section": "s", "title": "t", "text": "x", "relevance": 1.0, "embedding": [1]}), "PROJECTED_CHUNK_INVALID"),
+        (lambda p: p["projected_core"].extend([chunk("a", "x"), chunk("a", "y")]) or p["projection_metadata"].update({"returned_chunks": 2, "total_characters": 2}), "DUPLICATE_CHUNK_ID"),
+        (lambda p: p["projected_core"].extend([chunk(str(i), "x") for i in range(7)]) or p["projection_metadata"].update({"returned_chunks": 7, "total_characters": 7}), "PROJECTION_LIMIT_EXCEEDED"),
+        (lambda p: p["projected_core"].append(chunk("long", "x" * 3001)) or p["projection_metadata"].update({"returned_chunks": 1, "total_characters": 3001}), "PROJECTION_LIMIT_EXCEEDED"),
+        (lambda p: p["projection_metadata"].update({"returned_chunks": 99}), "PROJECTION_METADATA_MISMATCH"),
+        (lambda p: p["projection_metadata"].update({"total_characters": 99}), "PROJECTION_METADATA_MISMATCH"),
+        (lambda p: p["projection_metadata"].update({"max_chunks": 7}), "PROJECTION_LIMIT_INVALID"),
         (lambda p: p["bois_frame"].update({"core": {"system_prompt": "hidden"}}), "FORBIDDEN_PACKET_FIELD"),
     ],
 )
@@ -183,7 +189,7 @@ def test_preflight_failures_return_200_fail(api_context, mutate, code):
     "mutate,code",
     [
         (lambda p: p["sima"].update({"risk": True}), "SIMA_TYPE_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"returned_chunks": False}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["projection_metadata"].update({"returned_chunks": False}), "PROJECTION_METADATA_TYPE_INVALID"),
         (lambda p: p["bois_frame"].update({"framework": 123}), "BOIS_FRAME_TYPE_INVALID"),
         (lambda p: p["bois_frame"].update({"core": "invalid"}), "BOIS_FRAME_TYPE_INVALID"),
         (lambda p: p["bois_frame"].update({"input": []}), "BOIS_FRAME_TYPE_INVALID"),
@@ -212,18 +218,18 @@ def test_preflight_failures_return_200_fail(api_context, mutate, code):
         (lambda p: p["boris_context"].update({"name": "NOT_BORIS"}), "BORIS_NAME_INVALID"),
         (lambda p: p["boris_context"].update({"session": {"session_id": "different"}}), "BORIS_SESSION_ID_MISMATCH"),
         (lambda p: p["boris_context"].update({"session": {"clarification_cycles": 3, "max_clarification_cycles": 2}}), "CLARIFICATION_CYCLES_INVALID"),
-        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"section": 1}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
-        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"title": 1}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
-        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"relevance": "0.1"}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
-        (lambda p: p["retrieved_core"].append(chunk("a", "x") | {"relevance": True}) or p["retrieval_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "RETRIEVED_CHUNK_TYPE_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"truncated": None}), "RETRIEVAL_METADATA_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"truncated": 0}), "RETRIEVAL_METADATA_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"total_characters": 0.0}), "RETRIEVAL_METADATA_TYPE_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"max_chunks": True}), "RETRIEVAL_METADATA_TYPE_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"max_chunk_characters": False}), "RETRIEVAL_METADATA_TYPE_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"max_total_characters": True}), "RETRIEVAL_METADATA_TYPE_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"returned_chunks": -1}), "RETRIEVAL_METADATA_TYPE_INVALID"),
-        (lambda p: p["retrieval_metadata"].update({"total_characters": -1}), "RETRIEVAL_METADATA_TYPE_INVALID"),
+        (lambda p: p["projected_core"].append(chunk("a", "x") | {"section": 1}) or p["projection_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "PROJECTED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["projected_core"].append(chunk("a", "x") | {"title": 1}) or p["projection_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "PROJECTED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["projected_core"].append(chunk("a", "x") | {"relevance": "0.1"}) or p["projection_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "PROJECTED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["projected_core"].append(chunk("a", "x") | {"relevance": True}) or p["projection_metadata"].update({"returned_chunks": 1, "total_characters": 1}), "PROJECTED_CHUNK_TYPE_INVALID"),
+        (lambda p: p["projection_metadata"].update({"truncated": None}), "PROJECTION_METADATA_INVALID"),
+        (lambda p: p["projection_metadata"].update({"truncated": 0}), "PROJECTION_METADATA_INVALID"),
+        (lambda p: p["projection_metadata"].update({"total_characters": 0.0}), "PROJECTION_METADATA_TYPE_INVALID"),
+        (lambda p: p["projection_metadata"].update({"max_chunks": True}), "PROJECTION_METADATA_TYPE_INVALID"),
+        (lambda p: p["projection_metadata"].update({"max_chunk_characters": False}), "PROJECTION_METADATA_TYPE_INVALID"),
+        (lambda p: p["projection_metadata"].update({"max_total_characters": True}), "PROJECTION_METADATA_TYPE_INVALID"),
+        (lambda p: p["projection_metadata"].update({"returned_chunks": -1}), "PROJECTION_METADATA_TYPE_INVALID"),
+        (lambda p: p["projection_metadata"].update({"total_characters": -1}), "PROJECTION_METADATA_TYPE_INVALID"),
     ],
 )
 def test_preflight_strict_types_and_invariants_return_200_fail(api_context, mutate, code):
@@ -248,12 +254,12 @@ def test_preflight_strict_types_and_invariants_return_200_fail(api_context, muta
     assert code in {issue["code"] for issue in body["issues"]}
 
 
-def test_retrieval_metadata_cross_field_limits_are_enforced(api_context):
+def test_projection_metadata_cross_field_limits_are_enforced(api_context):
     app, runtime_registry = api_context
     runtime_registry.clear()
     packet = valid_packet()
-    packet["retrieval_metadata"]["returned_chunks"] = 7
-    packet["retrieval_metadata"]["total_characters"] = 12001
+    packet["projection_metadata"]["returned_chunks"] = 7
+    packet["projection_metadata"]["total_characters"] = 12001
     client = TestClient(app)
 
     response = client.post(
@@ -264,7 +270,7 @@ def test_retrieval_metadata_cross_field_limits_are_enforced(api_context):
     body = response.json()
     assert response.status_code == 200
     assert body["verdict"] == "FAIL"
-    assert "RETRIEVAL_METADATA_MISMATCH" in {issue["code"] for issue in body["issues"]}
+    assert "PROJECTION_METADATA_MISMATCH" in {issue["code"] for issue in body["issues"]}
 
 
 def test_validation_preflight_accepts_runtime_generated_prompt(api_context):
@@ -304,7 +310,7 @@ def test_preflight_detects_configured_secret_but_not_top_level_input(api_context
 
 
 def test_semantic_mode_answer_size_gate_blocks_adapter_construction():
-    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    ValidationEngine = active_module("application.validation").ValidationEngine
 
     report = ValidationEngine(validator_adapter_factory=ForbiddenAdapterFactory()).validate(
         answer="x" * 20001,
@@ -320,7 +326,7 @@ def test_semantic_mode_answer_size_gate_blocks_adapter_construction():
 
 
 def test_semantic_mode_packet_size_gate_blocks_adapter_construction():
-    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    ValidationEngine = active_module("application.validation").ValidationEngine
     packet = valid_packet()
     packet["input"] = "x" * 60001
 
@@ -338,7 +344,7 @@ def test_semantic_mode_packet_size_gate_blocks_adapter_construction():
 
 
 def test_hybrid_size_gate_blocks_semantic_escalation():
-    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    ValidationEngine = active_module("application.validation").ValidationEngine
     packet = valid_packet()
     packet["sima"]["risk"] = 0.9
 
@@ -354,7 +360,7 @@ def test_hybrid_size_gate_blocks_semantic_escalation():
 
 
 def test_deterministic_checks_secret_leak_missing_fields_and_duplicate_questions(monkeypatch):
-    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    ValidationEngine = active_module("application.validation").ValidationEngine
 
     monkeypatch.setenv("OPENAI_API_KEY", "answer-secret-value")
     packet = valid_packet()
@@ -376,7 +382,7 @@ def test_deterministic_checks_secret_leak_missing_fields_and_duplicate_questions
 
 
 def test_semantic_mode_uses_strict_validator_output():
-    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    ValidationEngine = active_module("application.validation").ValidationEngine
 
     adapter = FakeSemanticAdapter({
         "verdict": "REVISE",
@@ -417,8 +423,8 @@ def test_semantic_mode_uses_strict_validator_output():
     ],
 )
 def test_semantic_invalid_output_is_controlled(payload):
-    validation_module = active_module("runtime.validation")
-    semantic_module = sys.modules["runtime.semantic_validation"]
+    validation_module = active_module("application.validation")
+    semantic_module = sys.modules["application.semantic_validation"]
     SemanticValidationOutputError = semantic_module.SemanticValidationOutputError
     ValidationEngine = validation_module.ValidationEngine
 
@@ -471,7 +477,7 @@ def test_semantic_unavailable_and_invalid_output_api_errors(api_context, monkeyp
     ],
 )
 def test_hybrid_escalation_and_merge(packet_factory, deterministic_answer, semantic_verdict, expected):
-    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    ValidationEngine = active_module("application.validation").ValidationEngine
 
     packet = packet_factory()
     adapter = FakeSemanticAdapter({"verdict": semantic_verdict, "issues": [], "recommendations": []})
@@ -488,7 +494,7 @@ def test_hybrid_escalation_and_merge(packet_factory, deterministic_answer, seman
 
 
 def test_hybrid_deterministic_fail_does_not_call_semantic(monkeypatch):
-    ValidationEngine = active_module("runtime.validation").ValidationEngine
+    ValidationEngine = active_module("application.validation").ValidationEngine
 
     monkeypatch.setenv("OPENAI_API_KEY", "answer-secret-value")
 
@@ -504,9 +510,9 @@ def test_hybrid_deterministic_fail_does_not_call_semantic(monkeypatch):
 
 
 def test_hybrid_semantic_unavailable_and_invalid_output_preserve_deterministic(monkeypatch):
-    validation_module = active_module("runtime.validation")
-    config_module = sys.modules["runtime.config"]
-    LLMConfigurationError = config_module.LLMConfigurationError
+    validation_module = active_module("application.validation")
+    from llm.errors import LLMConfigurationError
+
     ValidationEngine = validation_module.ValidationEngine
 
     packet = valid_packet()
@@ -539,70 +545,8 @@ def test_hybrid_semantic_unavailable_and_invalid_output_preserve_deterministic(m
     assert invalid["llm_called"] is True
 
 
-def test_runtime_api_client_validate_posts_expected_body():
-    from mcp_server.runtime_client import RuntimeAPIClient
-
-    captured = {}
-    report = minimal_report()
-
-    def handler(request):
-        captured["method"] = request.method
-        captured["path"] = request.url.path
-        captured["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json=report)
-
-    client = RuntimeAPIClient("http://runtime.test", transport=httpx.MockTransport(handler))
-
-    response = client.validate(answer="BOIS Runtime answer", context_packet=valid_packet())
-
-    assert captured["method"] == "POST"
-    assert captured["path"] == "/runtime/validate"
-    assert captured["body"] == {
-        "answer": "BOIS Runtime answer",
-        "context_packet": valid_packet(),
-        "validation_mode": "deterministic",
-    }
-    assert response == report
-
-
-def test_mcp_validate_returns_structured_report_and_concise_text():
-    from mcp_server.server import run_boris_validate
-
-    class FakeClient:
-        def __init__(self):
-            self.calls = []
-
-        def validate(self, **kwargs):
-            self.calls.append(kwargs)
-            return minimal_report(verdict="REVISE")
-
-    client = FakeClient()
-    result = run_boris_validate(
-        answer="BOIS Runtime answer",
-        context_packet=valid_packet(),
-        validation_mode="deterministic",
-        client=client,
-    )
-
-    assert result["structuredContent"]["verdict"] == "REVISE"
-    assert result["content"] == [
-        {
-            "type": "text",
-            "text": "BORIS validation verdict: REVISE. Review structuredContent for issues and recommendations.",
-        }
-    ]
-    assert "validation_version" not in result["content"][0]["text"]
-    assert client.calls == [
-        {
-            "answer": "BOIS Runtime answer",
-            "context_packet": valid_packet(),
-            "validation_mode": "deterministic",
-        }
-    ]
-
-
 def test_validator_specific_config_falls_back_to_main_settings(monkeypatch):
-    config = active_module("runtime.config")
+    config = active_module("llm.config")
 
     captured = {}
 
@@ -630,41 +574,9 @@ def test_validator_specific_config_falls_back_to_main_settings(monkeypatch):
     config.build_validator_llm_adapter()
 
     assert captured["model"] == "validator-model"
-
-
-def test_validate_does_not_mutate_existing_session_state(api_context, monkeypatch):
-    app, runtime_registry = api_context
-    runtime_registry.clear()
-    monkeypatch.delenv("BOIS_LLM", raising=False)
-    client = TestClient(app)
-    client.post("/runtime/ask", json={"session_id": "existing", "input": "hello"})
-    runtime = runtime_registry.get("existing")
-    before = (
-        copy.deepcopy(runtime.session.state.snapshot()),
-        runtime.session.state.current_input,
-        dict(runtime.session.state.processed_inputs),
-        set(runtime_registry._handles),
-    )
-
-    response = client.post(
-        "/runtime/validate",
-        json={"answer": "BOIS Runtime answer", "context_packet": valid_packet() | {"session_id": "validate-session"}},
-    )
-
-    after = (
-        runtime.session.state.snapshot(),
-        runtime.session.state.current_input,
-        dict(runtime.session.state.processed_inputs),
-        set(runtime_registry._handles),
-    )
-    assert response.status_code == 200
-    assert after == before
-    assert "validate-session" not in runtime_registry._handles
-
-
 def valid_packet():
     return {
-        "packet_version": "boris-context/1.0",
+        "packet_version": "boris-context/2.0",
         "frame_id": "00000000-0000-4000-8000-000000000000",
         "session_id": "validate-session",
         "input": "Explain BOIS Runtime",
@@ -678,8 +590,8 @@ def valid_packet():
             "ambiguity_score": 0.1,
         },
         "boris_context": {},
-        "retrieved_core": [],
-        "retrieval_metadata": {
+        "projected_core": [],
+        "projection_metadata": {
             "returned_chunks": 0,
             "total_characters": 0,
             "truncated": False,
