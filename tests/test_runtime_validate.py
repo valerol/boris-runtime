@@ -474,6 +474,7 @@ def test_semantic_unavailable_and_invalid_output_api_errors(api_context, monkeyp
     assert "Traceback" not in unavailable.text
 
     monkeypatch.delenv("BORIS_VALIDATOR_LLM", raising=False)
+    monkeypatch.delenv("BOIS_LLM", raising=False)
     invalid = client.post(
         "/runtime/validate",
         json={"answer": "BOIS Runtime answer", "context_packet": valid_packet(), "validation_mode": "semantic"},
