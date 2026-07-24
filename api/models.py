@@ -3,23 +3,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, constr
 
 
-ProtocolOutputType = Literal["ANSWER", "QUESTION", "TOOL_CALL", "GAP"]
-
-
-class RuntimeAskRequest(BaseModel):
-    input: constr(strip_whitespace=True, min_length=1)
-    session_id: str | None = None
-    mode: str = "default"
-    context: dict[str, Any] = Field(default_factory=dict)
-
-
-class RuntimeAskResponse(BaseModel):
-    session_id: str
-    type: ProtocolOutputType
-    content: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class RuntimeFrameRequest(BaseModel):
     input: constr(strip_whitespace=True, min_length=1)
     session_id: str | None = None
@@ -34,7 +17,7 @@ class RuntimeSIMAFrame(BaseModel):
     ambiguity_score: float = 0.0
 
 
-class RuntimeRetrievedCoreChunk(BaseModel):
+class RuntimeProjectedCoreChunk(BaseModel):
     chunk_id: str
     section: str
     title: str
@@ -42,7 +25,7 @@ class RuntimeRetrievedCoreChunk(BaseModel):
     relevance: float = 0.0
 
 
-class RuntimeRetrievalMetadata(BaseModel):
+class RuntimeProjectionMetadata(BaseModel):
     returned_chunks: int
     total_characters: int
     truncated: bool
@@ -52,7 +35,7 @@ class RuntimeRetrievalMetadata(BaseModel):
 
 
 class RuntimeFrameResponse(BaseModel):
-    packet_version: Literal["boris-context/1.0"]
+    packet_version: Literal["boris-context/2.0"]
     frame_id: str
     session_id: str
     input: str
@@ -61,8 +44,8 @@ class RuntimeFrameResponse(BaseModel):
     bois_frame: dict[str, Any] = Field(default_factory=dict)
     sima: RuntimeSIMAFrame
     boris_context: dict[str, Any] = Field(default_factory=dict)
-    retrieved_core: list[RuntimeRetrievedCoreChunk] = Field(default_factory=list)
-    retrieval_metadata: RuntimeRetrievalMetadata
+    projected_core: list[RuntimeProjectedCoreChunk] = Field(default_factory=list)
+    projection_metadata: RuntimeProjectionMetadata
     answer_instructions: list[str] = Field(default_factory=list)
     runtime_generated_prompt: str
 
@@ -132,20 +115,6 @@ class RuntimeErrorResponse(BaseModel):
     error: str
     detail: str
     session_id: str | None = None
-
-
-class RuntimeResetRequest(BaseModel):
-    session_id: constr(strip_whitespace=True, min_length=1)
-
-
-class RuntimeResetResponse(BaseModel):
-    session_id: str
-    reset: bool
-
-
-class RuntimeSessionResponse(BaseModel):
-    session_id: str
-    exists: bool
 
 
 class HealthResponse(BaseModel):

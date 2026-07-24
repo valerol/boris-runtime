@@ -2,22 +2,19 @@
 
 The active roadmap is maintained in [docs/roadmap.md](docs/roadmap.md).
 
-Current completed phases:
+Current implemented boundary:
 
-- PHASE 0 - Architecture reset
-- PHASE 1 - CLI MVP
-- PHASE 2 - Core Loader System
-- PHASE 3 - Protocol Engine
-- PHASE 4A-4D.1 - Runtime API, MCP adapter, context packets, and stateless validation
-- PHASE 4E - Core Surface Foundation
-- PHASE 4R - Architecture Consolidation and Runtime Compatibility
+- Core Surface package trust;
+- Runtime compatibility and attestation;
+- Minimal Semantic Executor;
+- stateless CoreSurface-based `boris.frame`;
+- stateless answer validation;
+- consolidated architecture with earlier middleware generations removed.
 
-Current experimental phase:
+Next stages:
 
-- PHASE 4F - Minimal Semantic Executor; implementation and pre-merge hardening complete
-
-Future items:
-
-- Stateful Frame Registry and Packet Authenticity (future; not part of Phase 4D.1)
-- Independent Reviewer
-- Policy Kernel and state admission
+- Independent Reviewer;
+- Policy Kernel;
+- admitted State Events and Cycle Guard;
+- domain physiology and memory;
+- authorized external actions.

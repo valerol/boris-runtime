@@ -78,10 +78,6 @@ def build_llm_adapter():
     raise LLMConfigurationError(f"Unsupported BOIS_LLM mode: {mode}")
 
 
-def build_lazy_llm_adapter():
-    return LazyLLMAdapter(build_llm_adapter)
-
-
 def build_validator_llm_adapter():
     mode = os.getenv("BORIS_VALIDATOR_LLM", os.getenv("BOIS_LLM", "")).strip().lower()
 

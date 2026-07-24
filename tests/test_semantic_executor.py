@@ -414,7 +414,7 @@ def test_llm_calculator_wraps_provider_failure():
 
 
 def test_lazy_llm_adapter_forwards_structured_contract():
-    from runtime.config import LazyLLMAdapter
+    from llm.config import LazyLLMAdapter
 
     calls = []
 

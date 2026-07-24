@@ -1,120 +1,124 @@
 # SDK API
 
-This document describes the current public API implemented in the repository.
-It does not list planned APIs.
-
-## BOISRuntime
-
-Location: `runtime/runtime.py`
-
-`BOISRuntime` is the canonical Runtime composition root. It owns one
-`RuntimeSession`, one `ProtocolEngine`, and the clarification loop.
-
-```python
-from runtime.runtime import BOISRuntime
-
-runtime = BOISRuntime()
-output = runtime.run("Explain BOIS Runtime")
-print(output["type"])
-print(output["content"])
-```
-
-The returned dictionary contains:
-
-- `type`: `ANSWER`, `QUESTION`, `TOOL_CALL`, or `GAP`;
-- `content`: string;
-- `metadata`: object.
-
-`BOISRuntime.frame(...)` reuses the same Runtime framing path without calling
-the LLM or advancing conversation state.
-
-## RuntimeSession
-
-Location: `runtime/session.py`
-
-`RuntimeSession` holds one immutable Phase 2 Core, mutable Runtime state, session
-ID, and creation timestamp.
-
-Use `create_runtime_session(core_ref, session_id=None)` to create a session.
-Core Surface and Semantic Executor are deliberately not attached to this
-session in Phase 4F.
-
-## ProtocolEngine
-
-Location: `protocol/engine.py`
-
-`ProtocolEngine` runs one canonical protocol turn against an existing
-`RuntimeSession`.
-
-```python
-from llm.llm_adapter import MockLLMAdapter
-from protocol.engine import ProtocolEngine
-from runtime.session import create_runtime_session
-
-session = create_runtime_session("core/definitions")
-engine = ProtocolEngine(llm_adapter=MockLLMAdapter())
-output = engine.run_turn(session, "Explain BOIS Runtime")
-```
+This document lists the active programmatic boundaries.
 
 ## Core Surface
-
-Location: `core_surface/`
 
 ```python
 from core_surface import load_core_surface
 
-surface = load_core_surface("/path/to/core.zip", purpose="evaluation")
+surface = load_core_surface(
+    "/path/to/core-package.zip",
+    purpose="evaluation",
+)
 ```
 
-The immutable result separates exact archive, content-set, and manifest hashes.
-It loads and validates passive package data but does not calculate semantics.
+`CoreSurface` is immutable and preserves release identity, normative identity,
+manifest hash, content-set hash, component hashes, machine canon, and native
+norm records.
 
-## Runtime Compatibility
+## Context projection
 
-Location: `runtime_compatibility/`
+```python
+from application.context_projection import project_core_context
 
-`RuntimeCompatibilityVerifier.verify(...)` reads the package's runtime schemas,
-templates, and validation specification and returns a substrate declaration,
-operator decision, specification checks, and RuntimeAttestation.
+projection = project_core_context(surface, "Explain the STOP constraints")
+```
 
-An attestation accepted for `semantic_evaluation` is mandatory before the
-Semantic Executor calculator can be called.
+The result contains a bounded passive projection. It is not a semantic
+applicability decision.
 
-## SemanticExecutor
+## ContextProvider
 
-Location: `semantic_executor/`
+```python
+from application import ContextProvider
 
-`SemanticExecutor(surface, calculator, compatibility)` returns a non-executing
-`ExecutionCandidate`. It is isolated from `ProtocolEngine`, Runtime sessions,
-tools, memory, HTTP, and MCP.
+provider = ContextProvider()
+packet = provider.frame(
+    "Explain the applicable BOIS constraints",
+    session_id="correlation-id",
+)
+```
 
-See [semantic_executor.md](semantic_executor.md) for the complete contract.
+The default provider reads `BORIS_CORE_PACKAGE` and loads the package through
+Core Surface. The former `BORIS_CORE_PATH` alias is not supported.
 
-## Canonical LLM port
+`frame()` is stateless and never calls an LLM.
 
-Location: `llm/llm_adapter.py`
+## ValidationEngine
 
-Adapters implement:
+```python
+from application import ValidationEngine
+
+report = ValidationEngine().validate(
+    answer="ChatGPT-generated answer",
+    context_packet=packet,
+    validation_mode="deterministic",
+)
+```
+
+Supported modes are `deterministic`, `semantic`, and `hybrid`. Semantic modes
+require a validator adapter factory.
+
+## Runtime compatibility
+
+```python
+from runtime_compatibility import (
+    OperatorAcceptance,
+    RuntimeCompatibilityVerifier,
+)
+
+compatibility = RuntimeCompatibilityVerifier().verify(
+    surface,
+    operator_acceptance=acceptance,
+)
+compatibility.require_semantic_evaluation(surface)
+```
+
+Compatibility acceptance authorizes only the declared scope. It does not
+activate a package or authorize state mutation.
+
+## Semantic Executor
+
+```python
+from semantic_executor import SemanticExecutor, SemanticInput
+
+candidate = SemanticExecutor(
+    surface,
+    calculator,
+    compatibility,
+).execute(
+    SemanticInput(
+        phenomenon="Observed phenomenon",
+        phase="semantic_evaluation",
+    )
+)
+```
+
+The return value is an `ExecutionCandidate`, not an executed action or
+`KernelDecision`.
+
+## LLM port
+
+Location: `llm/llm_adapter.py`.
+
+Implementations provide:
 
 ```python
 call(prompt: str) -> str
 call_structured(prompt: str, system_message: str) -> str
 ```
 
-`runtime.config.LazyLLMAdapter` forwards both operations without losing the
-structured system contract or JSON mode.
+Configuration helpers live in `llm/config.py`.
 
-## Compatibility facades
+## Removed SDK contracts
 
-The following imports remain available for earlier SDK callers, but they are no
-longer independent execution paths:
+The following names are no longer supported:
 
-- `runtime.engine.MiddlewareEngine` delegates to `BOISRuntime`;
-- `api.fastapi_server.app` is an alias of `api.app.app`;
-- legacy `POST /run` remains available there as a deprecated compatibility
-  route and delegates through `MiddlewareEngine`;
-- `adapters.llm` names are backed by the canonical `llm` implementations.
-
-Legacy component injection into `MiddlewareEngine` is rejected. The earlier
-`runtime.prompt_builder`, `runtime.response_parser`, and `ProtocolLoop` were
-removed during Phase 4R.
+- `BOISRuntime`;
+- `RuntimeSession`;
+- `ProtocolEngine`;
+- `MiddlewareEngine`;
+- `adapters.llm`;
+- legacy `POST /run`;
+- private `/runtime/ask`, `/runtime/reset`, and `/runtime/session/{id}`.

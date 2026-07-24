@@ -36,19 +36,26 @@ no hard-coded version allowlist. A future package can pass only when its own
 contract uses the supported schema vocabulary and its declared capabilities
 match the receiving Runtime profile. Unsupported contract features fail closed.
 
-Every ID in `VALIDATION_SPEC.required_checks` is executed through an explicit
-Runtime registry. An unknown, duplicate, malformed, or non-passing check
-prevents `spec_check_status=PASS`; unknown future checks produce `HOLD` and the
-semantic calculator is not called. The v2.18 registry covers all 21 declared
-static checks, including archive safety, identity and hash reproduction,
-assurance tables, Predicate DSL conformance, lifecycle constraints, dependency
-acyclicity, runtime templates, inactive candidates, and visible open debts.
+The verifier recognizes both runtime-contract dialects:
+
+- legacy `VALIDATION_SPEC.required_checks` IDs are executed through the
+  explicit Runtime registry;
+- release-envelope `mandatory_checks` are matched exactly against the
+  cryptographically bound `VALIDATION_RECEIPT.json`, while receiving-Runtime
+  capability checks are still performed independently.
+
+An unknown, duplicate, malformed, missing, or non-passing check prevents
+`spec_check_status=PASS`. The v2.18 registry covers all 21 declared legacy
+checks. A release receipt is evidence of package static validation, not proof
+that the receiving Runtime supports a new Predicate DSL, deontic operation, or
+GateDecision contract.
 
 The local JSON Schema evaluator implements the vocabulary used by the current
-runtime records: object, array and string types, required fields, properties,
-additional properties, items, const, enum, regex pattern, and minimum string
-length. A package using an unimplemented schema keyword is rejected rather than
-partially validated.
+runtime records, including local `$ref`, `oneOf`, `allOf`, conditional
+`if`/`then`, collection bounds and uniqueness, date-time format, object, array,
+scalar and null types, required fields, properties, additional properties,
+items, const, enum, regex pattern, and minimum string length. A package using
+an unimplemented schema keyword is rejected rather than partially validated.
 
 ## Identity
 
@@ -64,6 +71,14 @@ The declaration and attestation additionally retain `source_kind` and
 `content_set_sha256`. RuntimeAttestation records every verified manifest
 component hash. The final attestation is itself hashed as canonical JSON, and
 that hash is written into each Semantic Executor trace.
+
+For a release-envelope package, `package_id` and `artifact_version` in the
+package's canonical runtime records remain the normative identity required by
+its schema. `RuntimeCompatibilityResult.package_identity` separately binds the
+original `release_package_id`, `release_version`, `normative_package_id`, and
+`normative_content_version`; its hash is rechecked before semantic evaluation.
+The exact archive and manifest hashes cryptographically connect both records to
+one release without changing the package's canonical schema.
 
 A directory source can still be checked by `core_surface`, but it cannot produce
 an archive-bound RuntimeAttestation.
@@ -86,7 +101,7 @@ Its limitations are explicit:
 - no Independent Reviewer;
 - no Policy Kernel transition;
 - no external action;
-- no RuntimeSession integration.
+- no stateful orchestration-cycle integration.
 
 These limitations do not disappear when the specification checks pass.
 

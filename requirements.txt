@@ -1,20 +1,16 @@
 # Core CLI has no required third-party dependencies.
 
-# Optional API adapter:
+# Optional private API and typed validation contracts:
 fastapi
 uvicorn
 pydantic
-httpx
 
 # Optional real LLM adapter:
 openai
 
-# Optional MCP adapter:
+# Optional public MCP adapter:
+httpx
 mcp
-
-# Optional local BOIS Core retriever:
-sentence-transformers
-numpy
 
 # Development:
 pytest

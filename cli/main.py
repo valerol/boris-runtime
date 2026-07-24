@@ -6,22 +6,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core_retriever.retrieve import CoreRetrieverError
-from runtime.config import build_llm_adapter, load_env_file
-from runtime.runtime import BOISRuntime
-
-
-def ask_for_clarification(output):
-    print(json.dumps(output, ensure_ascii=False))
-    try:
-        return input("clarification> ").strip()
-    except EOFError:
-        return ""
+from application.context_provider import ContextProvider, CoreSurfaceUnavailable
+from llm.config import load_env_file
 
 
 def main():
     load_env_file()
-    runtime = BOISRuntime(llm_adapter=build_llm_adapter())
+    provider = ContextProvider()
 
     while True:
         try:
@@ -29,13 +20,13 @@ def main():
         except EOFError:
             break
 
-        if runtime.engine.is_exit(user_input):
+        if user_input.lower() in {"exit", "quit", "/exit", "/quit"}:
             break
 
         try:
-            output = runtime.run(user_input, input_provider=ask_for_clarification)
-        except CoreRetrieverError as exc:
-            print(f"BOIS Core retriever error: {exc}", file=sys.stderr)
+            output = provider.frame(user_input)
+        except CoreSurfaceUnavailable as exc:
+            print(f"BOIS Core Surface error: {exc}", file=sys.stderr)
             break
         print(json.dumps(output, ensure_ascii=False))
 

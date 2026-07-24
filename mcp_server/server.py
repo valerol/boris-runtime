@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 
 from mcp_server.config import MCPServerConfig, load_config
-from mcp_server.models import BorisAskRequest, BorisFrameRequest, BorisValidateRequest
+from mcp_server.models import BorisFrameRequest
 from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
@@ -19,18 +19,6 @@ TOOL_ANNOTATIONS = {
 }
 
 
-def boris_ask(input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
-    config = load_config()
-    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as client:
-        return run_boris_ask(
-            input=input,
-            session_id=session_id,
-            mode=mode,
-            context=context,
-            client=client,
-        )
-
-
 def boris_frame(input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
     config = load_config()
     with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as client:
@@ -41,38 +29,6 @@ def boris_frame(input: str, session_id: str | None = None, mode: str = "default"
             context=context,
             client=client,
         )
-
-
-def boris_validate(answer: str, context_packet: dict, validation_mode: str = "deterministic"):
-    config = load_config()
-    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as client:
-        return run_boris_validate(
-            answer=answer,
-            context_packet=context_packet,
-            validation_mode=validation_mode,
-            client=client,
-        )
-
-
-def run_boris_ask(
-    input: str,
-    session_id: str | None = None,
-    mode: str = "default",
-    context: dict | None = None,
-    client=None,
-):
-    request = BorisAskRequest(
-        input=input,
-        session_id=session_id,
-        mode=mode,
-        context=context or {},
-    )
-    if client is not None:
-        return _ask_runtime(request, client)
-
-    config = load_config()
-    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as runtime_client:
-        return _ask_runtime(request, runtime_client)
 
 
 def run_boris_frame(
@@ -96,44 +52,6 @@ def run_boris_frame(
         return _frame_runtime(request, runtime_client)
 
 
-def run_boris_validate(
-    answer: str,
-    context_packet: dict,
-    validation_mode: str = "deterministic",
-    client=None,
-):
-    request = BorisValidateRequest(
-        answer=answer,
-        context_packet=context_packet,
-        validation_mode=validation_mode,
-    )
-    if client is not None:
-        return _validate_runtime(request, client)
-
-    config = load_config()
-    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as runtime_client:
-        return _validate_runtime(request, runtime_client)
-
-
-def _ask_runtime(request, runtime_client):
-    try:
-        runtime_payload = runtime_client.ask(
-            input=request.input,
-            session_id=request.session_id,
-            mode=request.mode,
-            context=request.context,
-        )
-        return normalize_tool_result(runtime_payload)
-    except RuntimeAPIError as exc:
-        if exc.payload:
-            return normalize_tool_result(exc.payload)
-        return normalize_tool_result({
-            "error": "runtime_api_error",
-            "detail": str(exc),
-            "session_id": request.session_id,
-        })
-
-
 def _frame_runtime(request, runtime_client):
     try:
         runtime_payload = runtime_client.frame(
@@ -145,60 +63,31 @@ def _frame_runtime(request, runtime_client):
         return normalize_frame_tool_result(runtime_payload)
     except RuntimeAPIError as exc:
         if exc.payload:
-            return normalize_tool_result(exc.payload)
-        return normalize_tool_result({
+            return normalize_error_result(exc.payload)
+        return normalize_error_result({
             "error": "runtime_api_error",
             "detail": str(exc),
             "session_id": request.session_id,
         })
 
 
-def _validate_runtime(request, runtime_client):
-    try:
-        runtime_payload = runtime_client.validate(
-            answer=request.answer,
-            context_packet=request.context_packet,
-            validation_mode=request.validation_mode,
-        )
-        return normalize_validation_tool_result(runtime_payload)
-    except RuntimeAPIError as exc:
-        if exc.payload:
-            return normalize_tool_result(exc.payload)
-        return normalize_tool_result({
-            "error": "runtime_api_error",
-            "detail": str(exc),
-            "session_id": request.context_packet.get("session_id"),
-        })
-
-
-def normalize_tool_result(payload):
-    if "error" in payload:
-        detail = str(payload.get("detail", "Runtime API error"))
-        return {
-            "structuredContent": dict(payload),
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Runtime error: {detail}",
-                }
-            ],
-            "isError": True,
-        }
-
+def normalize_error_result(payload):
+    detail = str(payload.get("detail", "Runtime API error"))
     return {
         "structuredContent": dict(payload),
         "content": [
             {
                 "type": "text",
-                "text": str(payload.get("content", "")),
+                "text": f"Runtime error: {detail}",
             }
         ],
+        "isError": True,
     }
 
 
 def normalize_frame_tool_result(payload):
     if "error" in payload:
-        return normalize_tool_result(payload)
+        return normalize_error_result(payload)
 
     runtime_prompt = str(payload.get("runtime_generated_prompt", ""))
     return {
@@ -211,25 +100,6 @@ def normalize_frame_tool_result(payload):
                     "generate your own answer from it. Do not hide, shorten, or omit "
                     "the Runtime-generated prompt.\n\n"
                     f"{runtime_prompt}"
-                ),
-            }
-        ],
-    }
-
-
-def normalize_validation_tool_result(payload):
-    if "error" in payload:
-        return normalize_tool_result(payload)
-
-    verdict = str(payload.get("verdict", "INDETERMINATE"))
-    return {
-        "structuredContent": dict(payload),
-        "content": [
-            {
-                "type": "text",
-                "text": (
-                    f"BORIS validation verdict: {verdict}. "
-                    "Review structuredContent for issues and recommendations."
                 ),
             }
         ],
@@ -252,10 +122,10 @@ def to_call_tool_result(envelope, call_tool_result_cls, text_content_cls):
 
 def create_mcp_server(config: MCPServerConfig | None = None):
     try:
+        from fastapi.responses import JSONResponse
         from mcp.server.fastmcp import FastMCP
         from mcp.server.transport_security import TransportSecuritySettings
         from mcp.types import CallToolResult, TextContent, ToolAnnotations
-        from starlette.responses import JSONResponse
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "The MCP server requires the 'mcp' package. "

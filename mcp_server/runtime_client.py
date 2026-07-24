@@ -18,15 +18,6 @@ class RuntimeAPIClient:
             transport=transport,
         )
 
-    def ask(self, input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
-        return self._post_runtime(
-            "/runtime/ask",
-            input=input,
-            session_id=session_id,
-            mode=mode,
-            context=context,
-        )
-
     def frame(self, input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
         return self._post_runtime(
             "/runtime/frame",
@@ -35,14 +26,6 @@ class RuntimeAPIClient:
             mode=mode,
             context=context,
         )
-
-    def validate(self, answer: str, context_packet: dict, validation_mode: str = "deterministic"):
-        request_body = {
-            "answer": answer,
-            "context_packet": dict(context_packet or {}),
-            "validation_mode": validation_mode,
-        }
-        return self._post_json("/runtime/validate", request_body)
 
     def _post_runtime(self, path, input, session_id=None, mode="default", context=None):
         request_body = {
