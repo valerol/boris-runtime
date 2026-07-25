@@ -61,8 +61,8 @@ def main():
     parser.add_argument(
         "--operator-acceptance",
         help=(
-            "Path to an OperatorAcceptance JSON record bound to the exact "
-            "archive hash. Without it the compatibility decision remains HOLD."
+            "Path to an OperatorAcceptance JSON record bound to the loaded "
+            "Core source. Without it the compatibility decision remains HOLD."
         ),
     )
     args = parser.parse_args()

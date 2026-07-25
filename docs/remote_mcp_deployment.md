@@ -20,15 +20,20 @@ the Semantic Executor, call OpenAI directly, or store memory.
 The private Runtime process must be configured with a package source:
 
 ```bash
-BORIS_CORE_PACKAGE=/opt/boris-core/current.zip
-BORIS_OPERATOR_ACCEPTANCE_FILE=/etc/boris-runtime/operator-acceptance.json
+BORIS_CORE_PACKAGE=/opt/boris-core
 BOIS_LLM=openai
 OPENAI_API_KEY=...
 ```
 
-Semantic execution requires an exact Core ZIP. The server-owned
-`OperatorAcceptance` must match that ZIP, artifact version, and manifest, and
-must accept only the `semantic_evaluation` scope required by this route.
+`/opt/boris-core` is the server-owned checkout used by Runtime at the current
+project stage. Runtime binds this directory to its manifest, reproducible
+content-set hash, and verified component hashes. The configured repository
+selection authorizes only the `semantic_evaluation` scope required by this
+route. Do not package the checkout into an exact ZIP and do not create a
+deployment-side `operator-acceptance.json`.
+
+Exact ZIP plus explicit `OperatorAcceptance` remains an optional archive
+compatibility path; it is not the production deployment protocol.
 
 Available public MCP tools:
 
@@ -108,8 +113,10 @@ routes remain on the private interface.
 
 `/runtime/execute` returns `boris-execution/1.0` with
 `status: "semantic_candidate"`. `PASS`, `HOLD`, `STOP`, and `REPAIR` are normal
-HTTP 200 Runtime results. Missing acceptance, compatibility rejection,
-invalid compiler output, and LLM failures use controlled error envelopes.
+HTTP 200 Runtime results. Core-source compatibility rejection, invalid
+compiler output, and LLM failures use controlled error envelopes. Archive mode
+also reports missing or mismatched explicit acceptance through a controlled
+error.
 Production output omits diagnostic trace data.
 
 `/runtime/frame` returns packets with `packet_version:

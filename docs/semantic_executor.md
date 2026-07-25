@@ -37,8 +37,8 @@ writes, and external action are outside this phase.
 Semantic View or calls the calculator. The result must prove:
 
 - the package runtime schema was validated;
-- the declaration, operator decision, and attestation refer to the same exact
-  archive, manifest, content set, and substrate;
+- the declaration, scoped decision, and attestation refer to the same Core
+  source, manifest, content set, and substrate;
 - loaded component hashes still match the immutable surface;
 - substrate-defined checks produced `PASS`;
 - activation status is `ACCEPTED_IN_SCOPE`;
@@ -102,7 +102,7 @@ The current evaluator implements the Core v2.23 release operator vocabulary:
 logical composition, literals, existence and non-empty checks, typed equality
 and enum membership, array bounds and uniqueness, identifier checks, scope
 relations, subject/cycle relations, and package reference resolution. Legacy
-`gte` and `scope_match` remain supported for older compatible archives.
+`gte` and `scope_match` remain supported for older compatible sources.
 
 A missing path remains `UNKNOWN`. Material unknowns constrain the final
 candidate to `HOLD`; a formal `ERROR` is a predicate or type defect and
@@ -114,8 +114,8 @@ constrains the gate to `REPAIR`.
 text as untrusted semantic data. The model must return one strict JSON object
 containing:
 
-- the exact Core Surface package ID, version, source kind, archive SHA-256,
-  content-set SHA-256, and manifest SHA-256;
+- the exact Core Surface package ID, version, source kind, content-set SHA-256,
+  and manifest SHA-256, plus archive SHA-256 when the source is a ZIP;
 - the exact phase;
 - exactly one result for every selected norm;
 - semantic applicability, reasoning, and material unknowns;
@@ -181,30 +181,18 @@ No missing human-readable classification is inferred.
 ## Programmatic Use
 
 ```python
+from application.execution import OperatorAcceptanceProvider
 from core_surface import load_core_surface
 from llm.llm_adapter import OpenAIAdapter
-from runtime_compatibility import (
-    OperatorAcceptance,
-    RuntimeCompatibilityVerifier,
-)
+from runtime_compatibility import RuntimeCompatibilityVerifier
 from semantic_executor import (
     LLMSemanticCalculator,
     SemanticExecutor,
     SemanticInput,
 )
 
-surface = load_core_surface("/path/to/core.zip", purpose="evaluation")
-acceptance = OperatorAcceptance(
-    package_id=surface.package_id,
-    artifact_version=surface.artifact_version,
-    archive_sha256=surface.archive_sha256,
-    manifest_sha256=surface.manifest_sha256,
-    operator_role="OPERATOR",
-    decision="ACCEPT",
-    accepted_scope=("semantic_evaluation",),
-    decision_time="2026-07-23T00:00:00Z",
-    revocation_route="Replace this OperatorAcceptance record.",
-)
+surface = load_core_surface("/opt/boris-core", purpose="evaluation")
+acceptance = OperatorAcceptanceProvider().get(surface)
 compatibility = RuntimeCompatibilityVerifier().verify(
     surface,
     operator_acceptance=acceptance,
@@ -246,15 +234,19 @@ python -m semantic_executor \
 The CLI loads packages for `evaluation` only and prints either a validated
 `ExecutionCandidate` or a controlled rejection. Without an acceptance record,
 the compatibility decision remains `HOLD` and the calculator is not called.
+This explicit-file CLI workflow is separate from server deployment;
+`ExecutionService` accepts the configured repository directory without a
+sidecar file.
 
 ## Current Core Integration Tests
 
-The Core archive remains outside this repository. By project convention, the
+The Core repository remains separate from Runtime. By project convention, the
 highest available Core release is current; older releases are used only for an
-explicit compatibility check. Run the current real-package checks with:
+explicit compatibility check. Run the current real-source checks directly
+against its checkout:
 
 ```bash
-BORIS_CURRENT_CORE_PATH=/path/to/current-core.zip pytest -q \
+BORIS_CURRENT_CORE_PATH=/path/to/boris-core pytest -q \
   tests/test_current_core_integration.py
 ```
 
@@ -263,7 +255,7 @@ They verify:
 - the package's canonical and operational Predicate DSL test vectors;
 - all positive and negative assurance gate predicates;
 - `N-GEN-027` machine-field separation;
-- exact current-archive RuntimeAttestation and schema validation;
+- current-source RuntimeAttestation and content binding;
 - `HOLD` for a material claim without evidence;
 - `HOLD` for an external action without authority;
 - evaluation-only handling of inactive `T-N-043`;
@@ -273,5 +265,5 @@ Synthetic tests cover layer separation, trigger selection, strict references,
 prompt-injection containment, unknown future `norm_type`, equal-priority
 conflicts, and prohibition of claimed execution.
 They also cover future contract versions without a number allowlist,
-exact-archive acceptance, stronger-gate preservation, structured lazy LLM
+exact-source acceptance, stronger-gate preservation, structured lazy LLM
 forwarding, and controlled provider failure.

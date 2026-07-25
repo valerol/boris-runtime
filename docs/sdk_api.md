@@ -42,7 +42,9 @@ packet = provider.frame(
 ```
 
 The default provider reads `BORIS_CORE_PACKAGE` and loads the package through
-Core Surface. The former `BORIS_CORE_PATH` alias is not supported.
+Core Surface. Production currently points it at the checked-out
+`/opt/boris-core` directory; an exact ZIP is not required. The former
+`BORIS_CORE_PATH` alias is not supported.
 
 `frame()` is stateless and never calls an LLM. Modes `default` and `production`
 return the compact `boris-context/2.0` packet. Mode `developer` additionally
@@ -67,11 +69,10 @@ require a validator adapter factory.
 ## Runtime compatibility
 
 ```python
-from runtime_compatibility import (
-    OperatorAcceptance,
-    RuntimeCompatibilityVerifier,
-)
+from application.execution import OperatorAcceptanceProvider
+from runtime_compatibility import RuntimeCompatibilityVerifier
 
+acceptance = OperatorAcceptanceProvider().get(surface)
 compatibility = RuntimeCompatibilityVerifier().verify(
     surface,
     operator_acceptance=acceptance,

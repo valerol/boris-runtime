@@ -18,7 +18,7 @@
 - package-declared required-check registry;
 - canonical `SubstrateDeclaration`;
 - `OperatorAcceptance`;
-- archive-bound `RuntimeAttestation`;
+- archive- or repository-content-bound `RuntimeAttestation`;
 - fail-closed capability and schema checks.
 
 ### Minimal Semantic Executor
@@ -34,7 +34,7 @@
 ### Semantic Execution Entry
 
 - strict application-level `SemanticInputCompiler`;
-- server-owned, exact-archive `OperatorAcceptance`;
+- scoped acceptance of the server-configured `boris-core` checkout;
 - `ExecutionService` route through Runtime Compatibility and Semantic Executor;
 - private `POST /runtime/execute`;
 - sole public MCP tool `boris.execute`;

@@ -213,7 +213,7 @@ class RuntimeCompatibilityResult:
         expected_identity = (
             surface.package_id,
             surface.artifact_version,
-            surface.archive_sha256,
+            surface.archive_sha256 or "",
             surface.manifest_sha256,
             surface.content_set_sha256,
         )

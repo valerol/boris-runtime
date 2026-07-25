@@ -14,7 +14,7 @@ immutable CoreSurface
   -> application Context Projector
   -> bounded context projection
 
-immutable CoreSurface + server OperatorAcceptance
+immutable CoreSurface + trusted server Core selection
   -> Runtime Compatibility
   -> application ExecutionService
   -> SemanticInputCompiler
@@ -43,9 +43,9 @@ unverified machine JSON directly.
 ## Semantic path
 
 ```text
-Core ZIP
+server boris-core checkout
   -> CoreSurface
-  -> server-owned OperatorAcceptance
+  -> repository content binding and scoped acceptance
   -> RuntimeCompatibilityVerifier
   -> RuntimeAttestation
   -> SemanticInputCompiler
@@ -63,8 +63,10 @@ The receiving profile supports both the legacy three-valued Predicate DSL and
 the current Core v2.23 four-valued contract. `UNKNOWN` constrains material
 uncertainty to `HOLD`; formal `ERROR` constrains the candidate to `REPAIR`.
 
-Compatibility and exact-archive acceptance are checked before the compiler or
-calculator can call an LLM. The compiler preserves raw input and request
+Compatibility and repository content binding are checked before the compiler
+or calculator can call an LLM. The configured server directory is accepted only
+for `semantic_evaluation`; archive compatibility mode still requires an
+explicit acceptance record. The compiler preserves raw input and request
 context as an untrusted phenomenon; it may classify only phases, triggers,
 layers, scopes, and explicitly named norm references exposed by the verified
 Core Surface. Supplied facts, evidence, and authority must be copied exactly.

@@ -60,6 +60,7 @@ class RuntimeProfile:
         "component_hash_verification",
         "content_set_hash_binding",
         "deontic_operation_validation",
+        "directory_content_set_binding",
         "gate_decision_semantics",
         "immutable_passive_core_surface",
         "no_direct_state_mutation",

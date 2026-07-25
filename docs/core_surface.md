@@ -47,8 +47,10 @@ Identity fields are intentionally separate:
   bytes for both source kinds;
 - `manifest_sha256` binds the exact manifest.
 
-A directory hash is never presented as an archive hash. Canonical Runtime
-attestation therefore requires the original ZIP.
+A directory hash is never presented as an archive hash. Runtime attests a
+server repository source through `content_set_sha256`, `manifest_sha256`, and
+the verified component hashes; archive sources additionally retain the exact
+ZIP hash.
 
 ## Manifest dialects
 

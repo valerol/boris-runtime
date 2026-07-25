@@ -58,16 +58,17 @@ middleware generations and are not compatibility paths.
 Copy `.env.example` to `.env` and set:
 
 ```bash
-BORIS_CORE_PACKAGE=/opt/boris-core/current.zip
-BORIS_OPERATOR_ACCEPTANCE_FILE=/etc/boris-runtime/operator-acceptance.json
+BORIS_CORE_PACKAGE=/opt/boris-core
 ```
 
-`BORIS_CORE_PACKAGE` must identify a Core ZIP accepted by
-`core_surface.load_core_surface` for semantic execution.
-`BORIS_OPERATOR_ACCEPTANCE_FILE` is a server-owned record bound to that exact
-archive, artifact version, manifest, and `semantic_evaluation` scope. It is
-never accepted from an MCP request. A legacy machine JSON file is not a valid
-source.
+At the current deployment stage, `BORIS_CORE_PACKAGE` identifies the checked-out
+`boris-core` repository. Runtime verifies the directory through its manifest,
+content-set hash, and component hashes. Selecting that server-owned directory
+authorizes only `semantic_evaluation`; no exact Core ZIP or separate
+`operator-acceptance.json` is required. Acceptance is never read from an MCP
+request. Archive sources remain supported for isolated compatibility work and
+still require an explicit server-owned acceptance record. A legacy machine JSON
+file is not a valid source.
 
 When several Core releases are available, configure the highest version as the
 current package. Older releases are used only for an explicit compatibility
@@ -114,8 +115,9 @@ The response uses `execution_version: "boris-execution/1.0"` and
 `status: "semantic_candidate"`. It includes the constrained gate, candidate
 result, norm results, unknowns, conflicts, alternatives, and explicit
 limitations. `HOLD`, `STOP`, and `REPAIR` are normal HTTP 200 Runtime results.
-Missing or mismatched server acceptance, invalid compiled input, and provider
-failures return controlled fail-closed errors.
+Invalid Core source binding, invalid compiled input, and provider failures
+return controlled fail-closed errors. An archive source with missing or
+mismatched server acceptance also fails closed.
 
 Set `mode` to `developer` to add the safe combined lexical and semantic trace:
 compiled `SemanticInput`, Core reference, RuntimeAttestation, selected norms,
@@ -160,7 +162,7 @@ answer or weaken its gate. No public `boris.frame` alias is registered.
 Validate a package:
 
 ```bash
-python -m core_surface /path/to/core-package.zip
+python -m core_surface /opt/boris-core
 ```
 
 Run an isolated semantic calculation:
@@ -179,7 +181,7 @@ fail-closed.
 
 ```bash
 python -m pytest -q
-BORIS_CURRENT_CORE_PATH=/path/to/current-core.zip \
+BORIS_CURRENT_CORE_PATH=/path/to/boris-core \
   python -m pytest -q tests/test_current_core_integration.py
 python -m compileall -q \
   application api cli core_surface llm mcp_server \
