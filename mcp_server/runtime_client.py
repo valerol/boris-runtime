@@ -22,14 +22,12 @@ class RuntimeAPIClient:
         self,
         input: str,
         session_id: str | None = None,
-        mode: str = "default",
         context: dict | None = None,
     ):
         return self._post_runtime(
             "/runtime/frame",
             input=input,
             session_id=session_id,
-            mode=mode,
             context=context,
         )
 
@@ -37,22 +35,19 @@ class RuntimeAPIClient:
         self,
         input: str,
         session_id: str | None = None,
-        mode: str = "default",
         context: dict | None = None,
     ):
         return self._post_runtime(
             "/runtime/execute",
             input=input,
             session_id=session_id,
-            mode=mode,
             context=context,
         )
 
-    def _post_runtime(self, path, input, session_id=None, mode="default", context=None):
+    def _post_runtime(self, path, input, session_id=None, context=None):
         request_body = {
             "input": input,
             "session_id": session_id,
-            "mode": mode,
             "context": dict(context or {}),
         }
         return self._post_json(path, request_body)

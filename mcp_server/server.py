@@ -1,6 +1,4 @@
 import json
-from typing import Literal
-
 from pydantic import ValidationError
 
 from llm.config import PROJECT_ROOT, load_env_file
@@ -13,7 +11,7 @@ SERVER_INSTRUCTIONS = (
     "BORIS exposes one public tool: boris.execute. Use it for the Runtime's "
     "semantic evaluation route. Present its ExecutionCandidate without replacing "
     "it with an independent answer or weakening HOLD, STOP, or REPAIR. "
-    "mode=developer adds the safe projection and semantic trace. The result is "
+    "Server developer mode adds the safe projection and semantic trace. The result is "
     "not independently reviewed, policy-admitted, state-mutating, or executed."
 )
 
@@ -27,7 +25,6 @@ TOOL_ANNOTATIONS = {
 def boris_execute(
     input: str,
     session_id: str | None = None,
-    mode: str = "default",
     context: dict | None = None,
 ):
     config = load_config()
@@ -38,7 +35,6 @@ def boris_execute(
         return run_boris_execute(
             input=input,
             session_id=session_id,
-            mode=mode,
             context=context,
             client=client,
         )
@@ -47,14 +43,12 @@ def boris_execute(
 def run_boris_execute(
     input: str,
     session_id: str | None = None,
-    mode: str = "default",
     context: dict | None = None,
     client=None,
 ):
     request = BorisExecuteRequest(
         input=input,
         session_id=session_id,
-        mode=mode,
         context=context or {},
     )
     if client is not None:
@@ -73,7 +67,6 @@ def _execute_runtime(request, runtime_client):
         runtime_payload = runtime_client.execute(
             input=request.input,
             session_id=request.session_id,
-            mode=request.mode,
             context=request.context,
         )
         return normalize_execution_tool_result(runtime_payload)
@@ -196,20 +189,18 @@ def create_mcp_server(config: MCPServerConfig | None = None):
     def tool_boris_execute(
         input: str,
         session_id: str | None = None,
-        mode: Literal["default", "production", "developer"] = "default",
         context: dict | None = None,
     ) -> CallToolResult:
         """Run the read-only BORIS semantic route.
 
-        Returns an ExecutionCandidate. Developer mode adds the safe projection
-        and semantic trace. The candidate is not independently reviewed,
+        Returns an ExecutionCandidate. Server developer mode adds the safe
+        projection and semantic trace. The candidate is not independently reviewed,
         policy-admitted, state-mutating, or executed.
         """
         try:
             envelope = boris_execute(
                 input=input,
                 session_id=session_id,
-                mode=mode,
                 context=context,
             )
         except ValidationError as exc:

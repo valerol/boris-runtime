@@ -82,7 +82,6 @@ def frame_runtime(request: RuntimeFrameRequest):
         return context_provider.frame(
             request.input,
             session_id=session_id,
-            mode=request.mode,
         )
     except CoreSurfaceUnavailable as exc:
         return _error_response(
@@ -112,7 +111,6 @@ def execute_runtime(request: RuntimeExecutionRequest):
         return execution_service.execute(
             request.input,
             session_id=session_id,
-            mode=request.mode,
             context=request.context,
         )
     except CoreSurfaceUnavailable as exc:

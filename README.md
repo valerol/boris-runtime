@@ -112,7 +112,6 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
   -d '{
     "session_id": "execution-test",
     "input": "Explain the applicable BOIS constraints",
-    "mode": "production",
     "context": {}
   }'
 ```
@@ -125,11 +124,12 @@ Invalid Core source binding, invalid compiled input, and provider failures
 return controlled fail-closed errors. An archive source with missing or
 mismatched server acceptance also fails closed.
 
-Set `mode` to `developer` to add the safe combined lexical and semantic trace:
+Set `BORIS_RUNTIME_MODE=dev` in the server `.env` to add the safe combined
+lexical and semantic trace:
 compiled `SemanticInput`, Core reference, RuntimeAttestation, selected norms,
 formal predicates, suggested and constrained gates, validation issues, stage
-ledger, and timings. `default` and `production` follow the same execution route
-without this trace.
+ledger, and timings. Any other or absent value returns the compact envelope.
+The request cannot enable or disable server observability.
 
 `/runtime/frame` is stateless. `session_id` is correlation data, not a stored
 conversation. The response uses `packet_version: "boris-context/2.0"` and
@@ -158,8 +158,8 @@ The MCP server exposes one public read-only tool: `boris.execute`. It communicat
 with the private API over HTTP and does not import Runtime internals, load Core
 packages, call LLMs, or store memory.
 
-For an observable response, call `boris.execute` with `mode: "developer"`.
-ChatGPT must present the complete safe trace first and then the Runtime
+When the Runtime server uses `BORIS_RUNTIME_MODE=dev`, ChatGPT must present the
+complete safe trace first and then the Runtime
 candidate. It must not replace the candidate with an independently generated
 answer or weaken its gate. No public `boris.frame` alias is registered.
 

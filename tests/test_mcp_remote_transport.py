@@ -49,6 +49,7 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
     assert "boris.validate" not in tool_names
     assert "ExecutionCandidate" in execute_tool.description
     assert "not independently reviewed" in execute_tool.description
+    assert "mode" not in execute_tool.inputSchema["properties"]
     assert execute_tool.annotations.readOnlyHint is True
     assert execute_tool.annotations.openWorldHint is False
     assert execute_tool.annotations.destructiveHint is False
@@ -116,7 +117,7 @@ class FakeRuntimeAPIClient:
     def __exit__(self, exc_type, exc, traceback):
         return None
 
-    def execute(self, input, session_id=None, mode="default", context=None):
+    def execute(self, input, session_id=None, context=None):
         packet = execution_packet()
         packet["session_id"] = session_id or packet["session_id"]
         return packet

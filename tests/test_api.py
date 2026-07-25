@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 import api.app as app_module
+from api.models import RuntimeExecutionRequest, RuntimeFrameRequest
 from application.context_provider import CoreSurfaceUnavailable
 from application.execution import (
     OperatorAcceptanceUnavailable,
@@ -16,8 +17,8 @@ class FakeContextProvider:
         self.error = error
         self.calls = []
 
-    def frame(self, user_input, session_id=None, mode="default"):
-        self.calls.append((user_input, session_id, mode))
+    def frame(self, user_input, session_id=None):
+        self.calls.append((user_input, session_id))
         if self.error:
             raise self.error
         return frame_packet(user_input, session_id)
@@ -33,10 +34,9 @@ class FakeExecutionService:
         self,
         user_input,
         session_id=None,
-        mode="default",
         context=None,
     ):
-        self.calls.append((user_input, session_id, mode, context))
+        self.calls.append((user_input, session_id, context))
         if self.error:
             raise self.error
         return execution_packet(session_id, gate=self.gate)
@@ -53,6 +53,11 @@ def test_health_returns_ok():
     }
 
 
+def test_runtime_request_schemas_do_not_expose_mode():
+    assert "mode" not in RuntimeFrameRequest.model_json_schema()["properties"]
+    assert "mode" not in RuntimeExecutionRequest.model_json_schema()["properties"]
+
+
 def test_runtime_frame_delegates_to_context_provider(monkeypatch):
     provider = FakeContextProvider()
     monkeypatch.setattr(app_module, "context_provider", provider)
@@ -62,7 +67,6 @@ def test_runtime_frame_delegates_to_context_provider(monkeypatch):
         json={
             "session_id": "frame-test",
             "input": "Explain BOIS Runtime",
-            "mode": "default",
             "context": {"source": "pytest"},
         },
     )
@@ -74,7 +78,7 @@ def test_runtime_frame_delegates_to_context_provider(monkeypatch):
     assert body["input"] == "Explain BOIS Runtime"
     assert body["runtime_mode"] == "context_provider"
     assert body["llm_called"] is False
-    assert provider.calls == [("Explain BOIS Runtime", "frame-test", "default")]
+    assert provider.calls == [("Explain BOIS Runtime", "frame-test")]
 
 
 def test_runtime_frame_generates_session_id(monkeypatch):
@@ -86,33 +90,11 @@ def test_runtime_frame_generates_session_id(monkeypatch):
     assert response.status_code == 200
     assert response.json()["session_id"]
     assert provider.calls[0][1]
-    assert provider.calls[0][2] == "default"
+    assert len(provider.calls[0]) == 2
 
 
 def test_runtime_frame_empty_input_returns_validation_error():
     response = client.post("/runtime/frame", json={"input": "   "})
-
-    assert response.status_code == 422
-
-
-def test_runtime_frame_passes_developer_mode(monkeypatch):
-    provider = FakeContextProvider()
-    monkeypatch.setattr(app_module, "context_provider", provider)
-
-    response = client.post(
-        "/runtime/frame",
-        json={"input": "Explain BOIS", "mode": "developer"},
-    )
-
-    assert response.status_code == 200
-    assert provider.calls[0][2] == "developer"
-
-
-def test_runtime_frame_rejects_unknown_mode():
-    response = client.post(
-        "/runtime/frame",
-        json={"input": "Explain BOIS", "mode": "debug"},
-    )
 
     assert response.status_code == 422
 
@@ -165,7 +147,6 @@ def test_runtime_execute_delegates_to_execution_service(monkeypatch):
         json={
             "session_id": "execution-test",
             "input": "Explain BOIS Runtime",
-            "mode": "developer",
             "context": {"facts": {"source_supplied": True}},
         },
     )
@@ -179,7 +160,6 @@ def test_runtime_execute_delegates_to_execution_service(monkeypatch):
         (
             "Explain BOIS Runtime",
             "execution-test",
-            "developer",
             {"facts": {"source_supplied": True}},
         )
     ]
