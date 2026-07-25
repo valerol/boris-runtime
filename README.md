@@ -55,11 +55,17 @@ middleware generations and are not compatibility paths.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set:
+The repository tracks non-secret Runtime and MCP settings in `.env`. Secret
+variables are present there only as empty placeholders. Put real secret values
+in the ignored `.env.local` file:
 
 ```bash
-BORIS_CORE_PACKAGE=/opt/boris-core
+OPENAI_API_KEY=...
 ```
+
+Runtime entry points load `.env` first and `.env.local` second. Values already
+present in the process environment have the highest priority; `.env.local`
+overrides tracked `.env` values otherwise.
 
 At the current deployment stage, `BORIS_CORE_PACKAGE` identifies the checked-out
 `boris-core` repository. Runtime verifies the directory through its manifest,
@@ -75,12 +81,12 @@ current package. Older releases are used only for an explicit compatibility
 test.
 
 LLM settings are used by the Semantic Input compiler, Semantic Executor
-calculator, and optional semantic answer validation:
+calculator, and optional semantic answer validation. Non-secret provider
+selection and model settings belong in tracked `.env`:
 
 ```bash
 BOIS_LLM=openai
-OPENAI_API_KEY=...
-OPENAI_MODEL=...
+OPENAI_MODEL=gpt-4o
 ```
 
 ## Private Runtime API

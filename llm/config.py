@@ -6,6 +6,7 @@ from llm.llm_adapter import MockLLMAdapter, OpenAIAdapter
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_ENV_FILES = (".env", ".env.local")
 
 
 class LazyLLMAdapter:
@@ -35,8 +36,18 @@ class LazyLLMAdapter:
 
 
 def load_env_file(path=None):
-    env_path = Path(path) if path else PROJECT_ROOT / ".env"
+    env_paths = (
+        (Path(path),)
+        if path
+        else tuple(PROJECT_ROOT / name for name in DEFAULT_ENV_FILES)
+    )
+    protected_keys = set(os.environ)
 
+    for env_path in env_paths:
+        _load_env_path(env_path, protected_keys)
+
+
+def _load_env_path(env_path, protected_keys):
     if not env_path.exists():
         return
 
@@ -53,7 +64,7 @@ def load_env_file(path=None):
         key = key.strip()
         value = value.strip().strip('"').strip("'")
 
-        if key and key not in os.environ:
+        if key and key not in protected_keys:
             os.environ[key] = value
 
 

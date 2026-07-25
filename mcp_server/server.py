@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from llm.config import load_env_file
 from mcp_server.config import MCPServerConfig, load_config
 from mcp_server.models import BorisExecuteRequest
 from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
@@ -263,6 +264,7 @@ def create_remote_app(config: MCPServerConfig | None = None):
 
 
 def main():
+    load_env_file()
     config = load_config()
     if config.transport not in {"stdio", "streamable-http"}:
         raise RuntimeError(

@@ -17,13 +17,32 @@ Runtime API 127.0.0.1:8000
 The MCP server is an adapter. It does not contain BOIS/SIMA/BORIS logic, import
 the Semantic Executor, call OpenAI directly, or store memory.
 
-The private Runtime process must be configured with a package source:
+The repository tracks non-secret deployment settings in `.env`, including the
+private Runtime package source:
 
 ```bash
 BORIS_CORE_PACKAGE=/opt/boris-core
 BOIS_LLM=openai
+OPENAI_MODEL=gpt-4o
+```
+
+Tracked `.env` also declares `OPENAI_API_KEY=` as an empty secret placeholder.
+Store the real value only in ignored `.env.local`:
+
+```bash
 OPENAI_API_KEY=...
 ```
+
+Runtime and MCP entry points load `.env` followed by `.env.local`. Existing
+process variables remain authoritative; otherwise `.env.local` overrides
+tracked settings. On systemd deployments, load both files in the same order:
+
+```ini
+EnvironmentFile=-/opt/boris-runtime/.env
+EnvironmentFile=-/opt/boris-runtime/.env.local
+```
+
+Restrict the secret file to the service account, for example with mode `0600`.
 
 `/opt/boris-core` is the server-owned checkout used by Runtime at the current
 project stage. Runtime binds this directory to its manifest, reproducible
