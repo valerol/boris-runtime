@@ -4,6 +4,8 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+## 2026-07-25 - Semantic Execution Entry
+
 - Added `application.execution.ExecutionService` and a strict
   `SemanticInputCompiler` that preserve supplied facts, evidence, authority,
   and untrusted phenomenon data while restricting selectors to the verified
@@ -28,6 +30,9 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 - Replaced version-pinned v2.18 tests with current-Core integration tests
   selected through `BORIS_CURRENT_CORE_PATH`; by project convention the
   highest available Core release is current.
+
+## 2026-07-24 - Core Surface Runtime Consolidation
+
 - Added an explicit `developer` mode to internal `/runtime/frame`. It exposes
   the sanitized `boris-projection-trace/1.0` envelope with Core Surface package
   metadata, all selection candidates, selected/excluded reasons, lexical
@@ -53,6 +58,10 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   compatibility, Semantic Executor, and stateless application services.
 - Removed the former `BOISRuntime`, `ProtocolEngine`, prompt/parser/loop
   implementation, and compatibility facades.
+- Removed deprecated `POST /run` and the stateful Runtime API.
+
+## 2026-07-23 - Core Surface and Minimal Semantic Executor
+
 - Split Core Surface identity into `source_kind`, exact `archive_sha256`,
   reproducible `content_set_sha256`, and `manifest_sha256`.
 - Added canonical runtime-contract loading, substrate declaration,
@@ -60,7 +69,6 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   RuntimeAttestation, and attestation hashes.
 - Added a fail-closed registry for every package-declared required check;
   unknown future checks now produce `HOLD` instead of compatibility `PASS`.
-- Removed deprecated `POST /run` and the stateful Runtime API.
 - Made an accepted RuntimeAttestation mandatory before semantic calculation
   and included its reference in every execution trace.
 - Applied canonical GateDecision precedence so material unknowns cannot weaken
