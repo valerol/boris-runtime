@@ -84,6 +84,58 @@ def test_frame_posts_to_runtime_frame_with_expected_body():
     assert response == packet
 
 
+def test_execute_posts_to_runtime_execute_with_expected_body():
+    captured = {}
+    candidate = {
+        "execution_version": "boris-execution/1.0",
+        "session_id": "test",
+        "status": "semantic_candidate",
+        "phase": "C03",
+        "gate": "HOLD",
+        "candidate_result": {},
+        "norm_results": [],
+        "unknowns": [],
+        "conflicts": [],
+        "alternatives": [],
+        "limitations": [
+            "not_independently_reviewed",
+            "not_policy_admitted",
+            "no_state_mutation",
+            "no_external_action",
+        ],
+    }
+
+    def handler(request):
+        captured["method"] = request.method
+        captured["path"] = request.url.path
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json=candidate)
+
+    client = RuntimeAPIClient(
+        "http://runtime.test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    response = client.execute(
+        input="Explain BOIS Runtime",
+        session_id="test",
+        mode="developer",
+        context={"source": "pytest"},
+    )
+
+    assert captured == {
+        "method": "POST",
+        "path": "/runtime/execute",
+        "body": {
+            "input": "Explain BOIS Runtime",
+            "session_id": "test",
+            "mode": "developer",
+            "context": {"source": "pytest"},
+        },
+    }
+    assert response == candidate
+
+
 def test_frame_runtime_error_json_is_available_on_runtime_api_error():
     error_payload = {
         "error": "runtime_error",

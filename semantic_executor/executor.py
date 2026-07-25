@@ -116,8 +116,18 @@ class SemanticExecutor:
                     ),
                     norm_refs=(candidate.norm_ref,),
                 ))
+            if candidate.formal_predicate_result == "ERROR":
+                issues.append(ValidationIssue(
+                    code="FORMAL_PREDICATE_ERROR",
+                    message=(
+                        f"{candidate.norm_ref} has an ERROR formal predicate "
+                        "result and requires repair."
+                    ),
+                    norm_refs=(candidate.norm_ref,),
+                ))
             if (
-                candidate.formal_predicate_result in {"FALSE", "UNKNOWN"}
+                candidate.formal_predicate_result
+                in {"FALSE", "UNKNOWN", "ERROR"}
                 and result.applicability == "TRUE"
             ):
                 issues.append(ValidationIssue(
@@ -203,10 +213,15 @@ class SemanticExecutor:
         )
         if any(issue.code in compatibility_or_unknown_codes for issue in issues):
             decisions.append("HOLD")
-        precedence = tuple(
+        if any(
+            issue.code == "FORMAL_PREDICATE_ERROR"
+            for issue in issues
+        ):
+            decisions.append("REPAIR")
+        precedence = tuple(dict.fromkeys(
             rule["result"]
             for rule in view.gate_decision_semantics["mapping_rules"]
-        )
+        ))
         return min(decisions, key=precedence.index)
 
 

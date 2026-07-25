@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
 from runtime_compatibility.models import SpecificationCheck
+from runtime_compatibility.profile import SUPPORTED_PREDICATE_TRUTH_VALUES
 
 
 FINAL_VERIFICATION_PATH = "FINAL_VERIFICATION.json"
@@ -273,7 +274,8 @@ class RequiredCheckRegistry:
         if not isinstance(dsl, Mapping):
             return False
         if (
-            tuple(dsl.get("truth_values", ())) != ("TRUE", "FALSE", "UNKNOWN")
+            tuple(dsl.get("truth_values", ()))
+            not in SUPPORTED_PREDICATE_TRUTH_VALUES
             or dsl.get("missing_path_result") != "UNKNOWN"
             or dsl.get("unknown_material_result") != "HOLD"
         ):

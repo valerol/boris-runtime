@@ -20,7 +20,10 @@ from semantic_executor.models import (
     SemanticInput,
     SemanticView,
 )
-from semantic_executor.predicates import PredicateEvaluator
+from semantic_executor.predicates import (
+    SUPPORTED_OPERATORS,
+    PredicateEvaluator,
+)
 
 
 PHASE_APPLICABILITY_PATH = "assurance/NORM_PHASE_APPLICABILITY.tsv"
@@ -46,6 +49,9 @@ class SemanticViewBuilder:
         )
         self._validate_predicate_dsl(predicate_dsl)
         self._validate_gate_semantics(gates)
+        predicate_evaluator = (
+            self.predicate_evaluator or PredicateEvaluator(surface)
+        )
         bindings = self._load_bindings(surface)
         active_layers = tuple(dict.fromkeys(("BASE", *semantic_input.active_layers)))
         active_scopes = {
@@ -98,6 +104,7 @@ class SemanticViewBuilder:
                     norm_bindings,
                     deontic,
                     semantic_input,
+                    predicate_evaluator,
                 ))
 
         missing_requested = requested - {item.norm_ref for item in candidates}
@@ -131,15 +138,41 @@ class SemanticViewBuilder:
             },
         )
 
+    def applicability_catalog(self, surface: CoreSurface) -> dict[str, tuple[str, ...]]:
+        """Expose the verified selector vocabulary without selecting any norms."""
+
+        bindings = self._load_bindings(surface)
+        phases = {
+            binding.required_phase
+            for norm_bindings in bindings.values()
+            for binding in norm_bindings
+            if binding.required_phase != "ALL_PHASES"
+        }
+        triggers = {
+            trigger
+            for norm_bindings in bindings.values()
+            for binding in norm_bindings
+            for trigger in binding.triggers
+            if trigger != "*"
+        }
+        return {
+            "phases": tuple(sorted(phases)),
+            "triggers": tuple(sorted(triggers)),
+            "layers": tuple(sorted(surface.norms_by_layer)),
+            "applicability_scopes": tuple(sorted(phases)),
+            "norm_refs": tuple(sorted(surface.norm_ids)),
+        }
+
     def _candidate(
         self,
         record: NormRecord,
         bindings,
         deontic,
         semantic_input,
+        predicate_evaluator,
     ):
         when = _json_object_field(record, "when")
-        formal_result = self.predicate_evaluator.evaluate(
+        formal_result = predicate_evaluator.evaluate(
             when,
             semantic_input.predicate_context(),
         )
@@ -199,13 +232,20 @@ class SemanticViewBuilder:
             raise SemanticViewError(
                 "Predicate DSL missing_path_result must be UNKNOWN for Phase 4F."
             )
-        if tuple(predicate_dsl.get("truth_values", ())) != (
-            "TRUE",
-            "FALSE",
-            "UNKNOWN",
-        ):
+        if tuple(predicate_dsl.get("truth_values", ())) not in {
+            ("TRUE", "FALSE", "UNKNOWN"),
+            ("TRUE", "FALSE", "UNKNOWN", "ERROR"),
+        }:
             raise SemanticViewError(
                 "Predicate DSL truth_values are incompatible with Phase 4F."
+            )
+        operators = predicate_dsl.get("operators")
+        if (
+            not isinstance(operators, Mapping)
+            or not set(operators).issubset(SUPPORTED_OPERATORS)
+        ):
+            raise SemanticViewError(
+                "Predicate DSL operators are incompatible with Phase 4F."
             )
         if predicate_dsl.get("unknown_material_result") != "HOLD":
             raise SemanticViewError(
@@ -231,11 +271,11 @@ class SemanticViewBuilder:
             raise SemanticViewError(
                 "GateDecision mapping_rules must be an array."
             )
-        precedence = tuple(
+        precedence = tuple(dict.fromkeys(
             item.get("result")
             for item in mapping
             if isinstance(item, Mapping)
-        )
+        ))
         if precedence != SUPPORTED_GATE_RESULTS:
             raise SemanticViewError(
                 "GateDecision precedence is incompatible with Phase 4F."

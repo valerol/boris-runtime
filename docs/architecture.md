@@ -13,6 +13,13 @@ release package
 immutable CoreSurface
   -> application Context Projector
   -> bounded context projection
+
+immutable CoreSurface + server OperatorAcceptance
+  -> Runtime Compatibility
+  -> application ExecutionService
+  -> SemanticInputCompiler
+  -> SemanticExecutor
+  -> ExecutionCandidate
 ```
 
 The loader validates package layout, inventory, hashes, identity, dependency
@@ -27,10 +34,10 @@ unverified machine JSON directly.
 | `core_surface` | Verify and expose the passive, query-independent canonical package | Query selection, semantic calculation, state mutation, activation |
 | `runtime_compatibility` | Declare substrate capabilities, execute package-required checks, create attestation | Meaning creation, activation, external action |
 | `semantic_executor` | Produce a non-executing `ExecutionCandidate` | Independent review, state admission, tools, memory |
-| `application` | Build stateless ChatGPT frames and validate supplied answers | Conversation state, semantic authorization, tool execution |
+| `application` | Compile raw requests, orchestrate semantic candidates, build diagnostic frames, and validate supplied answers | Independent review, policy admission, state mutation, tool execution |
 | `llm` | Canonical structured/unstructured inference port | Policy decisions |
 | `api` | Private HTTP transport | Core or semantic logic |
-| `mcp_server` | Public read-only `boris.frame` transport | Direct Core access, LLM calls, memory |
+| `mcp_server` | Public read-only `boris.execute` transport | Direct Core access, LLM calls, memory |
 | `cli` | Local context-frame transport | Alternative engine |
 
 ## Semantic path
@@ -38,8 +45,10 @@ unverified machine JSON directly.
 ```text
 Core ZIP
   -> CoreSurface
+  -> server-owned OperatorAcceptance
   -> RuntimeCompatibilityVerifier
   -> RuntimeAttestation
+  -> SemanticInputCompiler
   -> SemanticViewBuilder
   -> semantic calculator
   -> deterministic validation and gate constraints
@@ -50,7 +59,38 @@ Semantic execution requires an accepted attestation for
 `semantic_evaluation`. The result is candidate material only. It cannot mutate
 Runtime or Core state.
 
-## ChatGPT context path
+The receiving profile supports both the legacy three-valued Predicate DSL and
+the current Core v2.23 four-valued contract. `UNKNOWN` constrains material
+uncertainty to `HOLD`; formal `ERROR` constrains the candidate to `REPAIR`.
+
+Compatibility and exact-archive acceptance are checked before the compiler or
+calculator can call an LLM. The compiler preserves raw input and request
+context as an untrusted phenomenon; it may classify only phases, triggers,
+layers, scopes, and explicitly named norm references exposed by the verified
+Core Surface. Supplied facts, evidence, and authority must be copied exactly.
+Deterministic validation rejects all other output.
+
+## Public ChatGPT execution path
+
+```text
+ChatGPT
+  -> public MCP boris.execute
+  -> private POST /runtime/execute
+  -> ExecutionService
+  -> ExecutionCandidate envelope
+```
+
+The MCP tool list is exactly `{"boris.execute"}`. There is no public
+`boris.frame` alias. `default`, `production`, and `developer` all execute the
+same semantic route; developer mode changes observability only. The public
+envelope uses `boris-execution/1.0`, marks the result as
+`status=semantic_candidate`, and exposes the final constrained gate, norm
+results, unknowns, conflicts, alternatives, and explicit limitations.
+
+`HOLD`, `STOP`, and `REPAIR` remain normal Runtime results. The MCP presentation
+layer must not weaken them or substitute a separate ChatGPT answer.
+
+## Internal context path
 
 ```text
 Core package
@@ -59,8 +99,7 @@ Core package
   -> bounded lexical projection
   -> ContextProvider
   -> /runtime/frame
-  -> boris.frame
-  -> ChatGPT-generated answer
+  -> internal diagnostics
 ```
 
 The lexical projection is not semantic routing. It exposes:
@@ -76,7 +115,7 @@ The `boris-context/2.0` wire contract exposes the projection as
 producer consumes verified Core Surface records but belongs to `application`,
 so `core_surface` remains passive and query-independent.
 
-`boris.frame`:
+`/runtime/frame`:
 
 - does not call an LLM;
 - does not create or mutate a server-side session;
@@ -97,11 +136,18 @@ The frame request supports `default`, `production`, and `developer` modes.
 - an explicit capability ledger showing that Semantic Executor, Independent
   Reviewer, Policy Kernel, Cycle Guard, and LLM inference were not invoked.
 
-The trace is structured observability, not model chain-of-thought. It passes
+The projection trace is structured observability, not model chain-of-thought. It passes
 through the same public-value sanitizer as the context packet and excludes
 secrets, hidden prompts, environment data, stack traces, and absolute source
 paths. Selected objects include their bounded projected chunks; excluded
 objects expose metadata rather than duplicating the full Core content.
+
+Developer execution mode embeds this lexical projection and trace in a separate
+`boris-execution-trace/1.0` envelope together with the compiled
+`SemanticInput`, Core reference, RuntimeAttestation, semantic selection and
+predicate results, suggested and constrained gates, validation issues, stage
+ledger, and timings. It excludes compiler/calculator prompts, chain-of-thought,
+server secrets, environment data, and absolute source paths.
 
 If the configured Core package is absent or invalid, the API returns
 `core_surface_unavailable` with HTTP 503. It does not fall back to local
@@ -157,14 +203,14 @@ be absorbed by the Semantic Executor:
 The future cycle is:
 
 ```text
-SemanticCalculation
-  -> IndependentReview
-  -> KernelDecision
+ExecutionCandidate
+  -> IndependentReviewer
+  -> PolicyKernel
   -> StateEvent
 ```
 
-Only the first contract is implemented. The current `ExecutionCandidate`
-packages its result for later review; it is not a `KernelDecision`.
+Only `ExecutionCandidate` is implemented. It packages its result for later
+review; it is not an `IndependentReview` or `KernelDecision`.
 
 ## Dependency rules
 
@@ -172,8 +218,8 @@ packages its result for later review; it is not a `KernelDecision`.
   executor code.
 - `runtime_compatibility` may read immutable Core Surface data.
 - `semantic_executor` may consume Core Surface and compatibility records.
-- `application` may consume Core Surface and the LLM port, but not Semantic
-  Executor internals.
+- `application` may consume Core Surface, Runtime compatibility, the LLM port,
+  and the public Semantic Executor contracts.
 - `api` may import `application`, never the inverse.
 - `mcp_server` communicates with `api` only through HTTP.
 - no active module may import a removed top-level package.

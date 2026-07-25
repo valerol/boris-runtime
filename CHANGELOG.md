@@ -4,11 +4,32 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-- Added an explicit `developer` mode to `/runtime/frame` and `boris.frame`.
-  It exposes the sanitized `boris-projection-trace/1.0` envelope with Core
-  Surface package metadata, all selection candidates, selected/excluded
-  reasons, lexical scores, limits, timings, warnings, and invoked capabilities.
-  Default and production responses remain compact.
+- Added `application.execution.ExecutionService` and a strict
+  `SemanticInputCompiler` that preserve supplied facts, evidence, authority,
+  and untrusted phenomenon data while restricting selectors to the verified
+  Core Surface.
+- Added private `POST /runtime/execute` and the `boris-execution/1.0`
+  `semantic_candidate` envelope with constrained gate, norm results, unknowns,
+  conflicts, alternatives, and explicit downstream limitations.
+- Replaced the sole public MCP tool `boris.frame` with the sole public
+  `boris.execute` tool. The internal `/runtime/frame` diagnostic route remains
+  available without a public alias.
+- Added server-owned exact-archive `OperatorAcceptance` loading and required
+  Runtime Compatibility checks before all semantic LLM calls.
+- Added safe `boris-execution-trace/1.0` developer output combining lexical
+  projection, compiled `SemanticInput`, Core and attestation references,
+  semantic results, validation issues, stage ledger, and timings. Default and
+  production responses remain compact.
+- Added current Core v2.23 compatibility for the four-valued Predicate DSL,
+  identifier/scope/reference/collection operations, duplicate gate mapping
+  rules, and deterministic `ERROR -> REPAIR` handling.
+- Replaced version-pinned v2.18 tests with current-Core integration tests
+  selected through `BORIS_CURRENT_CORE_PATH`; by project convention the
+  highest available Core release is current.
+- Added an explicit `developer` mode to internal `/runtime/frame`. It exposes
+  the sanitized `boris-projection-trace/1.0` envelope with Core Surface package
+  metadata, all selection candidates, selected/excluded reasons, lexical
+  scores, limits, timings, warnings, and invoked capabilities.
 - Moved request-specific Core context selection from `core_surface` to
   `application.context_projection`, keeping Core Surface passive and
   query-independent.
@@ -55,7 +76,7 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   separate source fields; unknown source types and inactive candidates now force
   `HOLD` instead of automatic interpretation.
 - Added an experimental semantic-executor CLI, synthetic boundary tests, and
-  optional real-package v2.18 integration tests.
+  optional real-package integration tests.
 - Replaced the planned Phase 4E Semantic Kernel Resolver with the Core Surface
   Foundation boundary.
 - Added passive package loading from directories and ZIP archives with safe

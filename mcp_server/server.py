@@ -4,16 +4,16 @@ from typing import Literal
 from pydantic import ValidationError
 
 from mcp_server.config import MCPServerConfig, load_config
-from mcp_server.models import BorisFrameRequest
+from mcp_server.models import BorisExecuteRequest
 from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS exposes one public tool: boris.frame. Use it to obtain a bounded "
-    "BOIS/SIMA/BORIS context frame and the complete Runtime-generated prompt "
-    "that ChatGPT must show to the user before generating its own answer. Use "
-    "mode=developer to show the safe Core Surface projection trace. "
-    "The MCP server is an adapter and does not store memory or call LLMs directly."
+    "BORIS exposes one public tool: boris.execute. Use it for the Runtime's "
+    "semantic evaluation route. Present its ExecutionCandidate without replacing "
+    "it with an independent answer or weakening HOLD, STOP, or REPAIR. "
+    "mode=developer adds the safe projection and semantic trace. The result is "
+    "not independently reviewed, policy-admitted, state-mutating, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -23,10 +23,18 @@ TOOL_ANNOTATIONS = {
 }
 
 
-def boris_frame(input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
+def boris_execute(
+    input: str,
+    session_id: str | None = None,
+    mode: str = "default",
+    context: dict | None = None,
+):
     config = load_config()
-    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as client:
-        return run_boris_frame(
+    with RuntimeAPIClient(
+        config.runtime_api_url,
+        timeout=config.timeout_seconds,
+    ) as client:
+        return run_boris_execute(
             input=input,
             session_id=session_id,
             mode=mode,
@@ -35,36 +43,39 @@ def boris_frame(input: str, session_id: str | None = None, mode: str = "default"
         )
 
 
-def run_boris_frame(
+def run_boris_execute(
     input: str,
     session_id: str | None = None,
     mode: str = "default",
     context: dict | None = None,
     client=None,
 ):
-    request = BorisFrameRequest(
+    request = BorisExecuteRequest(
         input=input,
         session_id=session_id,
         mode=mode,
         context=context or {},
     )
     if client is not None:
-        return _frame_runtime(request, client)
+        return _execute_runtime(request, client)
 
     config = load_config()
-    with RuntimeAPIClient(config.runtime_api_url, timeout=config.timeout_seconds) as runtime_client:
-        return _frame_runtime(request, runtime_client)
+    with RuntimeAPIClient(
+        config.runtime_api_url,
+        timeout=config.timeout_seconds,
+    ) as runtime_client:
+        return _execute_runtime(request, runtime_client)
 
 
-def _frame_runtime(request, runtime_client):
+def _execute_runtime(request, runtime_client):
     try:
-        runtime_payload = runtime_client.frame(
+        runtime_payload = runtime_client.execute(
             input=request.input,
             session_id=request.session_id,
             mode=request.mode,
             context=request.context,
         )
-        return normalize_frame_tool_result(runtime_payload)
+        return normalize_execution_tool_result(runtime_payload)
     except RuntimeAPIError as exc:
         if exc.payload:
             return normalize_error_result(exc.payload)
@@ -89,20 +100,36 @@ def normalize_error_result(payload):
     }
 
 
-def normalize_frame_tool_result(payload):
+def normalize_execution_tool_result(payload):
     if "error" in payload:
         return normalize_error_result(payload)
 
-    runtime_prompt = str(payload.get("runtime_generated_prompt", ""))
     developer_trace = payload.get("developer_trace")
+    candidate_payload = {
+        key: value
+        for key, value in payload.items()
+        if key != "developer_trace"
+    }
+    candidate_json = json.dumps(
+        candidate_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+    )
     developer_instruction = ""
     if developer_trace is not None:
+        developer_json = json.dumps(
+            developer_trace,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
         developer_instruction = (
-            "Developer mode is active. Show the complete developer_trace as "
-            "formatted JSON before the runtime_generated_prompt; do not hide, "
-            "shorten, or omit its projection diagnostics.\n\n"
+            "Developer mode is active. Present the complete safe developer_trace "
+            "as formatted JSON before the Runtime candidate; do not hide, shorten, "
+            "or omit its projection or semantic diagnostics.\n\n"
             "developer_trace:\n"
-            f"{json.dumps(developer_trace, ensure_ascii=False, sort_keys=True, indent=2)}"
+            f"{developer_json}"
             "\n\n"
         )
     return {
@@ -112,10 +139,12 @@ def normalize_frame_tool_result(payload):
                 "type": "text",
                 "text": (
                     developer_instruction
-                    + "Show the user the complete runtime_generated_prompt below, then "
-                    "generate your own answer from it. Do not hide, shorten, or omit "
-                    "the Runtime-generated prompt.\n\n"
-                    f"{runtime_prompt}"
+                    + "Present the Runtime ExecutionCandidate below as the result. "
+                    "Do not replace it with an independently generated answer, do "
+                    "not weaken its gate, and do not claim review, policy admission, "
+                    "state mutation, tool use, or external action.\n\n"
+                    "ExecutionCandidate:\n"
+                    f"{candidate_json}"
                 ),
             }
         ],
@@ -160,18 +189,28 @@ def create_mcp_server(config: MCPServerConfig | None = None):
     )
 
     @mcp.tool(
-        name="boris.frame",
+        name="boris.execute",
         annotations=ToolAnnotations(**TOOL_ANNOTATIONS),
     )
-    def tool_boris_frame(
+    def tool_boris_execute(
         input: str,
         session_id: str | None = None,
         mode: Literal["default", "production", "developer"] = "default",
         context: dict | None = None,
     ) -> CallToolResult:
-        """Context-only BOIS/SIMA/BORIS frame. Use mode='developer' to expose and display full safe Core Surface projection diagnostics. BORIS does not generate a final answer or call an external LLM."""
+        """Run the read-only BORIS semantic route.
+
+        Returns an ExecutionCandidate. Developer mode adds the safe projection
+        and semantic trace. The candidate is not independently reviewed,
+        policy-admitted, state-mutating, or executed.
+        """
         try:
-            envelope = boris_frame(input=input, session_id=session_id, mode=mode, context=context)
+            envelope = boris_execute(
+                input=input,
+                session_id=session_id,
+                mode=mode,
+                context=context,
+            )
         except ValidationError as exc:
             envelope = {
                 "structuredContent": {

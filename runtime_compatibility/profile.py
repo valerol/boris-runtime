@@ -5,17 +5,37 @@ from dataclasses import dataclass
 
 SUPPORTED_PREDICATE_OPERATORS = frozenset({
     "all",
+    "all_equal",
+    "all_references_resolve",
     "always",
     "any",
+    "enum_member",
+    "equals",
+    "equals_path",
     "exists",
     "fact",
     "gte",
     "in",
+    "literal",
+    "min_items",
     "neq",
+    "nonempty",
+    "nonempty_scope",
     "not",
+    "reference_resolves",
+    "same_cycle",
+    "same_subject",
+    "scope_contains",
+    "scope_equal",
     "scope_match",
+    "scope_matches",
     "unique",
+    "valid_identifier",
 })
+SUPPORTED_PREDICATE_TRUTH_VALUES = (
+    ("TRUE", "FALSE", "UNKNOWN"),
+    ("TRUE", "FALSE", "UNKNOWN", "ERROR"),
+)
 SUPPORTED_DEONTIC_OPERATIONS = frozenset({
     "HOLD",
     "PERMIT",
@@ -44,6 +64,7 @@ class RuntimeProfile:
         "immutable_passive_core_surface",
         "no_direct_state_mutation",
         "structured_semantic_calculation",
+        "four_valued_predicate_dsl",
         "three_valued_predicate_dsl",
     )
     limitations: tuple[str, ...] = (

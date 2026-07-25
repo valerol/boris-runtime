@@ -106,10 +106,11 @@ operation fields. Core Surface does not invent their mapping. Until the
 canonical projection is clarified or practical semantic execution requires a
 decision, all supplied classification fields remain opaque source data.
 
-Phase 4F consumes exact Core Surface references in an isolated Minimal Semantic
+Phase 4F consumes exact Core Surface references in the Minimal Semantic
 Executor only after `runtime_compatibility` validates the package's own runtime
 contract and creates an accepted RuntimeAttestation. The stateless
 `application.context_projection` service selects bounded records from the same
-surface for `boris.frame`; this request-specific projection is outside
-`core_surface` and is not semantic routing.
+surface for internal frame diagnostics and developer execution observability;
+this request-specific projection is outside `core_surface` and is not semantic
+routing.
 Independent Review and Policy Kernel admission remain absent.

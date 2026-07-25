@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, constr
 
 
-class BorisFrameRequest(BaseModel):
+class BorisExecuteRequest(BaseModel):
     input: constr(strip_whitespace=True, min_length=1)
     session_id: str | None = None
     mode: Literal["default", "production", "developer"] = "default"
