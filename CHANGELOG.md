@@ -5,8 +5,9 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 ## [Unreleased]
 
 - Replaced the obsolete `.env.example` workflow with tracked non-secret
-  settings in `.env` and ignored secret overrides in `.env.local`; Runtime and
-  MCP entry points now load both while preserving process-environment priority.
+  settings in `.env` and ignored secret overrides in `.env.local`; Runtime
+  loads both while MCP loads only non-secret settings, preserving
+  process-environment priority and least-privilege secret access.
 
 ## 2026-07-25 - Semantic Execution Entry
 

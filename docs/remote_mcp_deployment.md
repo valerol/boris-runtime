@@ -33,13 +33,19 @@ Store the real value only in ignored `.env.local`:
 OPENAI_API_KEY=...
 ```
 
-Runtime and MCP entry points load `.env` followed by `.env.local`. Existing
-process variables remain authoritative; otherwise `.env.local` overrides
-tracked settings. On systemd deployments, load both files in the same order:
+Runtime entry points load `.env` followed by `.env.local`. Existing process
+variables remain authoritative; otherwise `.env.local` overrides tracked
+settings. MCP loads only non-secret `.env` because the public adapter does not
+call OpenAI and does not need access to the API key. On systemd deployments,
+configure the files accordingly:
 
 ```ini
+# boris-runtime.service
 EnvironmentFile=-/opt/boris-runtime/.env
 EnvironmentFile=-/opt/boris-runtime/.env.local
+
+# boris-mcp.service
+EnvironmentFile=-/opt/boris-runtime/.env
 ```
 
 Restrict the secret file to the service account, for example with mode `0600`.
