@@ -153,14 +153,28 @@ def test_contract_identity_mismatch_is_rejected():
         RuntimeCompatibilityVerifier().verify(surface)
 
 
-def test_directory_source_cannot_issue_archive_attestation():
+def test_directory_source_issues_content_bound_attestation():
     surface = build_contract_surface(source_kind="directory")
 
-    with pytest.raises(RuntimeContractError, match="pattern"):
-        RuntimeCompatibilityVerifier().verify(surface)
+    result = RuntimeCompatibilityVerifier().verify(
+        surface,
+        operator_acceptance=accepted_for(surface),
+    )
+
+    assert result.eligible_for_semantic_execution is True
+    assert result.attestation.source_kind == "directory"
+    assert result.attestation.archive_sha256 == ""
+    assert result.attestation.content_set_sha256 == surface.content_set_sha256
+    assert "repository_directory_source" in result.attestation.limitations
+    assert any(
+        check.check_id == "CORE_SOURCE_INTEGRITY_BINDING"
+        and check.status == "PASS"
+        for check in result.checks
+    )
+    result.require_semantic_evaluation(surface)
 
 
-def test_operator_acceptance_must_match_exact_archive():
+def test_operator_acceptance_must_match_loaded_core_source():
     surface = build_contract_surface()
     acceptance = accepted_for(surface)
     acceptance = OperatorAcceptance(
@@ -175,7 +189,7 @@ def test_operator_acceptance_must_match_exact_archive():
         revocation_route=acceptance.revocation_route,
     )
 
-    with pytest.raises(RuntimeContractError, match="exact loaded archive"):
+    with pytest.raises(RuntimeContractError, match="loaded Core source"):
         RuntimeCompatibilityVerifier().verify(
             surface,
             operator_acceptance=acceptance,
@@ -186,7 +200,7 @@ def accepted_for(surface):
     return OperatorAcceptance(
         package_id=surface.package_id,
         artifact_version=surface.artifact_version,
-        archive_sha256=surface.archive_sha256,
+        archive_sha256=surface.archive_sha256 or "",
         manifest_sha256=surface.manifest_sha256,
         operator_role="TEST_OPERATOR",
         decision="ACCEPT",

@@ -14,8 +14,10 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 - Replaced the sole public MCP tool `boris.frame` with the sole public
   `boris.execute` tool. The internal `/runtime/frame` diagnostic route remains
   available without a public alias.
-- Added server-owned exact-archive `OperatorAcceptance` loading and required
-  Runtime Compatibility checks before all semantic LLM calls.
+- Added server-owned Core source acceptance and required Runtime Compatibility
+  checks before all semantic LLM calls. The deployment route uses the checked
+  out `boris-core` directory and binds it through manifest, content-set, and
+  component hashes without requiring an exact ZIP or acceptance sidecar.
 - Added safe `boris-execution-trace/1.0` developer output combining lexical
   projection, compiled `SemanticInput`, Core and attestation references,
   semantic results, validation issues, stage ledger, and timings. Default and
@@ -54,7 +56,7 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 - Split Core Surface identity into `source_kind`, exact `archive_sha256`,
   reproducible `content_set_sha256`, and `manifest_sha256`.
 - Added canonical runtime-contract loading, substrate declaration,
-  capability checks, exact-archive OperatorAcceptance, schema-validated
+  capability checks, source-bound OperatorAcceptance, schema-validated
   RuntimeAttestation, and attestation hashes.
 - Added a fail-closed registry for every package-declared required check;
   unknown future checks now produce `HOLD` instead of compatibility `PASS`.

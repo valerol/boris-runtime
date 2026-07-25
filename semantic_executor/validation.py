@@ -99,20 +99,32 @@ class SemanticCalculationValidator:
     def _parse_core_ref(self, value):
         value = self._object(value, "core_ref")
         self._require_exact_fields(value, CORE_REF_FIELDS, "core_ref")
+        source_kind = self._text(
+            value["source_kind"],
+            "core_ref.source_kind",
+        )
+        archive_sha256 = value["archive_sha256"]
+        if not isinstance(archive_sha256, str):
+            raise SemanticCalculationError(
+                "core_ref.archive_sha256 must be a string."
+            )
+        archive_sha256 = archive_sha256.strip()
+        if source_kind == "archive" and not archive_sha256:
+            raise SemanticCalculationError(
+                "core_ref.archive_sha256 must be non-empty for an archive source."
+            )
+        if source_kind == "directory" and archive_sha256:
+            raise SemanticCalculationError(
+                "core_ref.archive_sha256 must be empty for a directory source."
+            )
         return CoreReference(
             package_id=self._text(value["package_id"], "core_ref.package_id"),
             artifact_version=self._text(
                 value["artifact_version"],
                 "core_ref.artifact_version",
             ),
-            source_kind=self._text(
-                value["source_kind"],
-                "core_ref.source_kind",
-            ),
-            archive_sha256=self._text(
-                value["archive_sha256"],
-                "core_ref.archive_sha256",
-            ),
+            source_kind=source_kind,
+            archive_sha256=archive_sha256,
             content_set_sha256=self._text(
                 value["content_set_sha256"],
                 "core_ref.content_set_sha256",

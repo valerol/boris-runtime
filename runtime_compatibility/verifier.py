@@ -58,7 +58,10 @@ class RuntimeCompatibilityVerifier:
 
         declaration = self._build_declaration(surface)
         acceptance = self._resolve_acceptance(surface, operator_acceptance)
-        if surface.manifest_dialect != RELEASE_MANIFEST_DIALECT:
+        if (
+            surface.manifest_dialect != RELEASE_MANIFEST_DIALECT
+            and surface.source_kind == "archive"
+        ):
             validate_schema_definition(
                 schemas,
                 "SubstrateDeclaration",
@@ -86,6 +89,8 @@ class RuntimeCompatibilityVerifier:
         )
         spec_status = _aggregate_check_status(checks)
         limitations = list(self.profile.limitations)
+        if surface.source_kind == "directory":
+            limitations.append("repository_directory_source")
         activation_status = self._activation_status(
             acceptance,
             spec_status,
@@ -105,7 +110,10 @@ class RuntimeCompatibilityVerifier:
             content_set_sha256=surface.content_set_sha256,
         )
         canonical_records = {}
-        if surface.manifest_dialect == RELEASE_MANIFEST_DIALECT:
+        if (
+            surface.manifest_dialect == RELEASE_MANIFEST_DIALECT
+            and surface.source_kind == "archive"
+        ):
             canonical_records = self._build_release_canonical_records(
                 surface,
                 declaration,
@@ -125,7 +133,7 @@ class RuntimeCompatibilityVerifier:
                     definition_name,
                     canonical_records[record_name],
                 )
-        else:
+        elif surface.source_kind == "archive":
             validate_schema_definition(
                 schemas,
                 "RuntimeAttestation",
@@ -182,7 +190,7 @@ class RuntimeCompatibilityVerifier:
         expected = (
             surface.package_id,
             surface.artifact_version,
-            surface.archive_sha256,
+            surface.archive_sha256 or "",
             surface.manifest_sha256,
         )
         actual = (
@@ -193,7 +201,7 @@ class RuntimeCompatibilityVerifier:
         )
         if expected != actual:
             raise RuntimeContractError(
-                "OperatorAcceptance does not match the exact loaded archive."
+                "OperatorAcceptance does not match the loaded Core source."
             )
         return value
 
@@ -217,10 +225,16 @@ class RuntimeCompatibilityVerifier:
         )
         checks = [
             _check(
-                "EXACT_ARCHIVE_BINDING",
-                surface.source_kind == "archive" and bool(surface.archive_sha256),
-                "The loaded surface is bound to the exact source archive SHA-256.",
-                "Semantic evaluation requires the original ZIP archive.",
+                "CORE_SOURCE_INTEGRITY_BINDING",
+                _core_source_is_bound(surface),
+                (
+                    "The loaded Core source is bound to its manifest, content "
+                    "set, and component hashes."
+                ),
+                (
+                    "The loaded Core source lacks a complete archive or "
+                    "repository integrity binding."
+                ),
             ),
             _check(
                 "PASSIVE_DATA_ONLY",
@@ -607,6 +621,33 @@ def _check(check_id, passed, success, failure_detail, *, failure="HOLD"):
         check_id=check_id,
         status="PASS" if passed else failure,
         detail=success if passed else failure_detail,
+    )
+
+
+def _core_source_is_bound(surface):
+    sha256_pattern = re.compile(r"[0-9a-f]{64}")
+    common_hashes_are_valid = all(
+        sha256_pattern.fullmatch(value or "") is not None
+        for value in (
+            surface.content_set_sha256,
+            surface.manifest_sha256,
+        )
+    )
+    components_are_bound = (
+        len(surface.loaded_component_hashes) == len(surface.components)
+    )
+    if surface.source_kind == "archive":
+        source_identity_is_valid = (
+            sha256_pattern.fullmatch(surface.archive_sha256 or "") is not None
+        )
+    elif surface.source_kind == "directory":
+        source_identity_is_valid = surface.archive_sha256 is None
+    else:
+        source_identity_is_valid = False
+    return (
+        common_hashes_are_valid
+        and components_are_bound
+        and source_identity_is_valid
     )
 
 

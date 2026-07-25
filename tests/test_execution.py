@@ -161,9 +161,41 @@ def test_operator_acceptance_provider_rejects_wrong_archive_identity():
 
     with pytest.raises(
         OperatorAcceptanceUnavailable,
-        match="does not match the loaded Core archive",
+        match="does not match the loaded Core source",
     ):
         OperatorAcceptanceProvider(acceptance=mismatched).get(surface)
+
+
+def test_configured_core_repository_is_accepted_without_sidecar_file(
+    monkeypatch,
+):
+    monkeypatch.delenv("BORIS_OPERATOR_ACCEPTANCE_FILE", raising=False)
+    surface = replace(
+        build_surface(),
+        source="/opt/boris-core",
+        source_kind="directory",
+        archive_sha256=None,
+    )
+
+    acceptance = OperatorAcceptanceProvider().get(surface)
+
+    assert acceptance.package_id == surface.package_id
+    assert acceptance.artifact_version == surface.artifact_version
+    assert acceptance.archive_sha256 == ""
+    assert acceptance.manifest_sha256 == surface.manifest_sha256
+    assert acceptance.operator_role == "RUNTIME_CONFIGURED_CORE_REPOSITORY"
+    assert acceptance.decision == "ACCEPT"
+    assert acceptance.accepted_scope == ("semantic_evaluation",)
+
+
+def test_archive_source_still_requires_explicit_operator_acceptance(monkeypatch):
+    monkeypatch.delenv("BORIS_OPERATOR_ACCEPTANCE_FILE", raising=False)
+
+    with pytest.raises(
+        OperatorAcceptanceUnavailable,
+        match="not configured for the archive Core source",
+    ):
+        OperatorAcceptanceProvider().get(build_surface())
 
 
 @pytest.mark.parametrize(

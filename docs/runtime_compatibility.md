@@ -6,7 +6,7 @@
 It implements the package bootstrap contract:
 
 ```text
-original Core ZIP
+server Core source
   -> immutable CoreSurface
   -> package runtime schemas/templates/specification
   -> SubstrateDeclaration
@@ -17,8 +17,8 @@ original Core ZIP
 ```
 
 Loading a package is not compatibility, and compatibility is not activation.
-The calculator is called only when all three records refer to the same exact
-archive and the operator has accepted the `semantic_evaluation` scope.
+The calculator is called only when all records refer to the same verified Core
+source and the `semantic_evaluation` scope is accepted.
 
 ## Package contracts
 
@@ -63,31 +63,33 @@ All runtime records bind:
 
 - `package_id`;
 - `artifact_version`;
-- exact `archive_sha256`;
 - `manifest_sha256`;
 - receiving `substrate_id`.
 
 The declaration and attestation additionally retain `source_kind` and
-`content_set_sha256`. RuntimeAttestation records every verified manifest
-component hash. The final attestation is itself hashed as canonical JSON, and
-that hash is written into each Semantic Executor trace.
+`content_set_sha256`. `archive_sha256` is present only for an archive source;
+it is empty for a directory and never replaced with a directory hash.
+RuntimeAttestation records every verified manifest component hash. The final
+attestation is itself hashed as canonical JSON, and that hash is written into
+each Semantic Executor trace.
 
 For a release-envelope package, `package_id` and `artifact_version` in the
 package's canonical runtime records remain the normative identity required by
 its schema. `RuntimeCompatibilityResult.package_identity` separately binds the
 original `release_package_id`, `release_version`, `normative_package_id`, and
 `normative_content_version`; its hash is rechecked before semantic evaluation.
-The exact archive and manifest hashes cryptographically connect both records to
-one release without changing the package's canonical schema.
-
-A directory source can still be checked by `core_surface`, but it cannot produce
-an archive-bound RuntimeAttestation.
+For an archive source, the exact archive and manifest hashes cryptographically
+connect both records to one release without changing the package's canonical
+schema. For the server `boris-core` checkout, Runtime uses the manifest,
+reproducible content-set hash, and component hashes instead. Archive-specific
+Core final-record schemas are not misapplied to the directory source.
 
 ## Receiving Runtime profile
 
 The Phase 4R profile declares capabilities for:
 
-- archive, manifest, component, and content-set binding;
+- archive or repository-directory source binding;
+- manifest, component, and content-set binding;
 - immutable passive Core Surface handling;
 - legacy three-valued and current four-valued Predicate DSL contracts;
 - current identifier, scope, reference-resolution, and collection predicate
@@ -127,31 +129,26 @@ For Phase 4F execution, `ACCEPT` must include:
 action, or permit state mutation. It authorizes only the isolated semantic
 evaluation described in Phase 4F.
 
-If no decision is supplied, the verifier creates a schema-valid `HOLD` record.
-The specification checks can still pass and an attestation can still be
-produced, but the LLM calculator is not called.
+If no decision is supplied, the verifier creates a `HOLD` record. The
+specification checks can still pass and an attestation can still be produced,
+but the LLM calculator is not called.
+
+At the application boundary, a server-configured directory source such as
+`/opt/boris-core` receives a scoped `ACCEPT` because choosing that trusted
+checkout is the current Runtime operator protocol. No ZIP or
+`operator-acceptance.json` sidecar is required. This implicit decision never
+comes from request context and permits only `semantic_evaluation`. Archive
+sources retain the explicit acceptance-file protocol.
 
 ## Programmatic use
 
 ```python
+from application.execution import OperatorAcceptanceProvider
 from core_surface import load_core_surface
-from runtime_compatibility import (
-    OperatorAcceptance,
-    RuntimeCompatibilityVerifier,
-)
+from runtime_compatibility import RuntimeCompatibilityVerifier
 
-surface = load_core_surface("/path/to/core.zip", purpose="evaluation")
-acceptance = OperatorAcceptance(
-    package_id=surface.package_id,
-    artifact_version=surface.artifact_version,
-    archive_sha256=surface.archive_sha256,
-    manifest_sha256=surface.manifest_sha256,
-    operator_role="OPERATOR",
-    decision="ACCEPT",
-    accepted_scope=("semantic_evaluation",),
-    decision_time="2026-07-23T00:00:00Z",
-    revocation_route="Replace this OperatorAcceptance record.",
-)
+surface = load_core_surface("/opt/boris-core", purpose="evaluation")
+acceptance = OperatorAcceptanceProvider().get(surface)
 
 compatibility = RuntimeCompatibilityVerifier().verify(
     surface,
@@ -160,5 +157,7 @@ compatibility = RuntimeCompatibilityVerifier().verify(
 compatibility.require_semantic_evaluation(surface)
 ```
 
-The decision time and role above are examples; a real record must contain the
-actual operator decision.
+`OperatorAcceptanceProvider` reads only trusted server configuration. For an
+archive source it requires an explicit acceptance record; for a configured
+repository directory it binds the scoped decision to the loaded source
+identity.

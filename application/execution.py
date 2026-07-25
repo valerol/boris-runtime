@@ -4,6 +4,7 @@ import json
 import os
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -64,7 +65,7 @@ class SemanticInputCompilationError(RuntimeError):
 
 
 class OperatorAcceptanceProvider:
-    """Load OperatorAcceptance from server configuration, never request data."""
+    """Resolve acceptance from trusted server configuration, never request data."""
 
     def __init__(
         self,
@@ -79,8 +80,11 @@ class OperatorAcceptanceProvider:
         if value is None:
             source = self._source or os.getenv(OPERATOR_ACCEPTANCE_ENV)
             if not source:
+                if surface.source_kind == "directory":
+                    return self._accept_configured_repository(surface)
                 raise OperatorAcceptanceUnavailable(
-                    "Server OperatorAcceptance is not configured."
+                    "Server OperatorAcceptance is not configured for the "
+                    "archive Core source."
                 )
             try:
                 payload = Path(source).read_text(encoding="utf-8")
@@ -115,9 +119,25 @@ class OperatorAcceptanceProvider:
         )
         if actual != expected:
             raise OperatorAcceptanceUnavailable(
-                "Server OperatorAcceptance does not match the loaded Core archive."
+                "Server OperatorAcceptance does not match the loaded Core source."
             )
         return acceptance
+
+    @staticmethod
+    def _accept_configured_repository(surface) -> OperatorAcceptance:
+        return OperatorAcceptance(
+            package_id=surface.package_id,
+            artifact_version=surface.artifact_version,
+            archive_sha256="",
+            manifest_sha256=surface.manifest_sha256,
+            operator_role="RUNTIME_CONFIGURED_CORE_REPOSITORY",
+            decision="ACCEPT",
+            accepted_scope=("semantic_evaluation",),
+            decision_time=datetime.now(timezone.utc).isoformat(),
+            revocation_route=(
+                "Change BORIS_CORE_PACKAGE or stop the Runtime service."
+            ),
+        )
 
 
 class SemanticInputCompiler:

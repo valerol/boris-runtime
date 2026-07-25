@@ -185,6 +185,28 @@ def test_supported_calculation_produces_non_executing_pass_candidate():
     assert calculator.calls == 1
 
 
+def test_directory_core_reference_uses_content_binding_without_archive_hash():
+    surface = replace(
+        build_surface(),
+        source="/opt/boris-core",
+        source_kind="directory",
+        archive_sha256=None,
+    )
+
+    result = build_executor(
+        surface,
+        AutoCalculator(),
+    ).execute(SemanticInput(
+        phenomenon="Evaluate the configured Core repository.",
+        phase="C03",
+    ))
+
+    assert result.core_ref.source_kind == "directory"
+    assert result.core_ref.archive_sha256 == ""
+    assert result.core_ref.content_set_sha256 == surface.content_set_sha256
+    assert result.gate == "PASS"
+
+
 def test_missing_formal_fact_constrains_llm_pass_to_hold():
     surface = build_surface()
     calculator = AutoCalculator(suggested_gate="PASS")
@@ -747,10 +769,11 @@ def build_executor(surface, calculator, compatibility=None):
 
 def build_accepted_compatibility(surface):
     profile = RuntimeProfile()
+    archive_sha256 = surface.archive_sha256 or ""
     declaration = SubstrateDeclaration(
         package_id=surface.package_id,
         artifact_version=surface.artifact_version,
-        archive_sha256=surface.archive_sha256,
+        archive_sha256=archive_sha256,
         manifest_sha256=surface.manifest_sha256,
         substrate_id=profile.substrate_id,
         capabilities=profile.capabilities,
@@ -763,7 +786,7 @@ def build_accepted_compatibility(surface):
     acceptance = OperatorAcceptance(
         package_id=surface.package_id,
         artifact_version=surface.artifact_version,
-        archive_sha256=surface.archive_sha256,
+        archive_sha256=archive_sha256,
         manifest_sha256=surface.manifest_sha256,
         operator_role="TEST_OPERATOR",
         decision="ACCEPT",
@@ -774,7 +797,7 @@ def build_accepted_compatibility(surface):
     attestation = RuntimeAttestation(
         package_id=surface.package_id,
         artifact_version=surface.artifact_version,
-        archive_sha256=surface.archive_sha256,
+        archive_sha256=archive_sha256,
         manifest_sha256=surface.manifest_sha256,
         substrate_id=profile.substrate_id,
         loaded_component_hashes=surface.loaded_component_hashes,

@@ -16,7 +16,7 @@ from semantic_executor import (
     SemanticInput,
     SemanticViewBuilder,
 )
-from application.execution import ExecutionService
+from application.execution import ExecutionService, OperatorAcceptanceProvider
 from tests.test_execution import (
     CompilerAdapter,
     RecordingCalculator,
@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(
     not CURRENT_CORE_PATH or not Path(CURRENT_CORE_PATH).exists(),
     reason=(
         "Set BORIS_CURRENT_CORE_PATH to the highest available Core release "
-        "archive."
+        "source."
     ),
 )
 
@@ -57,14 +57,10 @@ def current_core_surface():
 
 @pytest.fixture(scope="module")
 def current_core_compatibility(current_core_surface):
-    if current_core_surface.source_kind != "archive":
-        pytest.skip(
-            "Current Core RuntimeAttestation tests require a ZIP archive."
-        )
     acceptance = OperatorAcceptance(
         package_id=current_core_surface.package_id,
         artifact_version=current_core_surface.artifact_version,
-        archive_sha256=current_core_surface.archive_sha256,
+        archive_sha256=current_core_surface.archive_sha256 or "",
         manifest_sha256=current_core_surface.manifest_sha256,
         operator_role="CURRENT_CORE_TEST_OPERATOR",
         decision="ACCEPT",
@@ -101,7 +97,7 @@ def test_current_core_runtime_compatibility_attestation(
 
     assert current_core_compatibility.eligible_for_semantic_execution is True
     assert current_core_compatibility.attestation.archive_sha256 == (
-        current_core_surface.archive_sha256
+        current_core_surface.archive_sha256 or ""
     )
     assert current_core_compatibility.attestation.spec_check_status == "PASS"
     assert current_core_compatibility.attestation.activation_status == (
@@ -204,7 +200,9 @@ def test_current_core_permission_keeps_machine_type_modality_and_operation_separ
     assert candidate.operation == "PERMIT"
     assert candidate.interpretation_status == "SUPPORTED"
     assert result.gate == "HOLD"
-    assert result.core_ref.archive_sha256 == current_core_surface.archive_sha256
+    assert result.core_ref.archive_sha256 == (
+        current_core_surface.archive_sha256 or ""
+    )
 
 
 def test_current_core_material_claim_without_evidence_yields_hold_candidate(
@@ -297,7 +295,7 @@ def test_current_core_publication_candidate_remains_evaluation_only(
     assert current_core_surface.status == "INTERNAL_STATIC_PASS"
 
 
-def test_current_core_cli_smoke_with_exact_operator_acceptance(
+def test_current_core_cli_smoke_with_source_operator_acceptance(
     current_core_surface,
     current_core_compatibility,
     tmp_path,
@@ -383,6 +381,41 @@ def test_current_core_application_execution_route_returns_semantic_candidate(
     assert events[:5] == [
         "core_surface",
         "operator_acceptance",
+        "runtime_compatibility",
+        "semantic_input_compiler",
+        "semantic_executor",
+    ]
+
+
+def test_current_core_repository_route_needs_no_acceptance_sidecar(
+    current_core_surface,
+    monkeypatch,
+):
+    if current_core_surface.source_kind != "directory":
+        pytest.skip("This check applies to a configured Core repository.")
+    monkeypatch.delenv("BORIS_OPERATOR_ACCEPTANCE_FILE", raising=False)
+    text = "Evaluate the configured Core repository."
+    events = []
+    adapter = CompilerAdapter(compiler_payload(text), events)
+    calculator = RecordingCalculator(events, suggested_gate="HOLD")
+    service = ExecutionService(
+        surface_provider=StaticSurfaceProvider(current_core_surface, events),
+        acceptance_provider=OperatorAcceptanceProvider(),
+        compatibility_verifier=RecordingCompatibilityVerifier(events),
+        llm_adapter_factory=lambda: adapter,
+        calculator_factory=lambda _adapter: calculator,
+    )
+
+    result = service.execute(
+        text,
+        session_id="current-core-repository-route",
+        mode="production",
+    )
+
+    assert result["status"] == "semantic_candidate"
+    assert result["gate"] == "HOLD"
+    assert events[:4] == [
+        "core_surface",
         "runtime_compatibility",
         "semantic_input_compiler",
         "semantic_executor",
