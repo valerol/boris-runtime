@@ -1,8 +1,8 @@
 # Remote MCP Deployment
 
-Phase 4C exposes the MCP server as the public adapter boundary while keeping the
-BORIS Runtime HTTP API private. Phase 4D adds `boris.frame`, a context-provider
-tool that still reaches Runtime only through the private HTTP API.
+The MCP server is the public adapter boundary while the BORIS Runtime HTTP API
+remains private. The sole public tool is `boris.execute`; it reaches the
+application execution service only through the private HTTP API.
 
 ```text
 ChatGPT / Remote MCP client
@@ -14,26 +14,31 @@ private MCP server
 Runtime API 127.0.0.1:8000
 ```
 
-The MCP server is an adapter. It does not contain BOIS/SIMA/BORIS logic, does
-not call OpenAI directly, and does not store memory.
+The MCP server is an adapter. It does not contain BOIS/SIMA/BORIS logic, import
+the Semantic Executor, call OpenAI directly, or store memory.
 
 The private Runtime process must be configured with a package source:
 
 ```bash
-BORIS_CORE_PACKAGE=/opt/boris-core
+BORIS_CORE_PACKAGE=/opt/boris-core/current.zip
+BORIS_OPERATOR_ACCEPTANCE_FILE=/etc/boris-runtime/operator-acceptance.json
+BOIS_LLM=openai
+OPENAI_API_KEY=...
 ```
 
-The path must identify a package directory or ZIP accepted by Core Surface.
+Semantic execution requires an exact Core ZIP. The server-owned
+`OperatorAcceptance` must match that ZIP, artifact version, and manifest, and
+must accept only the `semantic_evaluation` scope required by this route.
 
 Available public MCP tools:
 
-- `boris.frame`: calls private `/runtime/frame`; Runtime returns only a bounded
-  BOIS/SIMA/BORIS context packet in `structuredContent`, includes the full safe
-  `runtime_generated_prompt` in text `content`, does not call an LLM, and
-  ChatGPT shows the prompt before generating the final answer itself.
+- `boris.execute`: calls private `/runtime/execute`; Runtime verifies
+  compatibility, compiles a strict `SemanticInput`, invokes the existing
+  Semantic Executor, and returns a non-mutating `ExecutionCandidate`.
 
-Answer validation remains available through the private Runtime API. It is not
-registered as a public MCP tool.
+There is no public `boris.frame` alias. Frame diagnostics and answer validation
+remain available through the private Runtime API and are not registered as
+public MCP tools.
 
 ## Mode A - Local Development
 
@@ -97,10 +102,15 @@ location /mcp {
 }
 ```
 
-Do not expose `/runtime/frame` or `/runtime/validate` directly to the public
-internet. The public boundary is `/mcp`; the internal boundaries are
-`http://127.0.0.1:8000/runtime/frame` and
-`http://127.0.0.1:8000/runtime/validate`.
+Do not expose `/runtime/execute`, `/runtime/frame`, or `/runtime/validate`
+directly to the public internet. The public boundary is `/mcp`; all Runtime API
+routes remain on the private interface.
+
+`/runtime/execute` returns `boris-execution/1.0` with
+`status: "semantic_candidate"`. `PASS`, `HOLD`, `STOP`, and `REPAIR` are normal
+HTTP 200 Runtime results. Missing acceptance, compatibility rejection,
+invalid compiler output, and LLM failures use controlled error envelopes.
+Production output omits diagnostic trace data.
 
 `/runtime/frame` returns packets with `packet_version:
 "boris-context/2.0"`, `runtime_mode: "context_provider"`, `llm_called: false`,
@@ -155,23 +165,29 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS. Use boris.frame for LLM-free BOIS/SIMA/BORIS context packets and the full Runtime-generated prompt that ChatGPT shows before answering.
+Connects ChatGPT to BORIS. Use boris.execute for the Runtime semantic route. Present its ExecutionCandidate without replacing it with an independent answer or weakening HOLD, STOP, or REPAIR.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
 
-Use `"mode":"developer"` in a frame request to return `developer_trace`.
-Through MCP, developer mode also instructs ChatGPT to display the complete
-formatted trace before the Runtime-generated prompt and its own answer. The
-trace contains projection scores and decisions, not model chain-of-thought or
-server secrets.
+Use `"mode":"developer"` in an execution request to return
+`boris-execution-trace/1.0`. Through MCP, ChatGPT presents the complete safe
+trace before the candidate. The trace combines lexical projection,
+`SemanticInput`, RuntimeAttestation, norm and predicate results, constrained
+gate, validation issues, stage ledger, and timings. It contains no hidden
+prompts, chain-of-thought, server secrets, or absolute server paths.
 
 Local smoke tests:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/runtime/frame \
+curl -s -X POST http://127.0.0.1:8000/runtime/execute \
   -H "Content-Type: application/json" \
-  -d '{"session_id":"frame-test","input":"Explain BOIS Runtime as a context provider","mode":"default","context":{"source":"curl"}}'
+  -d '{
+    "session_id": "execute-test",
+    "input": "Explain the applicable BOIS constraints",
+    "mode": "developer",
+    "context": {}
+  }'
 
 curl -s -X POST http://127.0.0.1:8000/runtime/validate \
   -H "Content-Type: application/json" \

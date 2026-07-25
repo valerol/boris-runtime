@@ -7,22 +7,32 @@ from fastapi.responses import JSONResponse
 from api.models import (
     HealthResponse,
     RuntimeErrorResponse,
+    RuntimeExecutionRequest,
+    RuntimeExecutionResponse,
     RuntimeFrameRequest,
     RuntimeFrameResponse,
     RuntimeValidationRequest,
     RuntimeValidationResponse,
 )
 from application.context_provider import ContextProvider, CoreSurfaceUnavailable
+from application.execution import (
+    ExecutionService,
+    OperatorAcceptanceUnavailable,
+    SemanticInputCompilationError,
+)
 from application.semantic_validation import SemanticValidationOutputError
 from application.validation import ValidationEngine
 from llm.config import build_lazy_validator_llm_adapter, load_env_file
 from llm.errors import LLMConfigurationError
+from runtime_compatibility import RuntimeCompatibilityError
+from semantic_executor import SemanticExecutorError
 
 
 load_env_file()
 
 app = FastAPI(title="BORIS Runtime API")
 context_provider = ContextProvider()
+execution_service = ExecutionService()
 validation_engine = ValidationEngine(
     validator_adapter_factory=build_lazy_validator_llm_adapter
 )
@@ -83,6 +93,70 @@ def frame_runtime(request: RuntimeFrameRequest):
         )
     except Exception as exc:
         return _error_response(500, "runtime_error", exc, session_id=session_id)
+
+
+@app.post(
+    "/runtime/execute",
+    response_model=RuntimeExecutionResponse,
+    response_model_exclude_none=True,
+    responses={
+        409: {"model": RuntimeErrorResponse},
+        500: {"model": RuntimeErrorResponse},
+        502: {"model": RuntimeErrorResponse},
+        503: {"model": RuntimeErrorResponse},
+    },
+)
+def execute_runtime(request: RuntimeExecutionRequest):
+    session_id = request.session_id or str(uuid4())
+    try:
+        return execution_service.execute(
+            request.input,
+            session_id=session_id,
+            mode=request.mode,
+            context=request.context,
+        )
+    except CoreSurfaceUnavailable as exc:
+        return _error_response(
+            503,
+            "core_surface_unavailable",
+            exc,
+            session_id=session_id,
+        )
+    except OperatorAcceptanceUnavailable as exc:
+        return _error_response(
+            503,
+            "operator_acceptance_unavailable",
+            exc,
+            session_id=session_id,
+        )
+    except RuntimeCompatibilityError as exc:
+        return _error_response(
+            409,
+            "runtime_compatibility_rejected",
+            exc,
+            session_id=session_id,
+        )
+    except SemanticInputCompilationError as exc:
+        return _error_response(
+            502,
+            "semantic_input_error",
+            exc,
+            session_id=session_id,
+        )
+    except (SemanticExecutorError, LLMConfigurationError) as exc:
+        return _error_response(
+            502,
+            "semantic_execution_error",
+            exc,
+            session_id=session_id,
+        )
+    except Exception:
+        return _error_response(
+            500,
+            "runtime_error",
+            "Unexpected Runtime execution failure.",
+            session_id=session_id,
+        )
 
 
 @app.post(

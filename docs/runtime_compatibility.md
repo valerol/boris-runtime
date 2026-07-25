@@ -45,7 +45,7 @@ The verifier recognizes both runtime-contract dialects:
   capability checks are still performed independently.
 
 An unknown, duplicate, malformed, missing, or non-passing check prevents
-`spec_check_status=PASS`. The v2.18 registry covers all 21 declared legacy
+`spec_check_status=PASS`. The legacy registry covers all declared legacy
 checks. A release receipt is evidence of package static validation, not proof
 that the receiving Runtime supports a new Predicate DSL, deontic operation, or
 GateDecision contract.
@@ -89,7 +89,9 @@ The Phase 4R profile declares capabilities for:
 
 - archive, manifest, component, and content-set binding;
 - immutable passive Core Surface handling;
-- the three-valued Predicate DSL;
+- legacy three-valued and current four-valued Predicate DSL contracts;
+- current identifier, scope, reference-resolution, and collection predicate
+  operations;
 - deontic operation checks;
 - GateDecision semantics;
 - structured semantic calculation;
@@ -104,6 +106,10 @@ Its limitations are explicit:
 - no stateful orchestration-cycle integration.
 
 These limitations do not disappear when the specification checks pass.
+
+The current Core v2.23 release passes the receiving profile, including its
+`ERROR` predicate result and extended operator set. A formal predicate `ERROR`
+maps to `REPAIR`; it is not treated as an ordinary unknown.
 
 ## Operator decision
 

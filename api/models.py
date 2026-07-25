@@ -51,6 +51,28 @@ class RuntimeFrameResponse(BaseModel):
     runtime_generated_prompt: str
 
 
+class RuntimeExecutionRequest(BaseModel):
+    input: constr(strip_whitespace=True, min_length=1)
+    session_id: str | None = None
+    mode: Literal["default", "production", "developer"] = "default"
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeExecutionResponse(BaseModel):
+    execution_version: Literal["boris-execution/1.0"]
+    session_id: str
+    status: Literal["semantic_candidate"]
+    phase: str
+    gate: Literal["PASS", "HOLD", "STOP", "REPAIR"]
+    candidate_result: dict[str, Any] = Field(default_factory=dict)
+    norm_results: list[dict[str, Any]] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+    conflicts: list[dict[str, Any]] = Field(default_factory=list)
+    alternatives: list[dict[str, Any]] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    developer_trace: dict[str, Any] | None = None
+
+
 ValidationMode = Literal["deterministic", "semantic", "hybrid"]
 ValidationVerdict = Literal["PASS", "REVISE", "FAIL", "INDETERMINATE"]
 

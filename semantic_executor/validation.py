@@ -5,13 +5,14 @@ from collections.abc import Mapping
 
 from semantic_executor.errors import SemanticCalculationError
 from semantic_executor.models import (
+    APPLICABILITY_RESULTS,
     ConflictCalculation,
     CoreReference,
     GATE_RESULTS,
     NormCalculation,
+    PREDICATE_RESULTS,
     SemanticCalculation,
     SemanticView,
-    TRUTH_VALUES,
 )
 
 
@@ -146,11 +147,11 @@ class SemanticCalculationValidator:
             candidate = candidates[norm_ref]
             layer = self._text(item["layer"], f"{label}.layer")
             operation = self._text(item["operation"], f"{label}.operation")
-            predicate_result = self._truth(
+            predicate_result = self._predicate_result(
                 item["predicate_result"],
                 f"{label}.predicate_result",
             )
-            applicability = self._truth(
+            applicability = self._applicability(
                 item["applicability"],
                 f"{label}.applicability",
             )
@@ -285,9 +286,17 @@ class SemanticCalculationValidator:
             raise SemanticCalculationError(f"{label} must be a non-empty string.")
         return value.strip()
 
-    def _truth(self, value, label):
+    def _predicate_result(self, value, label):
         value = self._text(value, label)
-        if value not in TRUTH_VALUES:
+        if value not in PREDICATE_RESULTS:
+            raise SemanticCalculationError(
+                f"{label} must be TRUE, FALSE, UNKNOWN, or ERROR."
+            )
+        return value
+
+    def _applicability(self, value, label):
+        value = self._text(value, label)
+        if value not in APPLICABILITY_RESULTS:
             raise SemanticCalculationError(
                 f"{label} must be TRUE, FALSE, or UNKNOWN."
             )

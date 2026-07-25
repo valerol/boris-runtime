@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from mcp_server.server import run_boris_frame
+from mcp_server.server import run_boris_execute
 from mcp_server.runtime_client import RuntimeAPIError
 
 
@@ -9,20 +9,22 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class FakeRuntimeClient:
     def __init__(self, response=None, error=None):
-        self.response = response or _frame_packet()
+        self.response = response or _execution_packet()
         self.error = error
         self.calls = []
 
-    def frame(self, **kwargs):
+    def execute(self, **kwargs):
         self.calls.append(kwargs)
         if self.error:
             raise self.error
         return self.response
-def test_boris_frame_calls_runtime_api_client_and_returns_context_packet():
-    packet = _frame_packet()
+
+
+def test_boris_execute_calls_runtime_api_client_and_returns_candidate():
+    packet = _execution_packet()
     client = FakeRuntimeClient(response=packet)
 
-    response = run_boris_frame(
+    response = run_boris_execute(
         input="Explain BOIS Runtime",
         session_id="test",
         mode="default",
@@ -32,9 +34,13 @@ def test_boris_frame_calls_runtime_api_client_and_returns_context_packet():
 
     assert response["structuredContent"] == packet
     assert response["content"][0]["type"] == "text"
-    assert response["content"][0]["text"].startswith("Show the user the complete runtime_generated_prompt")
-    assert "Do not hide, shorten, or omit the Runtime-generated prompt." in response["content"][0]["text"]
-    assert "## User input\nExplain BOIS Runtime" in response["content"][0]["text"]
+    assert response["content"][0]["text"].startswith(
+        "Present the Runtime ExecutionCandidate"
+    )
+    assert "Do not replace it with an independently generated answer" in (
+        response["content"][0]["text"]
+    )
+    assert '"status": "semantic_candidate"' in response["content"][0]["text"]
     assert "isError" not in response
     assert client.calls == [
         {
@@ -46,15 +52,19 @@ def test_boris_frame_calls_runtime_api_client_and_returns_context_packet():
     ]
 
 
-def test_boris_frame_surfaces_runtime_error_payload():
+def test_boris_execute_surfaces_runtime_error_payload():
     error_payload = {
         "error": "runtime_error",
         "detail": "failed",
         "session_id": "test",
     }
-    client = FakeRuntimeClient(error=RuntimeAPIError("HTTP 500", status_code=500, payload=error_payload))
+    client = FakeRuntimeClient(error=RuntimeAPIError(
+        "HTTP 500",
+        status_code=500,
+        payload=error_payload,
+    ))
 
-    response = run_boris_frame(input="hello", session_id="test", client=client)
+    response = run_boris_execute(input="hello", session_id="test", client=client)
 
     assert response == {
         "structuredContent": error_payload,
@@ -63,15 +73,15 @@ def test_boris_frame_surfaces_runtime_error_payload():
     }
 
 
-def test_developer_frame_instructs_chatgpt_to_show_projection_trace():
-    packet = _frame_packet()
+def test_developer_execute_instructs_chatgpt_to_show_trace_before_candidate():
+    packet = _execution_packet()
     packet["developer_trace"] = {
-        "trace_version": "boris-projection-trace/1.0",
-        "projection": {"selected_count": 1},
+        "trace_version": "boris-execution-trace/1.0",
+        "semantic_execution": {"constrained_gate": "HOLD"},
     }
     client = FakeRuntimeClient(response=packet)
 
-    response = run_boris_frame(
+    response = run_boris_execute(
         input="Explain BOIS Runtime",
         mode="developer",
         client=client,
@@ -79,8 +89,8 @@ def test_developer_frame_instructs_chatgpt_to_show_projection_trace():
 
     text = response["content"][0]["text"]
     assert text.startswith("Developer mode is active.")
-    assert "Show the complete developer_trace as formatted JSON" in text
-    assert '"trace_version": "boris-projection-trace/1.0"' in text
+    assert text.index("developer_trace:") < text.index("ExecutionCandidate:")
+    assert '"trace_version": "boris-execution-trace/1.0"' in text
     assert response["structuredContent"]["developer_trace"] == packet["developer_trace"]
 
 
@@ -98,31 +108,22 @@ def test_mcp_adapter_does_not_import_runtime_internals():
             assert item not in source, f"{path} must not reference {item}"
 
 
-def _frame_packet():
+def _execution_packet():
     return {
-        "packet_version": "boris-context/2.0",
-        "frame_id": "frame-id",
+        "execution_version": "boris-execution/1.0",
         "session_id": "test",
-        "input": "Explain BOIS Runtime",
-        "runtime_mode": "context_provider",
-        "llm_called": False,
-        "bois_frame": {},
-        "sima": {
-            "risk": 0.2,
-            "uncertainty": 0.2,
-            "missing_fields": [],
-            "ambiguity_score": 0.1,
-        },
-        "boris_context": {},
-        "projected_core": [],
-        "projection_metadata": {
-            "returned_chunks": 0,
-            "total_characters": 0,
-            "truncated": False,
-            "max_chunks": 6,
-            "max_chunk_characters": 3000,
-            "max_total_characters": 12000,
-        },
-        "answer_instructions": [],
-        "runtime_generated_prompt": "## User input\nExplain BOIS Runtime",
+        "status": "semantic_candidate",
+        "phase": "C03",
+        "gate": "HOLD",
+        "candidate_result": {"summary": "Candidate only."},
+        "norm_results": [],
+        "unknowns": ["Independent review is absent."],
+        "conflicts": [],
+        "alternatives": [],
+        "limitations": [
+            "not_independently_reviewed",
+            "not_policy_admitted",
+            "no_state_mutation",
+            "no_external_action",
+        ],
     }

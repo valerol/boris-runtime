@@ -38,19 +38,20 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
 
     tools = asyncio.run(server.list_tools())
     tool_names = {item.name for item in tools}
-    frame_tool = next(item for item in tools if item.name == "boris.frame")
+    execute_tool = next(item for item in tools if item.name == "boris.execute")
 
     assert server._mcp_server.name == "BORIS"
     assert server._mcp_server.instructions.startswith("BORIS exposes one public tool")
     assert len(server._mcp_server.instructions) <= 512
-    assert tool_names == {"boris.frame"}
+    assert tool_names == {"boris.execute"}
+    assert "boris.frame" not in tool_names
     assert "boris.ask" not in tool_names
     assert "boris.validate" not in tool_names
-    assert "Context-only" in frame_tool.description
-    assert "does not generate a final answer or call an external LLM" in frame_tool.description
-    assert frame_tool.annotations.readOnlyHint is True
-    assert frame_tool.annotations.openWorldHint is False
-    assert frame_tool.annotations.destructiveHint is False
+    assert "ExecutionCandidate" in execute_tool.description
+    assert "not independently reviewed" in execute_tool.description
+    assert execute_tool.annotations.readOnlyHint is True
+    assert execute_tool.annotations.openWorldHint is False
+    assert execute_tool.annotations.destructiveHint is False
     assert TOOL_ANNOTATIONS == {
         "readOnlyHint": True,
         "openWorldHint": False,
@@ -84,25 +85,25 @@ async def test_streamable_http_client_receives_native_structured_content(monkeyp
                     tools = await session.list_tools()
                     tool_names = [tool.name for tool in tools.tools]
 
-                    frame_result = await session.call_tool(
-                        "boris.frame",
+                    execution_result = await session.call_tool(
+                        "boris.execute",
                         {
                             "input": "Explain BOIS Runtime",
-                            "session_id": "mcp-native-frame",
+                            "session_id": "mcp-native-execution",
                         },
                     )
-    assert tool_names == ["boris.frame"]
-    assert frame_result.isError is False
-    assert frame_result.structuredContent is not None
-    assert frame_result.structuredContent["packet_version"] == "boris-context/2.0"
-    assert frame_result.structuredContent["runtime_mode"] == "context_provider"
-    assert frame_result.structuredContent["llm_called"] is False
-    assert frame_result.structuredContent["runtime_generated_prompt"]
-    frame_text = frame_result.content[0].text
-    assert frame_text.startswith("Show the user the complete runtime_generated_prompt")
-    assert "Do not hide, shorten, or omit the Runtime-generated prompt." in frame_text
-    assert frame_result.structuredContent["runtime_generated_prompt"] in frame_text
-    assert '"structuredContent"' not in frame_text
+    assert tool_names == ["boris.execute"]
+    assert execution_result.isError is False
+    assert execution_result.structuredContent is not None
+    assert execution_result.structuredContent["execution_version"] == (
+        "boris-execution/1.0"
+    )
+    assert execution_result.structuredContent["status"] == "semantic_candidate"
+    assert execution_result.structuredContent["gate"] == "HOLD"
+    result_text = execution_result.content[0].text
+    assert result_text.startswith("Present the Runtime ExecutionCandidate")
+    assert "Do not replace it with an independently generated answer" in result_text
+    assert '"structuredContent"' not in result_text
 
 
 class FakeRuntimeAPIClient:
@@ -115,38 +116,28 @@ class FakeRuntimeAPIClient:
     def __exit__(self, exc_type, exc, traceback):
         return None
 
-    def frame(self, input, session_id=None, mode="default", context=None):
-        packet = frame_packet()
+    def execute(self, input, session_id=None, mode="default", context=None):
+        packet = execution_packet()
         packet["session_id"] = session_id or packet["session_id"]
-        packet["input"] = input
         return packet
 
 
-def frame_packet():
+def execution_packet():
     return {
-        "packet_version": "boris-context/2.0",
-        "frame_id": "00000000-0000-4000-8000-000000000000",
-        "session_id": "mcp-native-frame",
-        "input": "Explain BOIS Runtime",
-        "runtime_mode": "context_provider",
-        "llm_called": False,
-        "bois_frame": {},
-        "sima": {
-            "risk": 0.2,
-            "uncertainty": 0.2,
-            "missing_fields": [],
-            "ambiguity_score": 0.1,
-        },
-        "boris_context": {},
-        "projected_core": [],
-        "projection_metadata": {
-            "returned_chunks": 0,
-            "total_characters": 0,
-            "truncated": False,
-            "max_chunks": 6,
-            "max_chunk_characters": 3000,
-            "max_total_characters": 12000,
-        },
-        "answer_instructions": [],
-        "runtime_generated_prompt": "## User input\nExplain BOIS Runtime",
+        "execution_version": "boris-execution/1.0",
+        "session_id": "mcp-native-execution",
+        "status": "semantic_candidate",
+        "phase": "C03",
+        "gate": "HOLD",
+        "candidate_result": {"summary": "Candidate only."},
+        "norm_results": [],
+        "unknowns": ["Independent review is absent."],
+        "conflicts": [],
+        "alternatives": [],
+        "limitations": [
+            "not_independently_reviewed",
+            "not_policy_admitted",
+            "no_state_mutation",
+            "no_external_action",
+        ],
     }

@@ -31,9 +31,22 @@
 - non-executing `ExecutionCandidate`;
 - trace binding to RuntimeAttestation.
 
+### Semantic Execution Entry
+
+- strict application-level `SemanticInputCompiler`;
+- server-owned, exact-archive `OperatorAcceptance`;
+- `ExecutionService` route through Runtime Compatibility and Semantic Executor;
+- private `POST /runtime/execute`;
+- sole public MCP tool `boris.execute`;
+- `boris-execution/1.0` envelope marked `status=semantic_candidate`;
+- safe developer trace combining lexical projection, compiled input,
+  RuntimeAttestation, semantic results, stage ledger, and timings;
+- current Core v2.23 four-valued Predicate DSL and operator compatibility;
+- internal `/runtime/frame` retained without a public `boris.frame` alias.
+
 ### Stateless context, validation, and projection observability
 
-- CoreSurface-based `boris.frame`;
+- CoreSurface-based internal `/runtime/frame`;
 - bounded passive norm projection;
 - safe `boris-context/2.0` packet;
 - compact `default` and `production` responses;
@@ -55,69 +68,8 @@
 
 ## Current execution limit
 
-The current release package may still produce `HOLD` when its Predicate DSL,
-deontic operations, schema vocabulary, or gate semantics exceed the receiving
-Runtime profile. A successfully loaded package and
-`status=INTERNAL_STATIC_PASS` do not imply semantic compatibility or
-activation.
-
-The Semantic Executor is currently available only as an isolated internal
-component. The public `boris.frame` route performs bounded lexical projection
-and does not compile a `SemanticInput` or invoke `SemanticExecutor.execute()`.
-Its selected objects are retrieval candidates, not semantically applicable or
-policy-admitted norms.
-
-## Immediate next milestone: Semantic Execution Entry
-
-### Goal
-
-Connect the existing Semantic Executor to the application, private API, and
-public MCP path without introducing a second public route or renaming unrelated
-internal components.
-
-The target path is:
-
-```text
-MCP boris.execute
-  -> private POST /runtime/execute
-  -> ExecutionService
-  -> Runtime Compatibility and RuntimeAttestation
-  -> validated SemanticInput
-  -> SemanticExecutor
-  -> non-executing ExecutionCandidate
-```
-
-### Scope
-
-- add a minimal application-level `SemanticInputCompiler` for raw user input;
-- treat user input as an untrusted phenomenon and do not invent facts,
-  evidence, authority, norm references, phases, layers, or triggers;
-- validate all compiled identifiers against the verified Core Surface and fail
-  closed on invalid compiler output;
-- load server-side `OperatorAcceptance` and check Runtime Compatibility before
-  any semantic LLM call;
-- add an application-level `ExecutionService` that invokes the existing
-  Semantic Executor;
-- add private `POST /runtime/execute` while retaining `/runtime/frame` as an
-  internal read-only diagnostic route;
-- atomically replace the sole public MCP tool `boris.frame` with the sole
-  public tool `boris.execute`;
-- do not retain a public `boris.frame` alias;
-- preserve `default`, `production`, and `developer` modes on the single
-  execution route;
-- return an execution envelope marked `status=semantic_candidate`, including
-  gate, unknowns, conflicts, alternatives, and explicit limitations;
-- extend developer mode with the safe projection, compiled `SemanticInput`,
-  attestation, semantic trace, validation issues, invoked and absent stages,
-  and timings.
-
-The lexical Context Projector remains an observability source. It must not
-decide semantic applicability or automatically populate requested norm
-references.
-
-### Explicit limitations
-
-Every result from this milestone remains:
+The public route now reaches Runtime Compatibility and Semantic Executor, but
+every result remains:
 
 - not independently reviewed;
 - not admitted by Policy Kernel;
@@ -125,34 +77,9 @@ Every result from this milestone remains:
 - unable to execute external actions.
 
 `HOLD`, `STOP`, and `REPAIR` are normal Runtime results rather than transport
-errors. The execution envelope must not imply that any unavailable downstream
-stage ran.
-
-### Out of scope
-
-- Independent Reviewer;
-- Policy Kernel;
-- automatic phase transitions;
-- State Events and Cycle Guard;
-- memory and domain physiology;
-- external tool calls and action execution;
-- new architecture directories for future-only components.
-
-### Completion criteria
-
-- the MCP tool list is exactly `{"boris.execute"}`;
-- `boris.frame` is absent from the public MCP contract;
-- `/runtime/frame` remains available internally;
-- ordinary MCP input reaches Runtime Compatibility and the Semantic Executor;
-- invalid or mismatched `OperatorAcceptance` fails closed before semantic LLM
-  execution;
-- invalid phases, triggers, layers, and norm references are rejected;
-- constrained gates cannot be weakened by later presentation logic;
-- production omits developer trace;
-- developer mode contains projection, SemanticInput, attestation, and execution
-  trace;
-- the public result is explicitly a `semantic_candidate`;
-- existing and Core v2.18 integration tests pass.
+errors. `PASS` is still only a semantic candidate, not final authorization.
+Lexical projection remains observability and never determines semantic
+applicability.
 
 ## Next architectural stages
 

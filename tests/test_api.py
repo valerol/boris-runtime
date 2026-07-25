@@ -2,6 +2,10 @@ from fastapi.testclient import TestClient
 
 import api.app as app_module
 from application.context_provider import CoreSurfaceUnavailable
+from application.execution import (
+    OperatorAcceptanceUnavailable,
+    SemanticInputCompilationError,
+)
 
 
 client = TestClient(app_module.app)
@@ -17,6 +21,25 @@ class FakeContextProvider:
         if self.error:
             raise self.error
         return frame_packet(user_input, session_id)
+
+
+class FakeExecutionService:
+    def __init__(self, error=None, gate="HOLD"):
+        self.error = error
+        self.gate = gate
+        self.calls = []
+
+    def execute(
+        self,
+        user_input,
+        session_id=None,
+        mode="default",
+        context=None,
+    ):
+        self.calls.append((user_input, session_id, mode, context))
+        if self.error:
+            raise self.error
+        return execution_packet(session_id, gate=self.gate)
 
 
 def test_health_returns_ok():
@@ -133,6 +156,113 @@ def test_runtime_frame_execution_error_is_controlled_and_redacted(monkeypatch):
     }
 
 
+def test_runtime_execute_delegates_to_execution_service(monkeypatch):
+    service = FakeExecutionService(gate="PASS")
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={
+            "session_id": "execution-test",
+            "input": "Explain BOIS Runtime",
+            "mode": "developer",
+            "context": {"facts": {"source_supplied": True}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["execution_version"] == "boris-execution/1.0"
+    assert body["status"] == "semantic_candidate"
+    assert body["gate"] == "PASS"
+    assert service.calls == [
+        (
+            "Explain BOIS Runtime",
+            "execution-test",
+            "developer",
+            {"facts": {"source_supplied": True}},
+        )
+    ]
+
+
+def test_runtime_execute_hold_is_a_normal_runtime_result(monkeypatch):
+    service = FakeExecutionService(gate="HOLD")
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={"input": "Explain BOIS Runtime"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["gate"] == "HOLD"
+    assert response.json()["status"] == "semantic_candidate"
+
+
+def test_runtime_execute_missing_acceptance_fails_closed(monkeypatch):
+    service = FakeExecutionService(
+        error=OperatorAcceptanceUnavailable(
+            "Server OperatorAcceptance is not configured."
+        )
+    )
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={"session_id": "closed", "input": "Explain BOIS Runtime"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "operator_acceptance_unavailable",
+        "detail": "Server OperatorAcceptance is not configured.",
+        "session_id": "closed",
+    }
+
+
+def test_runtime_execute_invalid_semantic_input_is_controlled(monkeypatch):
+    service = FakeExecutionService(
+        error=SemanticInputCompilationError(
+            "SemanticInput phase is not allowed."
+        )
+    )
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={"session_id": "invalid", "input": "Explain BOIS Runtime"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": "semantic_input_error",
+        "detail": "SemanticInput phase is not allowed.",
+        "session_id": "invalid",
+    }
+
+
+def test_runtime_execute_unexpected_error_does_not_leak_detail(monkeypatch):
+    service = FakeExecutionService(
+        error=RuntimeError(
+            "failure at /opt/private/core.zip with secret-value"
+        )
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-value")
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={"session_id": "broken", "input": "Explain BOIS Runtime"},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": "runtime_error",
+        "detail": "Unexpected Runtime execution failure.",
+        "session_id": "broken",
+    }
+
+
 def test_legacy_runtime_routes_are_removed():
     routes = {
         (method, route.path)
@@ -143,6 +273,8 @@ def test_legacy_runtime_routes_are_removed():
     assert ("POST", "/runtime/ask") not in routes
     assert ("POST", "/runtime/reset") not in routes
     assert ("POST", "/run") not in routes
+    assert ("POST", "/runtime/execute") in routes
+    assert ("POST", "/runtime/frame") in routes
     assert not any(path.startswith("/runtime/session/") for _method, path in routes)
 
 
@@ -187,4 +319,25 @@ def frame_packet(user_input, session_id):
         },
         "answer_instructions": [],
         "runtime_generated_prompt": f"## User input\n{user_input}",
+    }
+
+
+def execution_packet(session_id, gate="HOLD"):
+    return {
+        "execution_version": "boris-execution/1.0",
+        "session_id": session_id,
+        "status": "semantic_candidate",
+        "phase": "C03",
+        "gate": gate,
+        "candidate_result": {"summary": "Candidate only."},
+        "norm_results": [],
+        "unknowns": [],
+        "conflicts": [],
+        "alternatives": [],
+        "limitations": [
+            "not_independently_reviewed",
+            "not_policy_admitted",
+            "no_state_mutation",
+            "no_external_action",
+        ],
     }

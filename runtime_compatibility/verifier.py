@@ -16,7 +16,10 @@ from runtime_compatibility.models import (
     SubstrateDeclaration,
     canonical_sha256,
 )
-from runtime_compatibility.profile import RuntimeProfile
+from runtime_compatibility.profile import (
+    SUPPORTED_PREDICATE_TRUTH_VALUES,
+    RuntimeProfile,
+)
 from runtime_compatibility.schema import validate_schema_definition
 
 
@@ -277,14 +280,14 @@ class RuntimeCompatibilityVerifier:
             (
                 isinstance(predicate_dsl, Mapping)
                 and tuple(predicate_dsl.get("truth_values", ()))
-                == ("TRUE", "FALSE", "UNKNOWN")
+                in SUPPORTED_PREDICATE_TRUTH_VALUES
                 and predicate_dsl.get("missing_path_result") == "UNKNOWN"
                 and predicate_dsl.get("unknown_material_result") == "HOLD"
                 and predicate_operators.issubset(
                     self.profile.supported_predicate_operators
                 )
             ),
-            "The declared three-valued Predicate DSL is supported.",
+            "The declared Predicate DSL truth values and operators are supported.",
             "The Predicate DSL contract or operator set is unsupported.",
             failure="HOLD",
         ))

@@ -89,7 +89,7 @@ class RecordingLLM:
         return json.dumps(self.response)
 
 
-def test_predicate_evaluator_matches_canonical_three_valued_vectors():
+def test_predicate_evaluator_matches_supported_truth_value_vectors():
     evaluator = PredicateEvaluator()
 
     assert evaluator.evaluate({"op": "always"}, {}) == "TRUE"
@@ -106,6 +106,36 @@ def test_predicate_evaluator_matches_canonical_three_valued_vectors():
         {},
     ) == "UNKNOWN"
     assert evaluator.evaluate({"op": "not", "arg": None}, {}) == "UNKNOWN"
+    assert evaluator.evaluate(
+        {"op": "literal", "value": "invalid-truth-literal"},
+        {},
+    ) == "ERROR"
+    assert evaluator.evaluate(
+        {"op": "min_items", "path": "items", "value": 1},
+        {"items": "not-an-array"},
+    ) == "ERROR"
+
+
+def test_formal_predicate_error_forces_repair():
+    surface = build_surface()
+    calculator = AutoCalculator(
+        suggested_gate="PASS",
+        applicability={"N-PREDICATE-ERROR": "UNKNOWN"},
+    )
+
+    result = build_executor(surface, calculator).execute(SemanticInput(
+        phenomenon="Evaluate a malformed predicate input.",
+        phase="C03",
+        facts={"items": "not-an-array"},
+        triggers=("predicate:error",),
+    ))
+
+    assert result.gate == "REPAIR"
+    assert any(
+        issue.code == "FORMAL_PREDICATE_ERROR"
+        and issue.norm_refs == ("N-PREDICATE-ERROR",)
+        for issue in result.validation_issues
+    )
 
 
 def test_semantic_view_selects_native_phase_trigger_and_explicit_layers():
@@ -530,6 +560,21 @@ def build_surface():
             "priority": "950",
         },
         {
+            "norm_id": "N-PREDICATE-ERROR",
+            "layer": "BASE",
+            "norm_type": "MANDATORY_RULE",
+            "card_status": "ACTIVE",
+            "trigger": ["predicate:error"],
+            "when": {
+                "op": "min_items",
+                "path": "items",
+                "value": 1,
+            },
+            "modality": "MUST",
+            "operation": "REQUIRE",
+            "priority": "925",
+        },
+        {
             "norm_id": "N-INACTIVE",
             "layer": "PUBLICATION_CANDIDATE",
             "norm_type": "MANDATORY_RULE",
@@ -635,10 +680,14 @@ def build_surface():
         loading_order=(),
         machine_canon={
             "predicate_dsl": {
-                "truth_values": ["TRUE", "FALSE", "UNKNOWN"],
+                "truth_values": ["TRUE", "FALSE", "UNKNOWN", "ERROR"],
                 "missing_path_result": "UNKNOWN",
                 "unknown_material_result": "HOLD",
-                "operators": {},
+                "operators": {
+                    "always": {},
+                    "fact": {},
+                    "min_items": {},
+                },
             },
             "deontic_semantics": {
                 "modality_map": {

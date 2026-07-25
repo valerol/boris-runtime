@@ -18,9 +18,30 @@ class RuntimeAPIClient:
             transport=transport,
         )
 
-    def frame(self, input: str, session_id: str | None = None, mode: str = "default", context: dict | None = None):
+    def frame(
+        self,
+        input: str,
+        session_id: str | None = None,
+        mode: str = "default",
+        context: dict | None = None,
+    ):
         return self._post_runtime(
             "/runtime/frame",
+            input=input,
+            session_id=session_id,
+            mode=mode,
+            context=context,
+        )
+
+    def execute(
+        self,
+        input: str,
+        session_id: str | None = None,
+        mode: str = "default",
+        context: dict | None = None,
+    ):
+        return self._post_runtime(
+            "/runtime/execute",
             input=input,
             session_id=session_id,
             mode=mode,
@@ -47,7 +68,10 @@ class RuntimeAPIClient:
         try:
             payload = response.json()
         except ValueError as exc:
-            raise RuntimeAPIError("Runtime API returned invalid JSON", status_code=response.status_code) from exc
+            raise RuntimeAPIError(
+                "Runtime API returned invalid JSON",
+                status_code=response.status_code,
+            ) from exc
 
         if response.status_code < 200 or response.status_code >= 300:
             raise RuntimeAPIError(

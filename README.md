@@ -2,7 +2,8 @@
 
 BORIS Runtime is an experimental BOIS/SIMA/BORIS orchestration substrate. The
 repository currently implements a verified passive Core Surface, compatibility
-attestation, an isolated Semantic Executor, a stateless ChatGPT context
+attestation, a strict Semantic Input compiler, an application-level execution
+service, a non-mutating Semantic Executor, an internal diagnostic context
 provider, and transport adapters.
 
 It does not yet implement Independent Review, Policy Kernel state admission,
@@ -14,30 +15,34 @@ external actions, domain physiology, or long-term memory.
 Core release package
   -> core_surface
   -> runtime_compatibility
+  -> application.execution.SemanticInputCompiler
   -> semantic_executor
   -> ExecutionCandidate
+  -> private HTTP /runtime/execute
+  -> public MCP boris.execute
 
 Core release package
   -> core_surface
   -> application.context_provider
   -> private HTTP /runtime/frame
-  -> public MCP boris.frame
-  -> ChatGPT
+  -> internal diagnostics
 ```
 
-The two paths share the same verified `CoreSurface`. The context-provider path
-projects bounded canonical records but does not perform semantic applicability
-routing, call an LLM, mutate state, or claim package activation.
+Both paths share the same verified `CoreSurface`. The public execution path
+returns `status: "semantic_candidate"`; it does not claim Independent Review,
+Policy Kernel admission, state mutation, or external action. The frame path
+remains read-only lexical observability and does not determine semantic
+applicability.
 
 ## Repository layout
 
 ```text
-application/            context projection, stateless frame, answer validation
+application/            execution service, compiler, projection, validation
 api/                    private FastAPI adapter
 cli/                    local context-frame adapter
 core_surface/           package loading, integrity, immutable canonical data
 llm/                    canonical LLM port and configuration
-mcp_server/             public boris.frame adapter
+mcp_server/             public boris.execute adapter
 runtime_compatibility/  substrate checks and RuntimeAttestation
 semantic_executor/      isolated semantic calculation
 tests/                  active regression suite
@@ -53,14 +58,23 @@ middleware generations and are not compatibility paths.
 Copy `.env.example` to `.env` and set:
 
 ```bash
-BORIS_CORE_PACKAGE=/opt/boris-core
+BORIS_CORE_PACKAGE=/opt/boris-core/current.zip
+BORIS_OPERATOR_ACCEPTANCE_FILE=/etc/boris-runtime/operator-acceptance.json
 ```
 
-The value must identify a Core release-package directory or ZIP accepted by
-`core_surface.load_core_surface`. A legacy machine JSON file is not a valid
+`BORIS_CORE_PACKAGE` must identify a Core ZIP accepted by
+`core_surface.load_core_surface` for semantic execution.
+`BORIS_OPERATOR_ACCEPTANCE_FILE` is a server-owned record bound to that exact
+archive, artifact version, manifest, and `semantic_evaluation` scope. It is
+never accepted from an MCP request. A legacy machine JSON file is not a valid
 source.
 
-LLM settings are needed only for the Semantic Executor or semantic validation:
+When several Core releases are available, configure the highest version as the
+current package. Older releases are used only for an explicit compatibility
+test.
+
+LLM settings are used by the Semantic Input compiler, Semantic Executor
+calculator, and optional semantic answer validation:
 
 ```bash
 BOIS_LLM=openai
@@ -79,31 +93,41 @@ uvicorn api.app:app --host 127.0.0.1 --port 8000
 Available endpoints:
 
 - `GET /health`
+- `POST /runtime/execute`
 - `POST /runtime/frame`
 - `POST /runtime/validate`
 
-Create a context packet:
+Create a semantic candidate:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/runtime/frame \
+curl -s -X POST http://127.0.0.1:8000/runtime/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "session_id": "frame-test",
+    "session_id": "execution-test",
     "input": "Explain the applicable BOIS constraints",
-    "mode": "default",
+    "mode": "production",
     "context": {}
   }'
 ```
 
+The response uses `execution_version: "boris-execution/1.0"` and
+`status: "semantic_candidate"`. It includes the constrained gate, candidate
+result, norm results, unknowns, conflicts, alternatives, and explicit
+limitations. `HOLD`, `STOP`, and `REPAIR` are normal HTTP 200 Runtime results.
+Missing or mismatched server acceptance, invalid compiled input, and provider
+failures return controlled fail-closed errors.
+
+Set `mode` to `developer` to add the safe combined lexical and semantic trace:
+compiled `SemanticInput`, Core reference, RuntimeAttestation, selected norms,
+formal predicates, suggested and constrained gates, validation issues, stage
+ledger, and timings. `default` and `production` follow the same execution route
+without this trace.
+
 `/runtime/frame` is stateless. `session_id` is correlation data, not a stored
 conversation. The response uses `packet_version: "boris-context/2.0"` and
 contains a bounded Core Surface projection plus a safe
-`runtime_generated_prompt`.
-
-Set `mode` to `developer` to add a safe `developer_trace` containing package
-metadata, projection candidates, selected and excluded norms, lexical scores
-and match terms, limits, stage timings, warnings, and the actual Runtime
-capabilities invoked. `default` and `production` omit this trace.
+`runtime_generated_prompt`. It remains available for internal diagnostics and
+is not a public MCP tool.
 
 `/runtime/validate` checks a ChatGPT-generated answer against a supplied context
 packet. Deterministic, semantic, and hybrid modes remain available. Validation
@@ -122,13 +146,14 @@ BORIS_RUNTIME_API_URL=http://127.0.0.1:8000 \
 python -m mcp_server.server
 ```
 
-The MCP server exposes one public read-only tool: `boris.frame`. It communicates
+The MCP server exposes one public read-only tool: `boris.execute`. It communicates
 with the private API over HTTP and does not import Runtime internals, load Core
 packages, call LLMs, or store memory.
 
-For an observable developer response, call `boris.frame` with
-`mode: "developer"`. The MCP result instructs ChatGPT to display the complete
-safe `developer_trace` before the Runtime-generated prompt and final answer.
+For an observable response, call `boris.execute` with `mode: "developer"`.
+ChatGPT must present the complete safe trace first and then the Runtime
+candidate. It must not replace the candidate with an independently generated
+answer or weaken its gate. No public `boris.frame` alias is registered.
 
 ## Core Surface and Semantic Executor
 
@@ -154,6 +179,8 @@ fail-closed.
 
 ```bash
 python -m pytest -q
+BORIS_CURRENT_CORE_PATH=/path/to/current-core.zip \
+  python -m pytest -q tests/test_current_core_integration.py
 python -m compileall -q \
   application api cli core_surface llm mcp_server \
   runtime_compatibility semantic_executor

@@ -8,7 +8,13 @@ from core_surface import CoreSurface
 from core_surface.models import freeze_value
 
 
-TRUTH_VALUES = frozenset({"TRUE", "FALSE", "UNKNOWN"})
+PREDICATE_RESULTS = frozenset({
+    "TRUE",
+    "FALSE",
+    "UNKNOWN",
+    "ERROR",
+})
+APPLICABILITY_RESULTS = frozenset({"TRUE", "FALSE", "UNKNOWN"})
 GATE_RESULTS = frozenset({"PASS", "HOLD", "STOP", "REPAIR"})
 
 

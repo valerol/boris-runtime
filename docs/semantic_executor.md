@@ -3,10 +3,9 @@
 `semantic_executor` is the isolated Phase 4F proof of concept that consumes an
 immutable `CoreSurface` and returns a non-executing `ExecutionCandidate`.
 
-It proves that Runtime can perform a grounded semantic calculation over a real
-versioned package without attaching the experiment to the stateless application
-services, changing state, activating a package, or authorizing an external
-action.
+It performs a grounded semantic calculation over a real versioned package. The
+application `ExecutionService` now invokes this component, but the component
+still cannot change state, activate a package, or authorize an external action.
 
 ## Boundary
 
@@ -92,23 +91,22 @@ are rejected rather than silently truncated.
 
 ## Predicate DSL
 
-Runtime recomputes the package's formal `when` expression with `TRUE`, `FALSE`,
-and `UNKNOWN`. The evaluator implements the operators declared by v2.18:
+Runtime recomputes the package's formal `when` expression. It supports the
+legacy three-valued contract and the current four-valued contract:
 
-- `always`;
-- `exists`;
-- `fact`;
-- `gte`;
-- `in`;
-- `neq`;
-- `scope_match`;
-- `unique`;
-- `all`;
-- `any`;
-- `not`.
+```text
+TRUE | FALSE | UNKNOWN | ERROR
+```
 
-A missing path remains `UNKNOWN`, and material unknowns constrain the final
-candidate to `HOLD`.
+The current evaluator implements the Core v2.23 release operator vocabulary:
+logical composition, literals, existence and non-empty checks, typed equality
+and enum membership, array bounds and uniqueness, identifier checks, scope
+relations, subject/cycle relations, and package reference resolution. Legacy
+`gte` and `scope_match` remain supported for older compatible archives.
+
+A missing path remains `UNKNOWN`. Material unknowns constrain the final
+candidate to `HOLD`; a formal `ERROR` is a predicate or type defect and
+constrains the gate to `REPAIR`.
 
 ## LLM Contract
 
@@ -136,9 +134,10 @@ The Runtime validator rejects:
 - conflicts referencing unselected norms;
 - any candidate result that claims a state transition, execution, or tool call.
 
-An LLM cannot upgrade a formal `FALSE` or `UNKNOWN` predicate to semantic
-`TRUE`. A `PASS` is constrained to `HOLD` while material unknowns, unresolved
-conflicts, unsupported source types, or evaluation-only candidate norms remain.
+An LLM cannot upgrade a formal `FALSE`, `UNKNOWN`, or `ERROR` predicate to
+semantic `TRUE`. A `PASS` is constrained to `HOLD` while material unknowns,
+unresolved conflicts, unsupported source types, or evaluation-only candidate
+norms remain. Formal `ERROR` cannot be weakened below `REPAIR`.
 
 The final gate follows the package's declared precedence:
 
@@ -157,8 +156,8 @@ controlled `SemanticCalculationError` rejections.
 Phase 4F does not map the nine human-readable statement types onto the three
 current machine `norm_type` values.
 
-The adapter currently reports interpretation coverage for the exact v2.18
-source values:
+The adapter currently reports interpretation coverage for the source values
+preserved by the current release:
 
 - `INVARIANT`;
 - `MANDATORY_RULE`;
@@ -169,7 +168,7 @@ This coverage set is not a new canonical ontology. `norm_type`, `modality`,
 fields. A future unknown `norm_type` remains visible in the view but forces
 `HOLD` instead of being automatically interpreted.
 
-The v2.18 `N-GEN-027` integration check deliberately preserves:
+The current-Core `N-GEN-027` integration check deliberately preserves:
 
 ```text
 norm_type = MANDATORY_RULE
@@ -248,25 +247,27 @@ The CLI loads packages for `evaluation` only and prints either a validated
 `ExecutionCandidate` or a controlled rejection. Without an acceptance record,
 the compatibility decision remains `HOLD` and the calculator is not called.
 
-## v2.18 Integration Tests
+## Current Core Integration Tests
 
-The repository keeps the proprietary/evaluation fixture outside Git. Run the
-real-package checks explicitly:
+The Core archive remains outside this repository. By project convention, the
+highest available Core release is current; older releases are used only for an
+explicit compatibility check. Run the current real-package checks with:
 
 ```bash
-BORIS_CORE_V218_PATH=/path/to/v2.18.zip pytest -q \
-  tests/test_semantic_executor_v218.py
+BORIS_CURRENT_CORE_PATH=/path/to/current-core.zip pytest -q \
+  tests/test_current_core_integration.py
 ```
 
 They verify:
 
-- the package's own Predicate DSL test vectors;
+- the package's canonical and operational Predicate DSL test vectors;
 - all positive and negative assurance gate predicates;
 - `N-GEN-027` machine-field separation;
-- exact v2.18 RuntimeAttestation and schema validation;
+- exact current-archive RuntimeAttestation and schema validation;
 - `HOLD` for a material claim without evidence;
 - `HOLD` for an external action without authority;
-- evaluation-only handling of inactive `T-N-043`.
+- evaluation-only handling of inactive `T-N-043`;
+- the application `ExecutionService` route through the real current Core.
 
 Synthetic tests cover layer separation, trigger selection, strict references,
 prompt-injection containment, unknown future `norm_type`, equal-priority
