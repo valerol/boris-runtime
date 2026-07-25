@@ -73,7 +73,8 @@ class RecordingCalculator(AutoCalculator):
         return super().calculate(view, semantic_input)
 
 
-def test_execution_service_runs_one_semantic_candidate_route():
+def test_execution_service_runs_one_semantic_candidate_route(monkeypatch):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
     service, adapter, calculator, events = build_service(
         compiler_payload("Explain the runtime."),
     )
@@ -81,7 +82,6 @@ def test_execution_service_runs_one_semantic_candidate_route():
     result = service.execute(
         "Explain the runtime.",
         session_id="execution-test",
-        mode="production",
     )
 
     assert result == {
@@ -272,7 +272,8 @@ def test_operator_acceptance_cannot_enter_through_request_context():
     assert adapter.calls == []
 
 
-def test_lexical_projection_does_not_become_requested_norm_refs():
+def test_lexical_projection_does_not_become_requested_norm_refs(monkeypatch):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
     text = "Inspect Formulation for N-ACTION."
     service, _adapter, calculator, _events = build_service(
         compiler_payload(text),
@@ -281,7 +282,6 @@ def test_lexical_projection_does_not_become_requested_norm_refs():
     result = service.execute(
         text,
         session_id="projection-separation",
-        mode="developer",
     )
 
     selected_projection_ids = {
@@ -300,7 +300,7 @@ def test_lexical_projection_does_not_become_requested_norm_refs():
     assert calculator.last_view.selection_trace["requested_norm_refs"] == ()
 
 
-def test_developer_mode_adds_safe_combined_trace_only():
+def test_developer_runtime_mode_adds_safe_combined_trace_only(monkeypatch):
     text = "Explain the runtime."
     production, _adapter, _calculator, _events = build_service(
         compiler_payload(text),
@@ -309,15 +309,15 @@ def test_developer_mode_adds_safe_combined_trace_only():
         compiler_payload(text),
     )
 
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
     production_result = production.execute(
         text,
         session_id="same",
-        mode="production",
     )
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
     developer_result = developer.execute(
         text,
         session_id="same",
-        mode="developer",
     )
 
     assert "developer_trace" not in production_result

@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from application.runtime_mode import developer_mode_enabled
 from llm.errors import LLMConfigurationError
 from llm.llm_adapter import MockLLMAdapter, OpenAIAdapter
 
@@ -69,10 +70,7 @@ def _load_env_path(env_path, protected_keys):
 
 
 def prompt_debug_enabled():
-    return (
-        os.getenv("BORIS_RUNTIME_MODE", "").strip().lower() == "dev"
-        or os.getenv("BOIS_DEBUG_PROMPT", "").strip().lower() == "true"
-    )
+    return developer_mode_enabled()
 
 
 def build_llm_adapter():

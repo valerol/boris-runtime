@@ -13,7 +13,8 @@ MAX_CHUNK_CHARACTERS = 3000
 MAX_TOTAL_CHARACTERS = 12000
 
 
-def test_context_provider_projects_verified_surface_without_llm():
+def test_context_provider_projects_verified_surface_without_llm(monkeypatch):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
     with active_runtime_imports():
         from application.context_provider import ContextProvider
 
@@ -58,7 +59,8 @@ def test_context_provider_is_stateless_between_frames():
     assert first["projected_core"] == second["projected_core"]
 
 
-def test_developer_mode_exposes_safe_projection_trace():
+def test_developer_runtime_mode_exposes_safe_projection_trace(monkeypatch):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
     with active_runtime_imports():
         from application.context_provider import ContextProvider
 
@@ -66,7 +68,6 @@ def test_developer_mode_exposes_safe_projection_trace():
         packet = provider.frame(
             "Explain BOIS",
             session_id="frame-developer",
-            mode="developer",
         )
 
     trace = packet["developer_trace"]
@@ -91,25 +92,15 @@ def test_developer_mode_exposes_safe_projection_trace():
     assert all(value >= 0 for value in trace["stage_timings_ms"].values())
 
 
-def test_default_and_production_modes_do_not_expose_developer_trace():
+def test_non_developer_runtime_mode_does_not_expose_developer_trace(monkeypatch):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
     with active_runtime_imports():
         from application.context_provider import ContextProvider
 
         provider = ContextProvider(surface_provider=_StaticSurfaceProvider())
-        default = provider.frame("Explain BOIS", mode="default")
-        production = provider.frame("Explain BOIS", mode="production")
+        packet = provider.frame("Explain BOIS")
 
-    assert "developer_trace" not in default
-    assert "developer_trace" not in production
-
-
-def test_context_provider_rejects_unknown_mode():
-    with active_runtime_imports():
-        from application.context_provider import ContextProvider
-
-        provider = ContextProvider(surface_provider=_StaticSurfaceProvider())
-        with pytest.raises(ValueError, match="Unsupported frame mode"):
-            provider.frame("Explain BOIS", mode="debug")
+    assert "developer_trace" not in packet
 
 
 def test_bound_projected_core_limits_count_dedupes_and_preserves_rank():

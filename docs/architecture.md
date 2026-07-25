@@ -83,8 +83,9 @@ ChatGPT
 ```
 
 The MCP tool list is exactly `{"boris.execute"}`. There is no public
-`boris.frame` alias. `default`, `production`, and `developer` all execute the
-same semantic route; developer mode changes observability only. The public
+`boris.frame` alias. Every request follows the same semantic route.
+`BORIS_RUNTIME_MODE=dev` changes server-side observability only; it is not a
+tool or API argument. The public
 envelope uses `boris-execution/1.0`, marks the result as
 `status=semantic_candidate`, and exposes the final constrained gate, norm
 results, unknowns, conflicts, alternatives, and explicit limitations.
@@ -127,8 +128,7 @@ so `core_surface` remains passive and query-independent.
 - bounds output to six chunks, 3000 characters per chunk, and 12000 total
   projected characters.
 
-The frame request supports `default`, `production`, and `developer` modes.
-`default` and `production` have the same compact wire output. `developer` adds
+The frame request has no observability selector. `BORIS_RUNTIME_MODE=dev` adds
 `developer_trace` (`boris-projection-trace/1.0`) with:
 
 - verified package identity and non-secret package/component metadata;

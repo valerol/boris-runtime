@@ -49,8 +49,8 @@
 - CoreSurface-based internal `/runtime/frame`;
 - bounded passive norm projection;
 - safe `boris-context/2.0` packet;
-- compact `default` and `production` responses;
-- safe `developer` projection trace with Core identity, attestation, selected
+- compact responses unless server `BORIS_RUNTIME_MODE=dev` is active;
+- safe server-controlled developer projection trace with Core identity, attestation, selected
   and excluded candidates, projection limits, stage timings, and explicit
   capability boundaries;
 - deterministic, semantic, and hybrid answer validation;

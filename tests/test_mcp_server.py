@@ -27,7 +27,6 @@ def test_boris_execute_calls_runtime_api_client_and_returns_candidate():
     response = run_boris_execute(
         input="Explain BOIS Runtime",
         session_id="test",
-        mode="default",
         context={"source": "mcp-test"},
         client=client,
     )
@@ -46,7 +45,6 @@ def test_boris_execute_calls_runtime_api_client_and_returns_candidate():
         {
             "input": "Explain BOIS Runtime",
             "session_id": "test",
-            "mode": "default",
             "context": {"source": "mcp-test"},
         }
     ]
@@ -83,7 +81,6 @@ def test_developer_execute_instructs_chatgpt_to_show_trace_before_candidate():
 
     response = run_boris_execute(
         input="Explain BOIS Runtime",
-        mode="developer",
         client=client,
     )
 

@@ -364,7 +364,6 @@ def test_current_core_application_execution_route_returns_semantic_candidate(
     result = service.execute(
         text,
         session_id="current-core-application-route",
-        mode="production",
     )
 
     assert result["execution_version"] == "boris-execution/1.0"
@@ -409,7 +408,6 @@ def test_current_core_repository_route_needs_no_acceptance_sidecar(
     result = service.execute(
         text,
         session_id="current-core-repository-route",
-        mode="production",
     )
 
     assert result["status"] == "semantic_candidate"

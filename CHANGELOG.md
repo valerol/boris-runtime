@@ -8,6 +8,10 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   settings in `.env` and ignored secret overrides in `.env.local`; Runtime
   loads both while MCP loads only non-secret settings, preserving
   process-environment priority and least-privilege secret access.
+- Made `BORIS_RUNTIME_MODE=dev` the sole developer-observability switch for
+  execution, frame projection, and LLM prompt diagnostics. Removed the public
+  MCP and private Runtime API request-level `mode` selectors so callers cannot
+  enable or suppress the server trace.
 
 ## 2026-07-25 - Semantic Execution Entry
 

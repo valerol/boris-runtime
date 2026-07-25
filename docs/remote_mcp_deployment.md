@@ -202,8 +202,9 @@ Connects ChatGPT to BORIS. Use boris.execute for the Runtime semantic route. Pre
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
 
-Use `"mode":"developer"` in an execution request to return
-`boris-execution-trace/1.0`. Through MCP, ChatGPT presents the complete safe
+Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
+`boris-execution-trace/1.0`. The execution request has no mode selector.
+Through MCP, ChatGPT presents the complete safe
 trace before the candidate. The trace combines lexical projection,
 `SemanticInput`, RuntimeAttestation, norm and predicate results, constrained
 gate, validation issues, stage ledger, and timings. It contains no hidden
@@ -217,7 +218,6 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
   -d '{
     "session_id": "execute-test",
     "input": "Explain the applicable BOIS constraints",
-    "mode": "developer",
     "context": {}
   }'
 

@@ -69,7 +69,6 @@ def test_frame_posts_to_runtime_frame_with_expected_body():
     response = client.frame(
         input="Explain BOIS Runtime",
         session_id="test",
-        mode="default",
         context={"source": "pytest"},
     )
 
@@ -78,7 +77,6 @@ def test_frame_posts_to_runtime_frame_with_expected_body():
     assert captured["body"] == {
         "input": "Explain BOIS Runtime",
         "session_id": "test",
-        "mode": "default",
         "context": {"source": "pytest"},
     }
     assert response == packet
@@ -119,7 +117,6 @@ def test_execute_posts_to_runtime_execute_with_expected_body():
     response = client.execute(
         input="Explain BOIS Runtime",
         session_id="test",
-        mode="developer",
         context={"source": "pytest"},
     )
 
@@ -129,7 +126,6 @@ def test_execute_posts_to_runtime_execute_with_expected_body():
         "body": {
             "input": "Explain BOIS Runtime",
             "session_id": "test",
-            "mode": "developer",
             "context": {"source": "pytest"},
         },
     }

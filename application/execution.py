@@ -11,10 +11,10 @@ from uuid import uuid4
 
 from application.context_packet import sanitize_public_value
 from application.context_provider import (
-    FRAME_MODES,
     ContextProvider,
     CoreSurfaceProvider,
 )
+from application.runtime_mode import developer_mode_enabled
 from llm.config import build_lazy_llm_adapter
 from runtime_compatibility import (
     OperatorAcceptance,
@@ -320,16 +320,11 @@ class ExecutionService:
         self,
         user_input: str,
         session_id: str | None = None,
-        mode: str = "default",
         context: Mapping | None = None,
     ) -> dict:
         text = str(user_input or "").strip()
         if not text:
             raise ValueError("Execution input must not be empty.")
-        if mode not in FRAME_MODES:
-            raise ValueError(
-                "Unsupported execution mode. Use default, production, or developer."
-            )
         resolved_session_id = session_id or str(uuid4())
         timings = {}
         started = perf_counter()
@@ -385,12 +380,11 @@ class ExecutionService:
             "alternatives": candidate.to_dict()["alternatives"],
             "limitations": list(PUBLIC_LIMITATIONS),
         }
-        if mode == "developer":
+        if developer_mode_enabled():
             stage_started = perf_counter()
             frame = self.context_provider.frame(
                 text,
                 session_id=resolved_session_id,
-                mode="developer",
             )
             timings["context_projection"] = _elapsed_ms(stage_started)
             timings["total"] = _elapsed_ms(started)

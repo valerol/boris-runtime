@@ -8,13 +8,11 @@ from uuid import uuid4
 
 from application.context_packet import build_context_packet
 from application.context_projection import project_core_context
+from application.runtime_mode import developer_mode_enabled
 from core_surface import CoreSurfaceError, load_core_surface
 
 
 DEFAULT_CORE_SURFACE_SOURCE = "/opt/boris-core"
-FRAME_MODES = {"default", "production", "developer"}
-
-
 class CoreSurfaceUnavailable(RuntimeError):
     """Raised when the configured canonical package cannot be loaded."""
 
@@ -75,15 +73,10 @@ class ContextProvider:
         self,
         user_input: str,
         session_id: str | None = None,
-        mode: str = "default",
     ) -> dict:
         text = str(user_input or "").strip()
         if not text:
             raise ValueError("Context frame input must not be empty.")
-        if mode not in FRAME_MODES:
-            raise ValueError(
-                "Unsupported frame mode. Use default, production, or developer."
-            )
         resolved_session_id = session_id or str(uuid4())
         started = perf_counter()
         surface_started = perf_counter()
@@ -103,7 +96,7 @@ class ContextProvider:
         packet = build_context_packet(
             resolved_session_id,
             frame_context,
-            developer_mode=mode == "developer",
+            developer_mode=developer_mode_enabled(),
             stage_timings_ms={
                 "core_surface_load": surface_ms,
                 "context_projection": projection_ms,

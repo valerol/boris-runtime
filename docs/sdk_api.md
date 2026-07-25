@@ -37,7 +37,6 @@ provider = ContextProvider()
 packet = provider.frame(
     "Explain the applicable BOIS constraints",
     session_id="correlation-id",
-    mode="developer",
 )
 ```
 
@@ -46,10 +45,10 @@ Core Surface. Production currently points it at the checked-out
 `/opt/boris-core` directory; an exact ZIP is not required. The former
 `BORIS_CORE_PATH` alias is not supported.
 
-`frame()` is stateless and never calls an LLM. Modes `default` and `production`
-return the compact `boris-context/2.0` packet. Mode `developer` additionally
-returns a sanitized `developer_trace` with Core Surface metadata and complete
-projection selection diagnostics.
+`frame()` is stateless and never calls an LLM. `BORIS_RUNTIME_MODE=dev`
+additionally returns a sanitized `developer_trace` with Core Surface metadata
+and complete projection selection diagnostics. Any other or absent value
+returns the compact `boris-context/2.0` packet.
 
 ## ValidationEngine
 
