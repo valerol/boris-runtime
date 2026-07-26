@@ -55,6 +55,9 @@
 - path-aware semantic unknowns kept separate from signed formal-predicate
   input paths;
 - explicit completeness check before semantic recalculation;
+- guaranteed non-empty candidate material after a completed non-`HOLD`
+  resume, with a trace-marked deterministic projection of the validated
+  calculation when the provider returns an empty object;
 - no automatic suggestion of the predicate-matching value as an operator
   decision;
 - developer-only MCP Apps resource

@@ -157,6 +157,11 @@ semantic unknowns and no typed path remains. Runtime returns
 is missing. Empty
 `candidate_result: {}` is never exposed: `HOLD` uses `null` plus
 `candidate_unavailable_reason`; other gates require a non-empty candidate.
+If a semantic calculator nevertheless returns an empty object for a route
+whose constrained gate is `PASS`, `STOP`, or `REPAIR`, Semantic Executor
+materializes `boris-candidate-projection/1.0` from the already validated
+calculation. The projection is marked in `validation_issues` and adds no
+semantic conclusion beyond the validated norm results and constrained gate.
 Invalid Core source binding, invalid compiled input, and provider failures
 return controlled fail-closed errors. An archive source with missing or
 mismatched server acceptance also fails closed.

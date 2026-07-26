@@ -45,6 +45,23 @@ class SemanticExecutor:
         calculation = self.validator.validate(raw_calculation, view)
         issues = self._guard_issues(view, calculation)
         final_gate = self._constrain_gate(view, calculation, issues)
+        candidate_result = calculation.candidate_result
+        if not candidate_result and final_gate != "HOLD":
+            issues = tuple(_dedupe_issues([
+                *issues,
+                ValidationIssue(
+                    code="CANDIDATE_RESULT_PROJECTED",
+                    message=(
+                        "The semantic calculator returned no candidate material "
+                        "for a non-HOLD route. Runtime projected a minimal "
+                        "candidate from the validated calculation."
+                    ),
+                ),
+            ]))
+            candidate_result = _project_candidate_result(
+                calculation,
+                final_gate,
+            )
         attestation = self.compatibility.attestation
         trace = ExecutionTrace(
             trace_id=str(uuid4()),
@@ -77,7 +94,7 @@ class SemanticExecutor:
             phase=view.phase,
             gate=final_gate,
             suggested_gate=calculation.suggested_gate,
-            candidate_result=calculation.candidate_result,
+            candidate_result=candidate_result,
             norm_results=calculation.norm_results,
             unknowns=calculation.unknowns,
             conflicts=calculation.conflicts,
@@ -237,6 +254,21 @@ def _dedupe_issues(issues):
         seen.add(marker)
         result.append(issue)
     return result
+
+
+def _project_candidate_result(calculation, final_gate):
+    """Build candidate material without adding a semantic conclusion."""
+    calculation_payload = calculation.to_dict()
+    return {
+        "status": "CANDIDATE_ONLY",
+        "projection_version": "boris-candidate-projection/1.0",
+        "projection_kind": "validated_semantic_calculation",
+        "gate": final_gate,
+        "norm_results": calculation_payload["norm_results"],
+        "unknowns": calculation_payload["unknowns"],
+        "conflicts": calculation_payload["conflicts"],
+        "alternatives": calculation_payload["alternatives"],
+    }
 
 
 def _required_inputs(view):
