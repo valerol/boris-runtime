@@ -197,6 +197,13 @@ def test_execute_posts_host_prepare_and_submit_contracts():
         session_id="host-client",
         work_order_id="work-order-1",
         work_order_token="hw1.payload.signature",
+        semantic_input=semantic_result,
+    )
+    client.execute(
+        operation="submit",
+        session_id="host-client",
+        work_order_id="work-order-2",
+        work_order_token="hw1.payload.signature",
         semantic_result=semantic_result,
     )
 
@@ -212,6 +219,14 @@ def test_execute_posts_host_prepare_and_submit_contracts():
             "context": {},
             "operation": "submit",
             "work_order_id": "work-order-1",
+            "work_order_token": "hw1.payload.signature",
+            "semantic_input": semantic_result,
+        },
+        {
+            "session_id": "host-client",
+            "context": {},
+            "operation": "submit",
+            "work_order_id": "work-order-2",
             "work_order_token": "hw1.payload.signature",
             "semantic_result": semantic_result,
         },

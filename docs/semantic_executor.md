@@ -183,29 +183,31 @@ controlled `SemanticCalculationError` rejections.
 
 `SemanticExecutor` remains calculator-port driven. The ordinary application
 route supplies `LLMSemanticCalculator`, which invokes the configured
-`OPENAI_API` adapter. The experimental `CHATGPT_HOST` route supplies
+`OPENAI_API` adapter. The experimental `CHATGPT_HOST_ONLY` route supplies
 `SubmittedSemanticCalculator` only after a signed work order has been prepared
 and consumed.
 
-`operation=prepare` mechanically builds the same `SemanticView` and the same
-`build_semantic_calculation_prompt()` used by `LLMSemanticCalculator`. The work
-order includes that prompt and a view-constrained JSON Schema. Its HMAC token
-and in-memory registry bind the exact input, view, prompt, schema, Core
-identity, attestation, session, phase, scope, and expiry.
+`operation=prepare` first returns a signed `COMPILATION` work order containing
+the ordinary compiler prompt and a strict JSON Schema. Runtime validates the
+submitted `semantic_input`, mechanically builds the same `SemanticView` and
+`build_semantic_calculation_prompt()` used by `LLMSemanticCalculator`, and
+returns a signed `CALCULATION` work order. HMAC tokens and the in-memory
+registry bind the exact source, compiler catalog, compiled input, view, prompts,
+schemas, Core identity, attestation, session, phase, scope, and expiry.
 
-`operation=submit` never calls an LLM. Runtime consumes the work order once,
-rebuilds the view against the current Core, verifies all hashes, and gives the
-submitted object to the ordinary `SemanticCalculationValidator`. All existing
-ownership checks, formal-result checks, candidate-result guards, and
+`operation=submit` never calls an LLM. Runtime consumes each work order once,
+rebuilds its scope against the current Core, verifies all hashes, and gives the
+calculation submission to the ordinary `SemanticCalculationValidator`. All
+existing ownership checks, formal-result checks, candidate-result guards, and
 deterministic gate constraints therefore remain provider-independent.
 
-This proof of concept moves the large phase-complete calculation into the
-current ChatGPT host but leaves `SemanticInputCompiler` on the configured
-Runtime LLM. It is not a clean-context model sandbox and does not yet provide
-durable or multi-worker work-order state. The work order discloses the Core
-minimum context requirement, while the resulting candidate retains explicit
-limitations because Runtime cannot attest the host model identity or its
-effective context capacity.
+This proof of concept moves both semantic compilation and phase-complete
+calculation into the current ChatGPT host, so the host-only route never
+constructs the Runtime API adapter. It is not a clean-context model sandbox and
+does not yet provide durable or multi-worker work-order state. The calculation
+work order discloses the Core minimum context requirement, while the resulting
+candidate retains explicit limitations because Runtime cannot attest the host
+model identity or its effective context capacity.
 
 An empty calculator `candidate_result` is not a public candidate. At the
 application boundary it is accepted only when deterministic constraints leave

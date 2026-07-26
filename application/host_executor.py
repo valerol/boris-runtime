@@ -20,16 +20,19 @@ from semantic_executor.calculator import (
 from semantic_executor.models import SemanticView, thaw_value
 
 
-HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.1"
-HOST_WORK_ORDER_TOKEN_VERSION = "boris-host-work-order-token/0.1"
+HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.2"
+HOST_WORK_ORDER_TOKEN_VERSION = "boris-host-work-order-token/0.2"
 HOST_WORK_ORDER_SECRET_ENV = "BORIS_HOST_EXECUTOR_SECRET"
 HOST_WORK_ORDER_TTL_ENV = "BORIS_HOST_WORK_ORDER_TTL_SECONDS"
 DEFAULT_HOST_WORK_ORDER_TTL_SECONDS = 900
 MIN_HOST_WORK_ORDER_SECRET_BYTES = 32
 MAX_HOST_WORK_ORDER_TOKEN_CHARACTERS = 16384
+MAX_HOST_SEMANTIC_INPUT_CHARACTERS = 1_000_000
 MAX_HOST_SEMANTIC_RESULT_CHARACTERS = 4_000_000
 MAX_PENDING_HOST_WORK_ORDERS = 128
-HOST_SEMANTIC_PROVIDER = "CHATGPT_HOST"
+HOST_SEMANTIC_PROVIDER = "CHATGPT_HOST_ONLY"
+COMPILATION_WORK_ORDER = "COMPILATION"
+CALCULATION_WORK_ORDER = "CALCULATION"
 HOST_EXECUTOR_LIMITATIONS = (
     "contract_isolation_only",
     "chat_context_not_isolated",
@@ -63,18 +66,23 @@ class HostWorkOrderAlreadyConsumed(HostExecutorError):
 @dataclass(slots=True)
 class HostWorkOrderState:
     work_order_id: str
+    work_order_type: str
     session_id: str
-    semantic_input: SemanticInput
     source_text: str
     resume_count: int
     resumed: bool
     core_ref: Mapping[str, str]
     attestation_sha256: str
-    semantic_input_sha256: str
-    semantic_view_sha256: str
     semantic_prompt_sha256: str
     response_schema_sha256: str
+    semantic_source_sha256: str
+    compiler_catalog_sha256: str
+    semantic_input_sha256: str
+    semantic_view_sha256: str
     expires_at: int
+    semantic_input: SemanticInput | None = None
+    source_material: Mapping[str, Any] | None = None
+    compiler_catalog: Mapping[str, Any] | None = None
     consumed: bool = False
 
 
@@ -308,6 +316,104 @@ class SubmittedSemanticCalculator:
         return self.semantic_result
 
 
+def validate_host_submission_payload(
+    value: Mapping[str, Any],
+    *,
+    field_name: str,
+    maximum_characters: int,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise InvalidHostWorkOrder(
+            f"{field_name} must be one JSON object."
+        )
+    payload = dict(value)
+    try:
+        encoded = _canonical_json(payload)
+    except (RecursionError, TypeError, ValueError) as exc:
+        raise InvalidHostWorkOrder(
+            f"{field_name} must be JSON-serializable."
+        ) from exc
+    if len(encoded) > maximum_characters:
+        raise InvalidHostWorkOrder(
+            f"{field_name} exceeds the host submission size limit."
+        )
+    return payload
+
+
+def build_host_compilation_work_order(
+    *,
+    codec: HostWorkOrderCodec,
+    registry: InMemoryHostWorkOrderRegistry,
+    source_material: Mapping[str, Any],
+    compiler_catalog: Mapping[str, Any],
+    semantic_prompt: str,
+    response_schema: Mapping[str, Any],
+    session_id: str,
+    source_text: str,
+    core_ref: Mapping[str, str],
+    resume_count: int,
+    attestation_sha256: str,
+) -> dict[str, Any]:
+    source_payload = dict(source_material)
+    catalog_payload = dict(compiler_catalog)
+    schema_payload = dict(response_schema)
+    semantic_source_sha256 = canonical_sha256(source_payload)
+    compiler_catalog_sha256 = canonical_sha256(catalog_payload)
+    semantic_prompt_sha256 = text_sha256(semantic_prompt)
+    response_schema_sha256 = canonical_sha256(schema_payload)
+    work_order_id = str(uuid4())
+    claims = {
+        "work_order_id": work_order_id,
+        "work_order_type": COMPILATION_WORK_ORDER,
+        "session_id": session_id,
+        "semantic_provider": HOST_SEMANTIC_PROVIDER,
+        "core_ref": dict(core_ref),
+        "attestation_sha256": attestation_sha256,
+        "semantic_source_sha256": semantic_source_sha256,
+        "compiler_catalog_sha256": compiler_catalog_sha256,
+        "semantic_prompt_sha256": semantic_prompt_sha256,
+        "response_schema_sha256": response_schema_sha256,
+    }
+    token, signed_claims = codec.issue(claims)
+    registry.register(HostWorkOrderState(
+        work_order_id=work_order_id,
+        work_order_type=COMPILATION_WORK_ORDER,
+        session_id=session_id,
+        source_text=source_text,
+        resume_count=resume_count,
+        resumed=False,
+        core_ref=dict(core_ref),
+        attestation_sha256=attestation_sha256,
+        semantic_prompt_sha256=semantic_prompt_sha256,
+        response_schema_sha256=response_schema_sha256,
+        semantic_source_sha256=semantic_source_sha256,
+        compiler_catalog_sha256=compiler_catalog_sha256,
+        semantic_input_sha256="",
+        semantic_view_sha256="",
+        expires_at=signed_claims["expires_at"],
+        source_material=source_payload,
+        compiler_catalog=catalog_payload,
+    ))
+    return _host_work_order_envelope(
+        work_order_id=work_order_id,
+        work_order_type=COMPILATION_WORK_ORDER,
+        session_id=session_id,
+        core_ref=dict(core_ref),
+        signed_claims=signed_claims,
+        semantic_prompt=semantic_prompt,
+        response_schema=schema_payload,
+        bindings={
+            "attestation_sha256": attestation_sha256,
+            "semantic_source_sha256": semantic_source_sha256,
+            "compiler_catalog_sha256": compiler_catalog_sha256,
+            "semantic_prompt_sha256": semantic_prompt_sha256,
+            "response_schema_sha256": response_schema_sha256,
+        },
+        token=token,
+        submission_field="semantic_input",
+    )
+
+
 def build_host_work_order(
     *,
     codec: HostWorkOrderCodec,
@@ -339,6 +445,7 @@ def build_host_work_order(
     work_order_id = str(uuid4())
     claims = {
         "work_order_id": work_order_id,
+        "work_order_type": CALCULATION_WORK_ORDER,
         "session_id": session_id,
         "semantic_provider": HOST_SEMANTIC_PROVIDER,
         "phase": view.phase,
@@ -359,41 +466,75 @@ def build_host_work_order(
     token, signed_claims = codec.issue(claims)
     registry.register(HostWorkOrderState(
         work_order_id=work_order_id,
+        work_order_type=CALCULATION_WORK_ORDER,
         session_id=session_id,
-        semantic_input=semantic_input,
         source_text=source_text,
         resume_count=resume_count,
         resumed=resumed,
         core_ref=core_ref,
         attestation_sha256=attestation_sha256,
-        semantic_input_sha256=semantic_input_sha256,
-        semantic_view_sha256=semantic_view_sha256,
         semantic_prompt_sha256=semantic_prompt_sha256,
         response_schema_sha256=response_schema_sha256,
+        semantic_source_sha256="",
+        compiler_catalog_sha256="",
+        semantic_input_sha256=semantic_input_sha256,
+        semantic_view_sha256=semantic_view_sha256,
         expires_at=signed_claims["expires_at"],
+        semantic_input=semantic_input,
     ))
-    return {
-        "work_order_version": HOST_WORK_ORDER_VERSION,
-        "work_order_id": work_order_id,
-        "session_id": session_id,
-        "status": "semantic_work_order",
-        "semantic_provider": HOST_SEMANTIC_PROVIDER,
-        "phase": view.phase,
-        "minimum_context_window_tokens": signed_claims[
-            "minimum_context_window_tokens"
-        ],
-        "core_ref": core_ref,
-        "issued_at": _timestamp_iso(signed_claims["issued_at"]),
-        "expires_at": _timestamp_iso(signed_claims["expires_at"]),
-        "semantic_prompt": semantic_prompt,
-        "response_schema": response_schema,
-        "bindings": {
+    return _host_work_order_envelope(
+        work_order_id=work_order_id,
+        work_order_type=CALCULATION_WORK_ORDER,
+        session_id=session_id,
+        core_ref=core_ref,
+        signed_claims=signed_claims,
+        semantic_prompt=semantic_prompt,
+        response_schema=response_schema,
+        bindings={
             "attestation_sha256": attestation_sha256,
             "semantic_input_sha256": semantic_input_sha256,
             "semantic_view_sha256": semantic_view_sha256,
             "semantic_prompt_sha256": semantic_prompt_sha256,
             "response_schema_sha256": response_schema_sha256,
         },
+        token=token,
+        submission_field="semantic_result",
+        phase=view.phase,
+        minimum_context_window_tokens=signed_claims[
+            "minimum_context_window_tokens"
+        ],
+    )
+
+
+def _host_work_order_envelope(
+    *,
+    work_order_id: str,
+    work_order_type: str,
+    session_id: str,
+    core_ref: Mapping[str, str],
+    signed_claims: Mapping[str, Any],
+    semantic_prompt: str,
+    response_schema: Mapping[str, Any],
+    bindings: Mapping[str, str],
+    token: str,
+    submission_field: str,
+    phase: str | None = None,
+    minimum_context_window_tokens: int = 0,
+) -> dict[str, Any]:
+    envelope = {
+        "work_order_version": HOST_WORK_ORDER_VERSION,
+        "work_order_id": work_order_id,
+        "work_order_type": work_order_type,
+        "session_id": session_id,
+        "status": "semantic_work_order",
+        "semantic_provider": HOST_SEMANTIC_PROVIDER,
+        "minimum_context_window_tokens": minimum_context_window_tokens,
+        "core_ref": dict(core_ref),
+        "issued_at": _timestamp_iso(signed_claims["issued_at"]),
+        "expires_at": _timestamp_iso(signed_claims["expires_at"]),
+        "semantic_prompt": semantic_prompt,
+        "response_schema": dict(response_schema),
+        "bindings": dict(bindings),
         "submission_contract": {
             "tool": "boris.execute",
             "operation": "submit",
@@ -401,7 +542,7 @@ def build_host_work_order(
                 "operation",
                 "work_order_id",
                 "work_order_token",
-                "semantic_result",
+                submission_field,
             ],
             "work_order_token": token,
         },
@@ -413,6 +554,9 @@ def build_host_work_order(
             "no_external_action",
         ],
     }
+    if phase is not None:
+        envelope["phase"] = phase
+    return envelope
 
 
 def consume_host_work_order(
@@ -441,16 +585,32 @@ def consume_host_work_order(
     state = registry.consume(work_order_id)
     expected = {
         "work_order_id": state.work_order_id,
+        "work_order_type": state.work_order_type,
         "session_id": state.session_id,
         "semantic_provider": HOST_SEMANTIC_PROVIDER,
-        "phase": state.semantic_input.phase,
         "core_ref": dict(state.core_ref),
         "attestation_sha256": state.attestation_sha256,
-        "semantic_input_sha256": state.semantic_input_sha256,
-        "semantic_view_sha256": state.semantic_view_sha256,
         "semantic_prompt_sha256": state.semantic_prompt_sha256,
         "response_schema_sha256": state.response_schema_sha256,
     }
+    if state.work_order_type == COMPILATION_WORK_ORDER:
+        expected.update({
+            "semantic_source_sha256": state.semantic_source_sha256,
+            "compiler_catalog_sha256": state.compiler_catalog_sha256,
+        })
+    elif (
+        state.work_order_type == CALCULATION_WORK_ORDER
+        and state.semantic_input is not None
+    ):
+        expected.update({
+            "phase": state.semantic_input.phase,
+            "semantic_input_sha256": state.semantic_input_sha256,
+            "semantic_view_sha256": state.semantic_view_sha256,
+        })
+    else:
+        raise HostWorkOrderStateMismatch(
+            "Pending host work-order state has an unsupported type."
+        )
     actual = {
         key: claims.get(key)
         for key in expected
@@ -468,6 +628,13 @@ def require_current_host_scope(
     view: SemanticView,
     attestation_sha256: str,
 ) -> None:
+    if (
+        state.work_order_type != CALCULATION_WORK_ORDER
+        or state.semantic_input is None
+    ):
+        raise HostWorkOrderStateMismatch(
+            "Host work order is not a calculation order."
+        )
     current = {
         "core_ref": view.core_ref.to_dict(),
         "attestation_sha256": attestation_sha256,
@@ -496,6 +663,43 @@ def require_current_host_scope(
     if current != expected:
         raise HostWorkOrderStateMismatch(
             "Current Core, attestation, phase, or semantic scope no longer "
+            "matches the prepared host work order."
+        )
+
+
+def require_current_compilation_scope(
+    state: HostWorkOrderState,
+    *,
+    core_ref: Mapping[str, str],
+    attestation_sha256: str,
+    source_material: Mapping[str, Any],
+    compiler_catalog: Mapping[str, Any],
+    semantic_prompt: str,
+    response_schema: Mapping[str, Any],
+) -> None:
+    if state.work_order_type != COMPILATION_WORK_ORDER:
+        raise HostWorkOrderStateMismatch(
+            "Host work order is not a compilation order."
+        )
+    current = {
+        "core_ref": dict(core_ref),
+        "attestation_sha256": attestation_sha256,
+        "semantic_source_sha256": canonical_sha256(source_material),
+        "compiler_catalog_sha256": canonical_sha256(compiler_catalog),
+        "semantic_prompt_sha256": text_sha256(semantic_prompt),
+        "response_schema_sha256": canonical_sha256(response_schema),
+    }
+    expected = {
+        "core_ref": dict(state.core_ref),
+        "attestation_sha256": state.attestation_sha256,
+        "semantic_source_sha256": state.semantic_source_sha256,
+        "compiler_catalog_sha256": state.compiler_catalog_sha256,
+        "semantic_prompt_sha256": state.semantic_prompt_sha256,
+        "response_schema_sha256": state.response_schema_sha256,
+    }
+    if current != expected:
+        raise HostWorkOrderStateMismatch(
+            "Current Core, attestation, or compilation scope no longer "
             "matches the prepared host work order."
         )
 

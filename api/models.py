@@ -69,6 +69,7 @@ class RuntimeExecutionRequest(BaseModel):
     resume: RuntimeExecutionResume | None = None
     work_order_id: constr(strip_whitespace=True, min_length=1) | None = None
     work_order_token: constr(strip_whitespace=True, min_length=1) | None = None
+    semantic_input: dict[str, Any] | None = None
     semantic_result: dict[str, Any] | None = None
 
     @model_validator(mode="after")
@@ -76,6 +77,7 @@ class RuntimeExecutionRequest(BaseModel):
         host_fields = (
             self.work_order_id,
             self.work_order_token,
+            self.semantic_input,
             self.semantic_result,
         )
         if self.operation in {"execute", "prepare"}:
@@ -96,18 +98,38 @@ class RuntimeExecutionRequest(BaseModel):
                 raise ValueError(
                     "Submit mode cannot replace work-order-bound input or context."
                 )
-            if any(value is None for value in host_fields):
+            if self.work_order_id is None or self.work_order_token is None:
                 raise ValueError(
-                    "Submit mode requires work_order_id, work_order_token, "
-                    "and semantic_result."
+                    "Submit mode requires work_order_id and work_order_token."
+                )
+            if (self.semantic_input is None) == (
+                self.semantic_result is None
+            ):
+                raise ValueError(
+                    "Submit mode requires exactly one of semantic_input or "
+                    "semantic_result."
                 )
         return self
 
 
 class RuntimeHostWorkOrderBindings(BaseModel):
     attestation_sha256: str
-    semantic_input_sha256: str
-    semantic_view_sha256: str
+    semantic_source_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    compiler_catalog_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    semantic_input_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    semantic_view_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     semantic_prompt_sha256: str
     response_schema_sha256: str
 
@@ -120,12 +142,16 @@ class RuntimeHostSubmissionContract(BaseModel):
 
 
 class RuntimeHostWorkOrderResponse(BaseModel):
-    work_order_version: Literal["boris-semantic-work-order/0.1"]
+    work_order_version: Literal["boris-semantic-work-order/0.2"]
     work_order_id: str
+    work_order_type: Literal["COMPILATION", "CALCULATION"]
     session_id: str
     status: Literal["semantic_work_order"]
-    semantic_provider: Literal["CHATGPT_HOST"]
-    phase: str
+    semantic_provider: Literal["CHATGPT_HOST_ONLY"]
+    phase: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     minimum_context_window_tokens: int = Field(ge=0)
     core_ref: dict[str, str]
     issued_at: str
@@ -135,6 +161,42 @@ class RuntimeHostWorkOrderResponse(BaseModel):
     bindings: RuntimeHostWorkOrderBindings
     submission_contract: RuntimeHostSubmissionContract
     limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_work_order_type(self):
+        bindings = self.bindings
+        if self.work_order_type == "COMPILATION":
+            if self.phase is not None:
+                raise ValueError(
+                    "Compilation work order cannot preselect a phase."
+                )
+            if (
+                bindings.semantic_source_sha256 is None
+                or bindings.compiler_catalog_sha256 is None
+                or bindings.semantic_input_sha256 is not None
+                or bindings.semantic_view_sha256 is not None
+            ):
+                raise ValueError(
+                    "Compilation work-order bindings are invalid."
+                )
+            submission_field = "semantic_input"
+        else:
+            if (
+                self.phase is None
+                or bindings.semantic_input_sha256 is None
+                or bindings.semantic_view_sha256 is None
+                or bindings.semantic_source_sha256 is not None
+                or bindings.compiler_catalog_sha256 is not None
+            ):
+                raise ValueError(
+                    "Calculation work-order bindings are invalid."
+                )
+            submission_field = "semantic_result"
+        if submission_field not in self.submission_contract.required_arguments:
+            raise ValueError(
+                "Submission contract does not match the work-order type."
+            )
+        return self
 
 
 class RuntimeSemanticUnknown(BaseModel):
@@ -220,7 +282,7 @@ class RuntimeExecutionResponse(BaseModel):
     execution_version: Literal["boris-execution/1.0"]
     session_id: str
     status: Literal["semantic_candidate"]
-    semantic_provider: Literal["CHATGPT_HOST"] | None = Field(
+    semantic_provider: Literal["CHATGPT_HOST_ONLY"] | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

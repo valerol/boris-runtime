@@ -511,6 +511,64 @@ def test_current_core_application_execution_route_returns_semantic_candidate(
     ]
 
 
+def test_current_core_host_only_route_uses_no_api_adapter(
+    current_core_surface,
+    current_core_compatibility,
+):
+    text = "Evaluate the available Core norms for this request."
+    registry = InMemoryHostWorkOrderRegistry()
+    codec = HostWorkOrderCodec("h" * 32)
+
+    def reject_api_adapter():
+        raise AssertionError("Host-only route constructed the API adapter.")
+
+    service = ExecutionService(
+        surface_provider=StaticSurfaceProvider(current_core_surface),
+        acceptance_provider=StaticAcceptanceProvider(
+            current_core_compatibility.operator_acceptance,
+        ),
+        compatibility_verifier=RecordingCompatibilityVerifier([]),
+        llm_adapter_factory=reject_api_adapter,
+        host_work_order_codec_factory=lambda: codec,
+        host_work_order_registry=registry,
+    )
+    compilation_order = service.prepare_host(
+        text,
+        session_id="current-core-host-only",
+    )
+    semantic_input_payload = compiler_payload(text)
+    calculation_order = service.submit_host(
+        work_order_id=compilation_order["work_order_id"],
+        work_order_token=compilation_order["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_input=semantic_input_payload,
+        session_id="current-core-host-only",
+    )
+    state = registry._entries[calculation_order["work_order_id"]]
+    view = SemanticViewBuilder().build(
+        current_core_surface,
+        state.semantic_input,
+    )
+    semantic_result = AutoCalculator(
+        suggested_gate="HOLD",
+    ).calculate(view, state.semantic_input)
+    result = service.submit_host(
+        work_order_id=calculation_order["work_order_id"],
+        work_order_token=calculation_order["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_result=semantic_result,
+        session_id="current-core-host-only",
+    )
+
+    assert compilation_order["work_order_type"] == "COMPILATION"
+    assert calculation_order["work_order_type"] == "CALCULATION"
+    assert result["status"] == "semantic_candidate"
+    assert result["semantic_provider"] == "CHATGPT_HOST_ONLY"
+    assert result["norm_results"]
+
+
 def test_current_core_repository_route_needs_no_acceptance_sidecar(
     current_core_surface,
     monkeypatch,

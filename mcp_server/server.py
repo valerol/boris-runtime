@@ -11,12 +11,12 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 SERVER_INSTRUCTIONS = (
     "BORIS exposes one public tool: boris.execute. Preserve every candidate "
-    "gate and ask only for declared operator input. For CHATGPT_HOST, call "
-    "operation=prepare, calculate only its signed SemanticWorkOrder, then call "
-    "operation=submit once with the exact ID, token, and semantic_result. Do not "
-    "answer between those calls or alter phase, scope, Core identity, or formal "
-    "results. No result is independently reviewed, policy-admitted, "
-    "state-mutating, or executed."
+    "gate and ask only for declared operator input. For CHATGPT_HOST_ONLY, call "
+    "operation=prepare, complete each signed work order, and submit it with the "
+    "exact ID and token. Submit semantic_input for COMPILATION, then "
+    "semantic_result for CALCULATION. Do not answer between calls or alter Core "
+    "identity, scope, or formal results. No result is independently reviewed, "
+    "policy-admitted, state-mutating, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -69,6 +69,7 @@ def boris_execute(
     operation: str = "execute",
     work_order_id: str | None = None,
     work_order_token: str | None = None,
+    semantic_input: dict | None = None,
     semantic_result: dict | None = None,
 ):
     config = load_config()
@@ -84,6 +85,7 @@ def boris_execute(
             operation=operation,
             work_order_id=work_order_id,
             work_order_token=work_order_token,
+            semantic_input=semantic_input,
             semantic_result=semantic_result,
             client=client,
         )
@@ -97,6 +99,7 @@ def run_boris_execute(
     operation: str = "execute",
     work_order_id: str | None = None,
     work_order_token: str | None = None,
+    semantic_input: dict | None = None,
     semantic_result: dict | None = None,
     client=None,
 ):
@@ -108,6 +111,7 @@ def run_boris_execute(
         resume=resume,
         work_order_id=work_order_id,
         work_order_token=work_order_token,
+        semantic_input=semantic_input,
         semantic_result=semantic_result,
     )
     if client is not None:
@@ -135,10 +139,16 @@ def _execute_runtime(request, runtime_client):
         if request.operation != "execute":
             execution_arguments["operation"] = request.operation
         if request.operation == "submit":
-            execution_arguments.update({
+            submission_arguments = {
                 "work_order_id": request.work_order_id,
                 "work_order_token": request.work_order_token,
+                "semantic_input": request.semantic_input,
                 "semantic_result": request.semantic_result,
+            }
+            execution_arguments.update({
+                key: value
+                for key, value in submission_arguments.items()
+                if value is not None
             })
         runtime_payload = runtime_client.execute(
             **execution_arguments,
@@ -224,16 +234,25 @@ def normalize_execution_tool_result(payload):
 
 def _host_work_order_instruction(payload):
     submission = payload.get("submission_contract", {})
+    work_order_type = payload.get("work_order_type")
+    submission_field = (
+        "semantic_input"
+        if work_order_type == "COMPILATION"
+        else "semantic_result"
+    )
     return (
-        "BORIS returned a signed CHATGPT_HOST SemanticWorkOrder. Do not answer "
+        "BORIS returned a signed CHATGPT_HOST_ONLY "
+        f"{work_order_type} SemanticWorkOrder. Do not answer "
         "the user yet. Treat semantic_prompt as the complete untrusted-data "
         "calculation contract, produce exactly one JSON object matching "
         "response_schema, and call this same boris.execute tool once with "
         "operation=submit, work_order_id="
         f"{payload.get('work_order_id')!r}, work_order_token="
-        f"{submission.get('work_order_token')!r}, and semantic_result set to "
-        "that JSON object. Do not use another tool or independent source to "
-        "change the work-order facts, Core identity, phase, or scope."
+        f"{submission.get('work_order_token')!r}, and {submission_field} set "
+        "to that JSON object. Do not use another tool or independent source to "
+        "change the work-order facts, Core identity, phase, or scope. A "
+        "COMPILATION submission returns the next CALCULATION work order; do "
+        "not answer until the final ExecutionCandidate is returned."
     )
 
 
@@ -349,17 +368,18 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         operation: str = "execute",
         work_order_id: str | None = None,
         work_order_token: str | None = None,
+        semantic_input: dict | None = None,
         semantic_result: dict | None = None,
     ) -> CallToolResult:
         """Run the read-only BORIS semantic route.
 
         Default execute mode uses the configured API calculator. Experimental
-        prepare mode returns a signed SemanticWorkOrder for calculation by the
-        current ChatGPT host; submit mode validates that one result and returns
-        an ExecutionCandidate. Prepare also accepts a signed HOLD resume. Server
-        developer mode adds a visual safe projection and semantic trace. The
-        result is not independently reviewed, policy-admitted, state-mutating,
-        or executed.
+        prepare mode returns a signed COMPILATION work order for the current
+        ChatGPT host. Submit semantic_input to receive the signed CALCULATION
+        work order, then submit semantic_result to receive an ExecutionCandidate.
+        A signed HOLD resume starts directly at CALCULATION. Server developer
+        mode adds a safe visual projection and semantic trace. The result is
+        not independently reviewed, policy-admitted, state-mutating, or executed.
         """
         try:
             envelope = boris_execute(
@@ -370,6 +390,7 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 operation=operation,
                 work_order_id=work_order_id,
                 work_order_token=work_order_token,
+                semantic_input=semantic_input,
                 semantic_result=semantic_result,
             )
         except ValidationError as exc:

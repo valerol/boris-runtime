@@ -51,7 +51,7 @@ operator-response window is desired. The accepted range is 60 through 86400
 seconds. Changing the secret invalidates every unexpired continuation token.
 
 Generate a separate value for `BORIS_HOST_EXECUTOR_SECRET`. It signs
-`CHATGPT_HOST` work-order tokens. The default
+`CHATGPT_HOST_ONLY` work-order tokens. The default
 `BORIS_HOST_WORK_ORDER_TTL_SECONDS=900` may be set from 60 through 86400
 seconds. Rotating this secret invalidates outstanding work-order tokens; the
 in-memory registry is also cleared by every Runtime restart.
@@ -190,9 +190,9 @@ Do not expose `/runtime/execute`, `/runtime/frame`, or `/runtime/validate`
 directly to the public internet. The public boundary is `/mcp`; all Runtime API
 routes remain on the private interface.
 
-The `CHATGPT_HOST` PoC stores pending one-shot work orders in the Runtime
+The `CHATGPT_HOST_ONLY` PoC stores pending one-shot work orders in the Runtime
 process. Run the Runtime API with one worker, or configure sticky routing to the
-same worker for prepare and submit. A multi-worker or restart-safe deployment
+same worker for prepare and both submits. A multi-worker or restart-safe deployment
 requires the deferred persistent atomic registry. This transaction registry is
 not BORIS memory and does not admit a state transition.
 
@@ -271,7 +271,7 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS through the sole boris.execute tool. Preserve every ExecutionCandidate gate. For CHATGPT_HOST, call operation=prepare, calculate only the signed SemanticWorkOrder, and call operation=submit once with its exact ID, token, and semantic_result; do not answer between those calls. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
+Connects ChatGPT to BORIS through the sole boris.execute tool. Preserve every ExecutionCandidate gate. For CHATGPT_HOST_ONLY, call operation=prepare, submit semantic_input for the signed COMPILATION work order, then submit semantic_result for the signed CALCULATION work order; use each exact ID and token and do not answer between calls. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.

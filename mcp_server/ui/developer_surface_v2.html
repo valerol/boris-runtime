@@ -563,10 +563,11 @@
           gateChip.textContent = "work order";
           gateChip.dataset.gate = "";
           candidateNote.textContent =
-            "Awaiting one CHATGPT_HOST semantic submission.";
+            `Awaiting CHATGPT_HOST_ONLY ${payload.work_order_type || ""} submission.`;
           candidateJson.textContent = json({
             work_order_version: payload.work_order_version,
             work_order_id: payload.work_order_id,
+            work_order_type: payload.work_order_type,
             semantic_provider: payload.semantic_provider,
             phase: payload.phase,
             minimum_context_window_tokens:

@@ -17,9 +17,9 @@ immutable CoreSurface
 immutable CoreSurface + trusted server Core selection
   -> Runtime Compatibility
   -> application ExecutionService
-  -> SemanticInputCompiler
-  -> SemanticExecutor through OPENAI_API
-     or signed CHATGPT_HOST prepare/submit
+  -> OPENAI_API compiler + calculator
+     or signed CHATGPT_HOST_ONLY compiler + calculator work orders
+  -> SemanticExecutor validation and gate constraints
   -> ExecutionCandidate
 ```
 
@@ -107,19 +107,26 @@ boris.execute
   -> validated ExecutionCandidate
 ```
 
-The optional host route uses two calls to the same tool:
+The optional host route uses one prepare and two submit calls to the same tool:
 
 ```text
 boris.execute operation=prepare
   -> Runtime compatibility
-  -> API-backed SemanticInputCompiler
+  -> signed COMPILATION SemanticWorkOrder
+
+ChatGPT compiles one semantic_input
+
+boris.execute operation=submit
+  -> verify token and one-shot registry state
+  -> re-verify Core and RuntimeAttestation
+  -> validate SemanticInput
   -> deterministic Semantic View
-  -> signed SemanticWorkOrder
+  -> signed CALCULATION SemanticWorkOrder
 
 ChatGPT calculates one semantic_result
 
 boris.execute operation=submit
-  -> verify token and one-shot registry state
+  -> verify the second token and one-shot registry state
   -> re-verify Core and RuntimeAttestation
   -> rebuild and hash the Semantic View
   -> SemanticCalculationValidator
@@ -127,12 +134,13 @@ boris.execute operation=submit
   -> ExecutionCandidate
 ```
 
-The work order uses `boris-semantic-work-order/0.1` and binds:
+Both work orders use `boris-semantic-work-order/0.2` and bind:
 
 - session and work-order IDs;
 - Core reference and RuntimeAttestation SHA-256;
-- exact `SemanticInput` and Semantic View SHA-256;
-- calculator prompt and response-schema SHA-256;
+- exact source material and compiler catalog for `COMPILATION`;
+- exact `SemanticInput` and Semantic View for `CALCULATION`;
+- stage prompt and response-schema SHA-256;
 - phase, selected norms, active layers, triggers, and scopes through the
   hashed view;
 - issue and expiry times.
@@ -159,10 +167,10 @@ both the work order and resulting candidate. The existing RuntimeAttestation
 continues to bind the receiving Runtime substrate and Core compatibility; it
 is not reinterpreted as proof about the ChatGPT host.
 
-The current host route still uses the configured LLM for
-`SemanticInputCompiler`. A zero-API route would require a separate signed host
-compilation work order before Runtime can select the exact phase-complete
-Semantic View.
+The host route never constructs the Runtime API adapter. The configured LLM is
+used only by the autonomous `OPENAI_API` route. A signed HOLD resume already
+contains a validated `SemanticInput`, so it skips `COMPILATION` and starts with
+the `CALCULATION` work order.
 
 ## Stateless HOLD continuation
 

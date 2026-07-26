@@ -40,6 +40,7 @@ class RuntimeAPIClient:
         operation: str = "execute",
         work_order_id: str | None = None,
         work_order_token: str | None = None,
+        semantic_input: dict | None = None,
         semantic_result: dict | None = None,
     ):
         request_body = {
@@ -54,6 +55,7 @@ class RuntimeAPIClient:
             ),
             "work_order_id": work_order_id,
             "work_order_token": work_order_token,
+            "semantic_input": semantic_input,
             "semantic_result": semantic_result,
         }
         request_body = {

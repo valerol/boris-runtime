@@ -73,15 +73,19 @@
 - complete safe trace delivered to the component through model-hidden `_meta`;
 - production MCP tool without a linked Developer Surface.
 
-### Experimental ChatGPT host calculator
+### Experimental ChatGPT host-only executor
 
-- optional `CHATGPT_HOST` provider through the sole `boris.execute` tool;
-- `operation=prepare` work order and one-shot `operation=submit`;
+- optional `CHATGPT_HOST_ONLY` provider through the sole `boris.execute` tool;
+- signed `COMPILATION` and `CALCULATION` work orders, each consumed by
+  `operation=submit` exactly once;
 - HMAC binding to the session, Core reference, RuntimeAttestation,
-  `SemanticInput`, Semantic View, calculator prompt, response schema, phase,
-  and selected scope;
+  source material, compiler catalog, `SemanticInput`, Semantic View, prompts,
+  response schemas, phase, and selected scope;
 - exact JSON Schema supplied to the ChatGPT host, with the existing
+  `SemanticInputCompiler` and
   `SemanticCalculationValidator` remaining authoritative;
+- zero Runtime LLM/API calls on the host-only route;
+- signed HOLD resume skips compilation and starts at `CALCULATION`;
 - deterministic gate constraints and ordinary HOLD handoff after submission;
 - bounded TTL and size controls;
 - existing `OPENAI_API` route retained unchanged;
@@ -183,7 +187,6 @@ are globally invalidated by continuation-secret rotation.
 - targeted host work-order revocation and audit records;
 - measurement of MCP payload and effective ChatGPT context limits on Core
   v2.31;
-- separate host compilation work order before claiming a zero-API route;
 - revocation and rotation of operator decisions;
 - persistent audit storage;
 - multi-tenant isolation and authorization.
