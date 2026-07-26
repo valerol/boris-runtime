@@ -28,6 +28,16 @@ from application.context_provider import (
     ContextProvider,
     CoreSurfaceProvider,
 )
+from application.host_executor import (
+    HOST_EXECUTOR_LIMITATIONS,
+    HOST_SEMANTIC_PROVIDER,
+    HostWorkOrderCodec,
+    InMemoryHostWorkOrderRegistry,
+    SubmittedSemanticCalculator,
+    build_host_work_order,
+    consume_host_work_order,
+    require_current_host_scope,
+)
 from application.runtime_mode import developer_mode_enabled
 from llm.config import build_lazy_llm_adapter
 from runtime_compatibility import (
@@ -309,6 +319,8 @@ class ExecutionService:
         calculator_factory=None,
         context_provider=None,
         continuation_codec_factory=None,
+        host_work_order_codec_factory=None,
+        host_work_order_registry=None,
     ):
         self.surface_provider = surface_provider or CoreSurfaceProvider()
         self.acceptance_provider = (
@@ -333,6 +345,152 @@ class ExecutionService:
         )
         self.continuation_codec_factory = (
             continuation_codec_factory or ContinuationCodec.from_environment
+        )
+        self.host_work_order_codec_factory = (
+            host_work_order_codec_factory
+            or HostWorkOrderCodec.from_environment
+        )
+        self.host_work_order_registry = (
+            host_work_order_registry
+            or InMemoryHostWorkOrderRegistry()
+        )
+
+    def prepare_host(
+        self,
+        user_input: str | None = None,
+        session_id: str | None = None,
+        context: Mapping | None = None,
+        resume: Mapping | None = None,
+    ) -> dict:
+        codec = self.host_work_order_codec_factory()
+        if resume is None:
+            text = str(user_input or "").strip()
+            if not text:
+                raise ValueError("Execution input must not be empty.")
+            if context is not None and not isinstance(context, Mapping):
+                raise ValueError("Execution context must be an object.")
+            resolved_session_id = session_id or str(uuid4())
+            continuation_state = None
+            resume_count = 0
+        else:
+            if user_input is not None or context:
+                raise ValueError(
+                    "A continuation request cannot replace token-bound input or context."
+                )
+            continuation_codec = self.continuation_codec_factory()
+            continuation_state = continuation_codec.verify(
+                resume_token(resume)
+            )
+            token_session_id = continuation_text(
+                continuation_state,
+                "session_id",
+            )
+            if session_id is not None and session_id != token_session_id:
+                raise ContinuationStateMismatch(
+                    "Continuation session_id does not match the signed state."
+                )
+            resolved_session_id = token_session_id
+            resume_count = continuation_count(continuation_state) + 1
+            text = continuation_source_input(continuation_state)
+
+        surface = self.surface_provider.get()
+        acceptance = self.acceptance_provider.get(surface)
+        compatibility = self.compatibility_verifier.verify(
+            surface,
+            operator_acceptance=acceptance,
+        )
+        compatibility.require_semantic_evaluation(surface)
+
+        if continuation_state is None:
+            adapter = self.llm_adapter_factory()
+            compiler = self.compiler_factory(adapter)
+            semantic_input = compiler.compile(
+                surface,
+                text,
+                context=context,
+            )
+        else:
+            require_continuation_core(continuation_state, surface)
+            semantic_input = resume_semantic_input(
+                continuation_state,
+                resume,
+            )
+
+        view = SemanticViewBuilder().build(surface, semantic_input)
+        return build_host_work_order(
+            codec=codec,
+            registry=self.host_work_order_registry,
+            semantic_input=semantic_input,
+            view=view,
+            session_id=resolved_session_id,
+            source_text=text,
+            resume_count=resume_count,
+            resumed=continuation_state is not None,
+            attestation_sha256=compatibility.attestation_sha256,
+        )
+
+    def submit_host(
+        self,
+        *,
+        work_order_id: str,
+        work_order_token: str,
+        semantic_result: Mapping,
+        session_id: str | None = None,
+    ) -> dict:
+        calculator = SubmittedSemanticCalculator(semantic_result)
+        codec = self.host_work_order_codec_factory()
+        state = consume_host_work_order(
+            codec=codec,
+            registry=self.host_work_order_registry,
+            work_order_id=work_order_id,
+            work_order_token=work_order_token,
+            session_id=session_id,
+        )
+        timings = {}
+        started = perf_counter()
+
+        stage_started = perf_counter()
+        surface = self.surface_provider.get()
+        timings["core_surface_load"] = _elapsed_ms(stage_started)
+
+        stage_started = perf_counter()
+        acceptance = self.acceptance_provider.get(surface)
+        timings["operator_acceptance_load"] = _elapsed_ms(stage_started)
+
+        stage_started = perf_counter()
+        compatibility = self.compatibility_verifier.verify(
+            surface,
+            operator_acceptance=acceptance,
+        )
+        compatibility.require_semantic_evaluation(surface)
+        timings["runtime_compatibility"] = _elapsed_ms(stage_started)
+
+        view = SemanticViewBuilder().build(surface, state.semantic_input)
+        require_current_host_scope(
+            state,
+            view=view,
+            attestation_sha256=compatibility.attestation_sha256,
+        )
+        executor = SemanticExecutor(
+            surface,
+            calculator,
+            compatibility,
+        )
+        stage_started = perf_counter()
+        candidate = executor.execute(state.semantic_input)
+        timings["semantic_executor"] = _elapsed_ms(stage_started)
+        return self._candidate_envelope(
+            candidate=candidate,
+            semantic_input=state.semantic_input,
+            session_id=state.session_id,
+            source_text=state.source_text,
+            compatibility=compatibility,
+            timings=timings,
+            resume_count=state.resume_count,
+            resumed=state.resumed,
+            semantic_provider=HOST_SEMANTIC_PROVIDER,
+            host_work_order_id=state.work_order_id,
+            started=started,
         )
 
     def execute(
@@ -414,7 +572,34 @@ class ExecutionService:
         stage_started = perf_counter()
         candidate = executor.execute(semantic_input)
         timings["semantic_executor"] = _elapsed_ms(stage_started)
+        return self._candidate_envelope(
+            candidate=candidate,
+            semantic_input=semantic_input,
+            session_id=resolved_session_id,
+            source_text=text,
+            compatibility=compatibility,
+            timings=timings,
+            resume_count=resume_count,
+            resumed=continuation_state is not None,
+            semantic_provider="OPENAI_API",
+            started=started,
+        )
 
+    def _candidate_envelope(
+        self,
+        *,
+        candidate,
+        semantic_input,
+        session_id,
+        source_text,
+        compatibility,
+        timings,
+        resume_count,
+        resumed,
+        semantic_provider,
+        started,
+        host_work_order_id=None,
+    ):
         candidate_result = candidate.to_dict()["candidate_result"]
         candidate_unavailable_reason = None
         if not candidate_result:
@@ -431,7 +616,7 @@ class ExecutionService:
 
         envelope = {
             "execution_version": EXECUTION_VERSION,
-            "session_id": resolved_session_id,
+            "session_id": session_id,
             "status": "semantic_candidate",
             "phase": candidate.phase,
             "gate": candidate.gate,
@@ -452,6 +637,13 @@ class ExecutionService:
             "alternatives": candidate.to_dict()["alternatives"],
             "limitations": list(PUBLIC_LIMITATIONS),
         }
+        if semantic_provider == HOST_SEMANTIC_PROVIDER:
+            envelope["semantic_provider"] = semantic_provider
+            envelope["host_work_order_id"] = host_work_order_id
+            envelope["limitations"] = list(dict.fromkeys((
+                *envelope["limitations"],
+                *HOST_EXECUTOR_LIMITATIONS,
+            )))
         if candidate_unavailable_reason is not None:
             envelope["candidate_unavailable_reason"] = (
                 candidate_unavailable_reason
@@ -463,7 +655,7 @@ class ExecutionService:
                     codec,
                     semantic_input,
                     candidate,
-                    resolved_session_id,
+                    session_id,
                     resume_count,
                 )
             else:
@@ -474,8 +666,8 @@ class ExecutionService:
         if developer_mode_enabled():
             stage_started = perf_counter()
             frame = self.context_provider.frame(
-                text,
-                session_id=resolved_session_id,
+                source_text,
+                session_id=session_id,
             )
             timings["context_projection"] = _elapsed_ms(stage_started)
             timings["total"] = _elapsed_ms(started)
@@ -486,10 +678,12 @@ class ExecutionService:
                 compatibility,
                 timings,
                 continuation={
-                    "resumed": continuation_state is not None,
+                    "resumed": resumed,
                     "resume_count": resume_count,
                     "handoff": trace_handoff(envelope.get("hold")),
                 },
+                semantic_provider=semantic_provider,
+                host_work_order_id=host_work_order_id,
             )
         return envelope
 
@@ -622,6 +816,8 @@ def _build_execution_trace(
     compatibility,
     timings,
     continuation=None,
+    semantic_provider="OPENAI_API",
+    host_work_order_id=None,
 ):
     trace = {
         "trace_version": "boris-execution-trace/1.0",
@@ -637,6 +833,8 @@ def _build_execution_trace(
             "attestation_sha256": compatibility.attestation_sha256,
         },
         "semantic_execution": {
+            "semantic_provider": semantic_provider,
+            "host_work_order_id": host_work_order_id,
             "phase": candidate.phase,
             "triggers": list(semantic_input.triggers),
             "active_layers": list(candidate.trace.active_layers),
@@ -667,9 +865,19 @@ def _build_execution_trace(
             "core_surface": "invoked",
             "runtime_compatibility": "invoked",
             "semantic_input_compiler": (
-                "not_invoked_resume"
-                if continuation and continuation.get("resumed")
-                else "invoked"
+                (
+                    "invoked_during_host_prepare"
+                    if semantic_provider == HOST_SEMANTIC_PROVIDER
+                    and not continuation.get("resumed")
+                    else "not_invoked_host_resume"
+                )
+                if semantic_provider == HOST_SEMANTIC_PROVIDER
+                and continuation
+                else (
+                    "not_invoked_resume"
+                    if continuation and continuation.get("resumed")
+                    else "invoked"
+                )
             ),
             "hold_continuation": (
                 "resumed"
@@ -680,7 +888,11 @@ def _build_execution_trace(
                     else "not_required"
                 )
             ),
-            "semantic_executor": "invoked",
+            "semantic_executor": (
+                "invoked_host_submission"
+                if semantic_provider == HOST_SEMANTIC_PROVIDER
+                else "invoked"
+            ),
             "independent_reviewer": "not_implemented",
             "policy_kernel": "not_implemented",
             "state_event": "not_implemented",

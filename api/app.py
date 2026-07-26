@@ -11,6 +11,7 @@ from api.models import (
     RuntimeExecutionResponse,
     RuntimeFrameRequest,
     RuntimeFrameResponse,
+    RuntimeHostWorkOrderResponse,
     RuntimeValidationRequest,
     RuntimeValidationResponse,
 )
@@ -25,6 +26,12 @@ from application.execution import (
     ExecutionService,
     OperatorAcceptanceUnavailable,
     SemanticInputCompilationError,
+)
+from application.host_executor import (
+    HostExecutorUnavailable,
+    HostWorkOrderAlreadyConsumed,
+    HostWorkOrderStateMismatch,
+    InvalidHostWorkOrder,
 )
 from application.semantic_validation import SemanticValidationOutputError
 from application.validation import ValidationEngine
@@ -66,7 +73,11 @@ def _error_response(status_code, error, detail, session_id=None):
 
 def _safe_error_detail(detail):
     text = str(detail)
-    for env_name in ("OPENAI_API_KEY",):
+    for env_name in (
+        "OPENAI_API_KEY",
+        "BORIS_CONTINUATION_SECRET",
+        "BORIS_HOST_EXECUTOR_SECRET",
+    ):
         secret = os.getenv(env_name)
         if secret:
             text = text.replace(secret, "[redacted]")
@@ -102,7 +113,7 @@ def frame_runtime(request: RuntimeFrameRequest):
 
 @app.post(
     "/runtime/execute",
-    response_model=RuntimeExecutionResponse,
+    response_model=RuntimeExecutionResponse | RuntimeHostWorkOrderResponse,
     responses={
         400: {"model": RuntimeErrorResponse},
         409: {"model": RuntimeErrorResponse},
@@ -113,9 +124,20 @@ def frame_runtime(request: RuntimeFrameRequest):
 )
 def execute_runtime(request: RuntimeExecutionRequest):
     session_id = request.session_id
-    if session_id is None and request.resume is None:
+    if (
+        session_id is None
+        and request.resume is None
+        and request.operation != "submit"
+    ):
         session_id = str(uuid4())
     try:
+        if request.operation == "submit":
+            return execution_service.submit_host(
+                work_order_id=request.work_order_id,
+                work_order_token=request.work_order_token,
+                semantic_result=request.semantic_result,
+                session_id=session_id,
+            )
         execution_arguments = {
             "session_id": session_id,
             "context": request.context,
@@ -124,9 +146,42 @@ def execute_runtime(request: RuntimeExecutionRequest):
             execution_arguments["resume"] = (
                 request.resume.model_dump()
             )
+        if request.operation == "prepare":
+            return execution_service.prepare_host(
+                request.input,
+                **execution_arguments,
+            )
         return execution_service.execute(
             request.input,
             **execution_arguments,
+        )
+    except HostWorkOrderAlreadyConsumed as exc:
+        return _error_response(
+            409,
+            "host_work_order_consumed",
+            exc,
+            session_id=session_id,
+        )
+    except HostWorkOrderStateMismatch as exc:
+        return _error_response(
+            409,
+            "host_work_order_state_mismatch",
+            exc,
+            session_id=session_id,
+        )
+    except InvalidHostWorkOrder as exc:
+        return _error_response(
+            400,
+            "invalid_host_work_order",
+            exc,
+            session_id=session_id,
+        )
+    except HostExecutorUnavailable as exc:
+        return _error_response(
+            503,
+            "host_executor_unavailable",
+            exc,
+            session_id=session_id,
         )
     except IncompleteOperatorResolution as exc:
         return _error_response(

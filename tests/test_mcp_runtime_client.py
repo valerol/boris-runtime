@@ -175,6 +175,49 @@ def test_execute_resume_posts_only_signed_continuation_material():
     }
 
 
+def test_execute_posts_host_prepare_and_submit_contracts():
+    captured = []
+
+    def handler(request):
+        captured.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"status": "ok"})
+
+    client = RuntimeAPIClient(
+        "http://runtime.test",
+        transport=httpx.MockTransport(handler),
+    )
+    client.execute(
+        operation="prepare",
+        input="Explain BOIS Runtime",
+        session_id="host-client",
+    )
+    semantic_result = {"candidate_result": {"summary": "Host"}}
+    client.execute(
+        operation="submit",
+        session_id="host-client",
+        work_order_id="work-order-1",
+        work_order_token="hw1.payload.signature",
+        semantic_result=semantic_result,
+    )
+
+    assert captured == [
+        {
+            "input": "Explain BOIS Runtime",
+            "session_id": "host-client",
+            "context": {},
+            "operation": "prepare",
+        },
+        {
+            "session_id": "host-client",
+            "context": {},
+            "operation": "submit",
+            "work_order_id": "work-order-1",
+            "work_order_token": "hw1.payload.signature",
+            "semantic_result": semantic_result,
+        },
+    ]
+
+
 def test_frame_runtime_error_json_is_available_on_runtime_api_error():
     error_payload = {
         "error": "runtime_error",

@@ -117,6 +117,56 @@ def test_boris_execute_forwards_resume_to_runtime():
     ]
 
 
+def test_boris_execute_returns_host_work_order_without_prompt_duplication():
+    packet = _host_work_order_packet()
+    client = FakeRuntimeClient(response=packet)
+
+    response = run_boris_execute(
+        operation="prepare",
+        input="Explain BOIS Runtime",
+        session_id="host-mcp",
+        client=client,
+    )
+
+    assert response["structuredContent"] == packet
+    text = response["content"][0]["text"]
+    assert text.startswith(
+        "BORIS returned a signed CHATGPT_HOST SemanticWorkOrder."
+    )
+    assert "operation=submit" in text
+    assert packet["semantic_prompt"] not in text
+    assert client.calls == [{
+        "input": "Explain BOIS Runtime",
+        "session_id": "host-mcp",
+        "context": {},
+        "operation": "prepare",
+    }]
+
+
+def test_boris_execute_forwards_one_host_submission():
+    client = FakeRuntimeClient(response=_execution_packet())
+    semantic_result = {"candidate_result": {"summary": "Host result"}}
+
+    run_boris_execute(
+        operation="submit",
+        session_id="host-mcp",
+        work_order_id="work-order-1",
+        work_order_token="hw1.payload.signature",
+        semantic_result=semantic_result,
+        client=client,
+    )
+
+    assert client.calls == [{
+        "input": None,
+        "session_id": "host-mcp",
+        "context": {},
+        "operation": "submit",
+        "work_order_id": "work-order-1",
+        "work_order_token": "hw1.payload.signature",
+        "semantic_result": semantic_result,
+    }]
+
+
 def test_non_operator_hold_is_presented_without_inventing_a_question():
     packet = _execution_packet()
     packet["hold"] = {
@@ -200,4 +250,34 @@ def _execution_packet():
             "expires_at": "2026-07-25T12:00:00+00:00",
             "resume_count": 0,
         },
+    }
+
+
+def _host_work_order_packet():
+    return {
+        "work_order_version": "boris-semantic-work-order/0.1",
+        "work_order_id": "work-order-1",
+        "session_id": "host-mcp",
+        "status": "semantic_work_order",
+        "semantic_provider": "CHATGPT_HOST",
+        "phase": "C03",
+        "minimum_context_window_tokens": 524288,
+        "core_ref": {},
+        "issued_at": "2026-07-26T12:00:00+00:00",
+        "expires_at": "2026-07-26T12:15:00+00:00",
+        "semantic_prompt": "Large semantic prompt must appear only once.",
+        "response_schema": {"type": "object"},
+        "bindings": {},
+        "submission_contract": {
+            "tool": "boris.execute",
+            "operation": "submit",
+            "required_arguments": [
+                "operation",
+                "work_order_id",
+                "work_order_token",
+                "semantic_result",
+            ],
+            "work_order_token": "hw1.payload.signature",
+        },
+        "limitations": ["contract_isolation_only"],
     }

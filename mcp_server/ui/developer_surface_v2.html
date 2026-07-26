@@ -559,6 +559,38 @@
         statusValue.textContent = payload.status || payload.error || "unknown";
         resumeValue.textContent = String(payload.hold?.resume_count ?? 0);
 
+        if (payload.status === "semantic_work_order") {
+          gateChip.textContent = "work order";
+          gateChip.dataset.gate = "";
+          candidateNote.textContent =
+            "Awaiting one CHATGPT_HOST semantic submission.";
+          candidateJson.textContent = json({
+            work_order_version: payload.work_order_version,
+            work_order_id: payload.work_order_id,
+            semantic_provider: payload.semantic_provider,
+            phase: payload.phase,
+            minimum_context_window_tokens:
+              payload.minimum_context_window_tokens,
+            core_ref: payload.core_ref,
+            issued_at: payload.issued_at,
+            expires_at: payload.expires_at,
+            bindings: payload.bindings,
+            limitations: payload.limitations,
+          });
+          semanticJson.textContent = json({
+            response_schema: payload.response_schema,
+            semantic_prompt_characters:
+              String(payload.semantic_prompt || "").length,
+            submission_operation:
+              payload.submission_contract?.operation,
+          });
+          traceJson.textContent = json({
+            status: "candidate trace begins after validated submit",
+          });
+          renderHandoff(null);
+          return;
+        }
+
         candidateJson.textContent = json(payload.candidate_result);
         candidateNote.textContent =
           payload.candidate_unavailable_reason || "";

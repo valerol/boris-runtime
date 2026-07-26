@@ -28,12 +28,25 @@ The MCP tool list is exactly `{"boris.execute"}`. The former public
 available for lexical projection diagnostics, and `/runtime/validate` remains a
 private stateless answer-validation service.
 
-Initial input and signed HOLD resume are two request forms of the same
-`boris.execute` tool. In developer mode the tool descriptor links one
+The standard `execute` operation accepts either initial input or a signed HOLD
+resume through the same `boris.execute` tool. In developer mode the tool
+descriptor links one
 versioned MCP Apps resource. The adapter moves Runtime `developer_trace` from
 the HTTP payload into tool-result `_meta`, while keeping the candidate and
 handoff in `structuredContent`. Production mode registers neither the link nor
 the resource.
+
+The same tool also exposes an optional `operation` discriminator:
+
+- omitted or `execute` uses the configured API calculator;
+- `prepare` returns a signed `CHATGPT_HOST` SemanticWorkOrder for either an
+  initial input or signed HOLD resume;
+- `submit` forwards exactly one work-order ID, token, and semantic result to
+  the private API.
+
+The MCP adapter does not calculate or validate the work order itself. It keeps
+the large semantic prompt in `structuredContent` and returns only a concise
+model instruction in text, avoiding a second full prompt copy.
 
 There is no compatibility `adapters.llm` module. Callers use
 `llm.llm_adapter` directly.

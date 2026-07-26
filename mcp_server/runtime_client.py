@@ -37,12 +37,24 @@ class RuntimeAPIClient:
         session_id: str | None = None,
         context: dict | None = None,
         resume: dict | None = None,
+        operation: str = "execute",
+        work_order_id: str | None = None,
+        work_order_token: str | None = None,
+        semantic_result: dict | None = None,
     ):
         request_body = {
             "input": input,
             "session_id": session_id,
             "context": dict(context or {}),
             "resume": dict(resume) if resume is not None else None,
+            "operation": (
+                operation
+                if operation != "execute"
+                else None
+            ),
+            "work_order_id": work_order_id,
+            "work_order_token": work_order_token,
+            "semantic_result": semantic_result,
         }
         request_body = {
             key: value

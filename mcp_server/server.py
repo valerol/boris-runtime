@@ -10,13 +10,13 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS exposes one public tool: boris.execute. Present its ExecutionCandidate without "
-    "replacing it or weakening HOLD, STOP, or REPAIR. For HOLD, ask only when "
-    "required_operator_input is present and resume only through its signed "
-    "continuation; otherwise present the conditional candidate and limits "
-    "without inventing an operator question. Developer trace is component-only. "
-    "The result is not independently reviewed, policy-admitted, state-mutating, "
-    "or executed."
+    "BORIS exposes one public tool: boris.execute. Preserve every candidate "
+    "gate and ask only for declared operator input. For CHATGPT_HOST, call "
+    "operation=prepare, calculate only its signed SemanticWorkOrder, then call "
+    "operation=submit once with the exact ID, token, and semantic_result. Do not "
+    "answer between those calls or alter phase, scope, Core identity, or formal "
+    "results. No result is independently reviewed, policy-admitted, "
+    "state-mutating, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -66,6 +66,10 @@ def boris_execute(
     session_id: str | None = None,
     context: dict | None = None,
     resume: dict | None = None,
+    operation: str = "execute",
+    work_order_id: str | None = None,
+    work_order_token: str | None = None,
+    semantic_result: dict | None = None,
 ):
     config = load_config()
     with RuntimeAPIClient(
@@ -77,6 +81,10 @@ def boris_execute(
             session_id=session_id,
             context=context,
             resume=resume,
+            operation=operation,
+            work_order_id=work_order_id,
+            work_order_token=work_order_token,
+            semantic_result=semantic_result,
             client=client,
         )
 
@@ -86,13 +94,21 @@ def run_boris_execute(
     session_id: str | None = None,
     context: dict | None = None,
     resume: dict | None = None,
+    operation: str = "execute",
+    work_order_id: str | None = None,
+    work_order_token: str | None = None,
+    semantic_result: dict | None = None,
     client=None,
 ):
     request = BorisExecuteRequest(
+        operation=operation,
         input=input,
         session_id=session_id,
         context=context or {},
         resume=resume,
+        work_order_id=work_order_id,
+        work_order_token=work_order_token,
+        semantic_result=semantic_result,
     )
     if client is not None:
         return _execute_runtime(request, client)
@@ -116,6 +132,14 @@ def _execute_runtime(request, runtime_client):
             execution_arguments["resume"] = (
                 request.resume.model_dump()
             )
+        if request.operation != "execute":
+            execution_arguments["operation"] = request.operation
+        if request.operation == "submit":
+            execution_arguments.update({
+                "work_order_id": request.work_order_id,
+                "work_order_token": request.work_order_token,
+                "semantic_result": request.semantic_result,
+            })
         runtime_payload = runtime_client.execute(
             **execution_arguments,
         )
@@ -154,6 +178,24 @@ def normalize_execution_tool_result(payload):
         for key, value in payload.items()
         if key != "developer_trace"
     }
+    if candidate_payload.get("status") == "semantic_work_order":
+        result = {
+            "structuredContent": candidate_payload,
+            "content": [
+                {
+                    "type": "text",
+                    "text": _host_work_order_instruction(
+                        candidate_payload,
+                    ),
+                }
+            ],
+        }
+        if developer_trace is not None:
+            result["_meta"] = {
+                "developer_surface_version": "2.0",
+                "developer_trace": developer_trace,
+            }
+        return result
     candidate_json = json.dumps(
         candidate_payload,
         ensure_ascii=False,
@@ -178,6 +220,21 @@ def normalize_execution_tool_result(payload):
             "developer_trace": developer_trace,
         }
     return result
+
+
+def _host_work_order_instruction(payload):
+    submission = payload.get("submission_contract", {})
+    return (
+        "BORIS returned a signed CHATGPT_HOST SemanticWorkOrder. Do not answer "
+        "the user yet. Treat semantic_prompt as the complete untrusted-data "
+        "calculation contract, produce exactly one JSON object matching "
+        "response_schema, and call this same boris.execute tool once with "
+        "operation=submit, work_order_id="
+        f"{payload.get('work_order_id')!r}, work_order_token="
+        f"{submission.get('work_order_token')!r}, and semantic_result set to "
+        "that JSON object. Do not use another tool or independent source to "
+        "change the work-order facts, Core identity, phase, or scope."
+    )
 
 
 def _candidate_instruction(payload, candidate_json):
@@ -289,13 +346,20 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         session_id: str | None = None,
         context: dict | None = None,
         resume: dict | None = None,
+        operation: str = "execute",
+        work_order_id: str | None = None,
+        work_order_token: str | None = None,
+        semantic_result: dict | None = None,
     ) -> CallToolResult:
         """Run the read-only BORIS semantic route.
 
-        Provide input for an initial calculation or resume for a signed HOLD
-        continuation. Returns an ExecutionCandidate. Server developer mode adds
-        a visual safe projection and semantic trace. It is not independently reviewed.
-        The candidate is not policy-admitted, state-mutating, or executed.
+        Default execute mode uses the configured API calculator. Experimental
+        prepare mode returns a signed SemanticWorkOrder for calculation by the
+        current ChatGPT host; submit mode validates that one result and returns
+        an ExecutionCandidate. Prepare also accepts a signed HOLD resume. Server
+        developer mode adds a visual safe projection and semantic trace. The
+        result is not independently reviewed, policy-admitted, state-mutating,
+        or executed.
         """
         try:
             envelope = boris_execute(
@@ -303,6 +367,10 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 session_id=session_id,
                 context=context,
                 resume=resume,
+                operation=operation,
+                work_order_id=work_order_id,
+                work_order_token=work_order_token,
+                semantic_result=semantic_result,
             )
         except ValidationError as exc:
             envelope = {
