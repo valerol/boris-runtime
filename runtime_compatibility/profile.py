@@ -1,14 +1,34 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
+
+
+SEMANTIC_CONTEXT_WINDOW_ENV = "BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS"
+
+
+def _semantic_context_window_tokens():
+    raw = os.getenv(SEMANTIC_CONTEXT_WINDOW_ENV, "").strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError:
+        return 0
+    return value if value > 0 else 0
 
 
 SUPPORTED_PREDICATE_OPERATORS = frozenset({
     "all",
     "all_equal",
+    "all_https",
+    "all_items_fact",
     "all_references_resolve",
+    "allowed_pair",
     "always",
     "any",
+    "contains",
+    "count_equals",
     "enum_member",
     "equals",
     "equals_path",
@@ -22,9 +42,12 @@ SUPPORTED_PREDICATE_OPERATORS = frozenset({
     "nonempty",
     "nonempty_scope",
     "not",
+    "not_equals",
+    "rank_at_least",
     "reference_resolves",
     "same_cycle",
     "same_subject",
+    "schema_valid",
     "scope_contains",
     "scope_equal",
     "scope_match",
@@ -61,6 +84,7 @@ class RuntimeProfile:
         "content_set_hash_binding",
         "deontic_operation_validation",
         "directory_content_set_binding",
+        "draft_2020_12_schema_validation",
         "gate_decision_semantics",
         "immutable_passive_core_surface",
         "no_direct_state_mutation",
@@ -89,3 +113,6 @@ class RuntimeProfile:
     supported_deontic_operations: frozenset[str] = SUPPORTED_DEONTIC_OPERATIONS
     supported_gate_results: tuple[str, ...] = SUPPORTED_GATE_RESULTS
     supported_source_norm_types: frozenset[str] = SUPPORTED_SOURCE_NORM_TYPES
+    semantic_context_window_tokens: int = field(
+        default_factory=_semantic_context_window_tokens
+    )

@@ -14,7 +14,7 @@ PREDICATE_RESULTS = frozenset({
     "UNKNOWN",
     "ERROR",
 })
-APPLICABILITY_RESULTS = frozenset({"TRUE", "FALSE", "UNKNOWN"})
+APPLICABILITY_RESULTS = PREDICATE_RESULTS
 GATE_RESULTS = frozenset({"PASS", "HOLD", "STOP", "REPAIR"})
 
 
@@ -179,17 +179,37 @@ class NormCandidate:
     execution_mode: str
     priority: int
     when: Mapping[str, Any]
+    applicability_predicate: Mapping[str, Any]
+    violation_predicate: Mapping[str, Any]
+    formal_applicability_result: str
     formal_predicate_result: str
+    predicate_mode: str
     bindings: tuple[ApplicabilityBinding, ...]
     interpretation_status: str
     source_fields: Mapping[str, str] = field(repr=False)
+    source_record: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
         object.__setattr__(self, "when", freeze_value(dict(self.when)))
         object.__setattr__(
             self,
+            "applicability_predicate",
+            freeze_value(dict(self.applicability_predicate)),
+        )
+        object.__setattr__(
+            self,
+            "violation_predicate",
+            freeze_value(dict(self.violation_predicate)),
+        )
+        object.__setattr__(
+            self,
             "source_fields",
             MappingProxyType(dict(self.source_fields)),
+        )
+        object.__setattr__(
+            self,
+            "source_record",
+            freeze_value(dict(self.source_record)),
         )
 
     def to_prompt_dict(self) -> dict[str, Any]:
@@ -201,6 +221,8 @@ class NormCandidate:
             "predicate",
             "trigger",
             "when",
+            "applicability_predicate",
+            "violation_predicate",
             "modality",
             "execution_mode",
             "operation",
@@ -220,18 +242,28 @@ class NormCandidate:
             "repair_path",
             "closure_criterion",
         )
+        source = (
+            thaw_value(self.source_record)
+            if self.predicate_mode != "legacy_formal"
+            and self.source_record
+            else {
+                name: self.source_fields.get(name, "")
+                for name in semantic_fields
+            }
+        )
         return {
             "norm_ref": self.norm_ref,
             "layer": self.layer,
             "card_status": self.card_status,
             "norm_type": self.norm_type,
             "interpretation_status": self.interpretation_status,
+            "predicate_mode": self.predicate_mode,
+            "formal_applicability_result": (
+                self.formal_applicability_result
+            ),
             "formal_predicate_result": self.formal_predicate_result,
             "phase_bindings": [binding.to_dict() for binding in self.bindings],
-            "source": {
-                name: self.source_fields.get(name, "")
-                for name in semantic_fields
-            },
+            "source": source,
         }
 
 
@@ -245,6 +277,10 @@ class SemanticView:
     deontic_semantics: Mapping[str, Any] = field(repr=False)
     gate_decision_semantics: Mapping[str, Any] = field(repr=False)
     selection_trace: Mapping[str, Any] = field(repr=False)
+    execution_context: Mapping[str, Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
     def __post_init__(self):
         object.__setattr__(
@@ -264,6 +300,11 @@ class SemanticView:
         )
         object.__setattr__(
             self,
+            "execution_context",
+            freeze_value(dict(self.execution_context)),
+        )
+        object.__setattr__(
+            self,
             "selection_trace",
             freeze_value(dict(self.selection_trace)),
         )
@@ -275,7 +316,7 @@ class SemanticView:
         raise KeyError(norm_ref)
 
     def to_prompt_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "core_ref": self.core_ref.to_dict(),
             "phase": self.phase,
             "active_layers": list(self.active_layers),
@@ -289,6 +330,11 @@ class SemanticView:
                 for candidate in self.candidates
             ],
         }
+        if self.execution_context:
+            result["execution_context"] = thaw_value(
+                self.execution_context
+            )
+        return result
 
 
 @dataclass(frozen=True, slots=True)

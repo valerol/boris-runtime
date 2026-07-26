@@ -93,8 +93,17 @@ selection and model settings belong in tracked `.env`:
 
 ```bash
 BOIS_LLM=openai
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5.6-terra
+OPENAI_REASONING_EFFORT=medium
+BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
 ```
+
+GPT-5.6 Terra supplies a 1,050,000-token context window and supports the
+structured Chat Completions contract used by the Runtime. Core v2.31 requires
+at least `524288`. Runtime fails closed when the capacity declaration is
+absent or insufficient; it does not silently narrow the phase-complete norm
+set. Keep the model, reasoning effort, and capacity declaration aligned when
+overriding these settings.
 
 ## Private Runtime API
 

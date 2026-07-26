@@ -8,6 +8,7 @@ import json
 from core_surface.errors import IntegrityError
 from core_surface.manifest import (
     LEGACY_MANIFEST_DIALECT,
+    PUBLIC_CORE_MANIFEST_DIALECT,
     RELEASE_MANIFEST_DIALECT,
     SHA256_PATTERN,
     validate_relative_path,
@@ -35,6 +36,8 @@ def validate_integrity(manifest: ManifestRecord, payloads: dict[str, bytes]) -> 
         _validate_legacy_inventory(manifest, payloads)
     elif manifest.manifest_dialect == RELEASE_MANIFEST_DIALECT:
         _validate_release_inventory(manifest, payloads)
+    elif manifest.manifest_dialect == PUBLIC_CORE_MANIFEST_DIALECT:
+        _validate_public_core_inventory(manifest, payloads)
     else:
         raise IntegrityError(
             f"Unsupported manifest dialect: {manifest.manifest_dialect}"
@@ -43,11 +46,13 @@ def validate_integrity(manifest: ManifestRecord, payloads: dict[str, bytes]) -> 
     if manifest.manifest_dialect == LEGACY_MANIFEST_DIALECT:
         _validate_checksum_file(payloads)
         _validate_dependency_order(manifest, payloads)
-    else:
+    elif manifest.manifest_dialect == RELEASE_MANIFEST_DIALECT:
         _validate_release_checksum_file(manifest, payloads)
         _validate_release_dependency_order(manifest, payloads)
         _validate_release_envelope_hashes(manifest, payloads)
         _validate_release_envelope_schema(manifest, payloads)
+    else:
+        _validate_public_core_checksums(manifest, payloads)
 
 
 def validate_identity(
@@ -57,9 +62,9 @@ def validate_identity(
     archive_sha256: str | None = None,
 ) -> dict:
     machine = _read_json(payloads, "machine/CORE_CANON.json")
-    final = _read_json(payloads, FINAL_VERIFICATION_PATH)
 
     if manifest.manifest_dialect == LEGACY_MANIFEST_DIALECT:
+        final = _read_json(payloads, FINAL_VERIFICATION_PATH)
         _require_matching_fields(
             machine,
             {
@@ -80,6 +85,30 @@ def validate_identity(
         )
         return machine
 
+    if manifest.manifest_dialect == PUBLIC_CORE_MANIFEST_DIALECT:
+        release = _read_json(payloads, "RELEASE.json")
+        expected = {
+            "release_id": manifest.release_package_id,
+            "artifact_version": manifest.artifact_version,
+        }
+        _require_matching_fields(
+            machine,
+            expected,
+            "machine/CORE_CANON.json",
+        )
+        _require_matching_fields(release, expected, "RELEASE.json")
+        if release.get("core_version") != manifest.artifact_version:
+            raise IntegrityError(
+                "RELEASE.json core_version does not match artifact_version."
+            )
+        authority = manifest.raw.get("canonical_authority")
+        if not isinstance(authority, str) or authority not in payloads:
+            raise IntegrityError(
+                "MANIFEST.json canonical_authority is missing from the package."
+            )
+        return machine
+
+    final = _read_json(payloads, FINAL_VERIFICATION_PATH)
     _require_matching_fields(
         machine,
         {
@@ -187,6 +216,28 @@ def _validate_release_inventory(
         )
 
 
+def _validate_public_core_inventory(
+    manifest: ManifestRecord,
+    payloads: dict[str, bytes],
+) -> None:
+    declared = manifest.raw.get("files")
+    if not isinstance(declared, (list, tuple)):
+        raise IntegrityError("public-core-v2 MANIFEST.json.files is invalid.")
+    declared_paths = tuple(validate_relative_path(path) for path in declared)
+    if len(declared_paths) != len(set(declared_paths)):
+        raise IntegrityError("public-core-v2 manifest paths are duplicated.")
+    if manifest.raw.get("file_count") != len(declared_paths):
+        raise IntegrityError("public-core-v2 manifest file_count mismatch.")
+    actual = set(payloads)
+    expected = set(declared_paths)
+    if actual != expected:
+        raise IntegrityError(
+            "public-core-v2 manifest inventory mismatch; "
+            f"missing={sorted(expected - actual)}, "
+            f"unexpected={sorted(actual - expected)}"
+        )
+
+
 def _validate_manifest_components(
     manifest: ManifestRecord,
     payloads: dict[str, bytes],
@@ -204,6 +255,56 @@ def _validate_manifest_components(
                 f"SHA-256 mismatch for {component.path}: "
                 f"expected {component.sha256}, got {actual_hash}"
             )
+
+
+def _validate_public_core_checksums(
+    manifest: ManifestRecord,
+    payloads: dict[str, bytes],
+) -> None:
+    checksums = _read_json(payloads, RELEASE_CHECKSUM_PATH)
+    if checksums.get("algorithm") != "SHA-256":
+        raise IntegrityError("CHECKSUMS.json algorithm must be SHA-256.")
+    _require_matching_fields(
+        checksums,
+        {
+            "release_id": manifest.release_package_id,
+            "artifact_version": manifest.artifact_version,
+        },
+        RELEASE_CHECKSUM_PATH,
+    )
+    entries = checksums.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise IntegrityError("CHECKSUMS.json.entries must be a non-empty array.")
+    expected_paths = set(payloads) - {RELEASE_CHECKSUM_PATH}
+    actual_paths = set()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise IntegrityError(
+                f"CHECKSUMS.json.entries[{index}] must be an object."
+            )
+        path = validate_relative_path(entry.get("path"))
+        if path in actual_paths:
+            raise IntegrityError(f"Duplicate CHECKSUMS.json entry: {path}")
+        actual_paths.add(path)
+        if path not in payloads:
+            raise IntegrityError(
+                f"CHECKSUMS.json references missing file: {path}"
+            )
+        payload = payloads[path]
+        if entry.get("size_bytes") != len(payload):
+            raise IntegrityError(
+                f"CHECKSUMS.json size mismatch for {path}."
+            )
+        if entry.get("sha256") != sha256_hex(payload):
+            raise IntegrityError(
+                f"CHECKSUMS.json hash mismatch for {path}."
+            )
+    if actual_paths != expected_paths:
+        raise IntegrityError(
+            "CHECKSUMS.json coverage mismatch; "
+            f"missing={sorted(expected_paths - actual_paths)}, "
+            f"unexpected={sorted(actual_paths - expected_paths)}"
+        )
 
 
 def _validate_checksum_file(payloads: dict[str, bytes]) -> None:

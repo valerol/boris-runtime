@@ -4,6 +4,7 @@
 fastapi
 uvicorn
 pydantic
+jsonschema
 
 # Optional real LLM adapter:
 openai

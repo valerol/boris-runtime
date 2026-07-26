@@ -5,7 +5,8 @@
 ### Core Surface
 
 - immutable package loading;
-- legacy and release-envelope manifests;
+- legacy, release-envelope, and public Core v2 manifests;
+- versioned package-contract adapters behind the stable `CoreSurface`;
 - separate release and normative identities;
 - archive, content-set, manifest, component, checksum, DAG, and validation
   envelope checks;
@@ -41,7 +42,9 @@
 - `boris-execution/1.0` envelope marked `status=semantic_candidate`;
 - safe developer trace combining lexical projection, compiled input,
   RuntimeAttestation, semantic results, stage ledger, and timings;
-- current Core v2.23 four-valued Predicate DSL and operator compatibility;
+- Core v2.31 phase-complete selection, typed applicability/violation
+  predicates, capsule context, model-capacity checks, and four-valued
+  Predicate DSL compatibility;
 - internal `/runtime/frame` retained without a public `boris.frame` alias.
 
 ### Closed HOLD handoff and Developer Surface

@@ -54,14 +54,34 @@ ZIP hash.
 
 ## Manifest dialects
 
-The loader recognizes two explicit dialects and rejects partial, mixed, or
+The loader recognizes three explicit dialects and rejects partial, mixed, or
 unknown identities:
 
 - legacy manifests with `package_id`, `artifact_version`, `release_flavor`,
   and `root_directory`;
 - release-envelope manifests with `release_package_id`, `release_version`,
   `normative_package_id`, `normative_content_version`, `transport`, and
-  `validation_envelope`.
+  `validation_envelope`;
+- public Core v2 manifests with `release_id`, `artifact_version`,
+  `canonical_authority`, `artifact_sets`, `files`, and `file_count`.
+
+Package-specific files are consumed only by a versioned contract adapter:
+
+```text
+verified package bytes
+  -> manifest dialect detector
+  -> dialect integrity verifier
+  -> Core contract adapter
+  -> stable immutable CoreSurface
+```
+
+For public Core v2, the adapter materializes the stable surface from
+`machine/CORE_CANON.json`, `machine/APPLICABILITY_SELECTOR.json`,
+`machine/OPERATIONAL_SEMANTICS.json`, `machine/GATE_CONTRACTS.json`, the
+phase/boot capsules, context-budget declarations, and the package-owned layer
+acceptance record. Application and Semantic Executor code do not read those
+paths directly. This confines future package-layout changes to the manifest,
+integrity, and contract-adapter boundary.
 
 Release-envelope manifests do not synthesize `root_directory` or collapse the
 two version axes. The observed archive/directory root remains a transport
@@ -99,6 +119,12 @@ package status and does not activate a package.
 - unique norm IDs;
 - declared legacy catalog or release normative counts;
 - explicit grouping by native package layer.
+
+Public Core v2 treats manifest path spelling as canonical. Runtime normalizes
+only an unambiguous case-only transport difference to that spelling before
+verification. It still requires exact agreement between the normalized
+inventory and checksum entries and rejects case collisions, missing or extra
+paths, size changes, and hash changes.
 
 ## Deliberately deferred
 

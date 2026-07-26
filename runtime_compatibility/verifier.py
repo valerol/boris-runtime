@@ -5,7 +5,10 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 
 from core_surface import CoreSurface
-from core_surface.manifest import RELEASE_MANIFEST_DIALECT
+from core_surface.manifest import (
+    PUBLIC_CORE_MANIFEST_DIALECT,
+    RELEASE_MANIFEST_DIALECT,
+)
 from runtime_compatibility.checks import RequiredCheckRegistry
 from runtime_compatibility.errors import RuntimeContractError
 from runtime_compatibility.models import (
@@ -39,6 +42,11 @@ class RuntimeCompatibilityVerifier:
         surface: CoreSurface,
         operator_acceptance: OperatorAcceptance | Mapping | None = None,
     ) -> RuntimeCompatibilityResult:
+        if surface.manifest_dialect == PUBLIC_CORE_MANIFEST_DIALECT:
+            return self._verify_public_core(
+                surface,
+                operator_acceptance,
+            )
         schemas = self._read_contract(surface, RUNTIME_SCHEMAS_PATH)
         templates = self._read_contract(surface, RUNTIME_TEMPLATES_PATH)
         validation_spec = self._read_contract(surface, VALIDATION_SPEC_PATH)
@@ -151,6 +159,191 @@ class RuntimeCompatibilityVerifier:
             package_identity=package_identity,
             package_identity_sha256=canonical_sha256(package_identity),
             canonical_records=canonical_records,
+        )
+
+    def _verify_public_core(
+        self,
+        surface,
+        operator_acceptance,
+    ):
+        declaration = self._build_declaration(surface)
+        acceptance = self._resolve_acceptance(
+            surface,
+            operator_acceptance,
+        )
+        contract = surface.compatibility_contract
+        predicate_dsl = surface.machine_canon.get("predicate_dsl", {})
+        deontic = surface.machine_canon.get("deontic_semantics", {})
+        gates = surface.machine_canon.get("gate_decision_semantics", {})
+        checks = (
+            _check(
+                "CORE_SOURCE_INTEGRITY_BINDING",
+                _core_source_is_bound(surface),
+                (
+                    "The public Core source is bound to its exact manifest, "
+                    "content set, and checksummed component inventory."
+                ),
+                "The public Core source integrity binding is incomplete.",
+                failure="STOP",
+            ),
+            _check(
+                "PASSIVE_DATA_ONLY",
+                surface.machine_canon.get("executable") is False,
+                "The public Core load set is passive data only.",
+                "The public Core load set does not preserve a passive boundary.",
+                failure="STOP",
+            ),
+            _check(
+                "PUBLIC_CORE_CONTRACT_PROJECTION",
+                contract.get("source_contract") == "public-core-v2",
+                (
+                    "The versioned public Core package contract was projected "
+                    "into the stable Runtime CoreSurface interface."
+                ),
+                "The public Core contract projection is unavailable.",
+                failure="REPAIR",
+            ),
+            _check(
+                "PREDICATE_DSL_COMPATIBILITY",
+                (
+                    tuple(predicate_dsl.get("truth_values", ()))
+                    in SUPPORTED_PREDICATE_TRUTH_VALUES
+                    and predicate_dsl.get("missing_path_result") == "UNKNOWN"
+                    and predicate_dsl.get("unknown_material_result") == "HOLD"
+                    and set(predicate_dsl.get("operators", {})).issubset(
+                        self.profile.supported_predicate_operators
+                    )
+                ),
+                "The public Core Predicate DSL is supported.",
+                "The public Core Predicate DSL is not supported completely.",
+            ),
+            _check(
+                "DEONTIC_COMPATIBILITY",
+                (
+                    isinstance(deontic.get("operations"), Mapping)
+                    and set(deontic["operations"]).issubset(
+                        self.profile.supported_deontic_operations
+                    )
+                    and {"PERMIT", "PROHIBIT", "REQUIRE"}.issubset(
+                        deontic["operations"]
+                    )
+                ),
+                "The public Core deontic operations are supported.",
+                "The public Core deontic operation set is unsupported.",
+            ),
+            _check(
+                "GATE_DECISION_COMPATIBILITY",
+                _gate_order(gates) == self.profile.supported_gate_results,
+                "The public Core GateDecision precedence is supported.",
+                "The public Core GateDecision contract is unsupported.",
+            ),
+            _check(
+                "NORM_RECORD_COMPATIBILITY",
+                (
+                    bool(surface.norm_ids)
+                    and set(contract.get("norm_types", ())).issubset(
+                        self.profile.supported_source_norm_types
+                    )
+                ),
+                "All public Core norm record types are supported.",
+                "The public Core contains unsupported norm record types.",
+            ),
+            _check(
+                "PHASE_SELECTOR_COVERAGE",
+                (
+                    set(surface.applicability_by_norm)
+                    == set(surface.norm_ids)
+                    and all(surface.applicability_by_norm.values())
+                ),
+                "Every canonical norm has a verified phase selector binding.",
+                "The public Core phase selector does not cover every norm.",
+                failure="REPAIR",
+            ),
+            _check(
+                "OPERATOR_LAYER_BOUNDARY",
+                (
+                    "BASE" in surface.accepted_layers
+                    and "PERSONAL" not in surface.accepted_layers
+                ),
+                (
+                    "The public package permits Base semantic evaluation and "
+                    "does not auto-accept the Personal layer."
+                ),
+                "The public package layer acceptance boundary is unsafe.",
+                failure="STOP",
+            ),
+            _check(
+                "PHASE_COMPLETE_SELECTION",
+                str(contract.get("phase_complete_selection", "")).startswith(
+                    "DISABLED"
+                ),
+                (
+                    "The Runtime preserves the Core requirement that task "
+                    "filters cannot narrow the phase-complete norm set."
+                ),
+                "The public Core phase-complete selector rule is unavailable.",
+                failure="HOLD",
+            ),
+            _check(
+                "SEMANTIC_CONTEXT_CAPACITY",
+                (
+                    self.profile.semantic_context_window_tokens
+                    >= int(
+                        contract.get(
+                            "minimum_context_window_tokens",
+                            0,
+                        )
+                    )
+                ),
+                (
+                    "The configured semantic model context window meets the "
+                    "largest per-phase minimum declared by the Core."
+                ),
+                (
+                    "The configured semantic model context window is absent "
+                    "or smaller than the Core requirement."
+                ),
+                failure="HOLD",
+            ),
+        )
+        spec_status = _aggregate_check_status(checks)
+        limitations = [
+            *self.profile.limitations,
+            "core_external_validation_not_run",
+            "kernel_interpreted_norms_require_semantic_calculation",
+            "phase_complete_context_required",
+        ]
+        if surface.source_kind == "directory":
+            limitations.append("repository_directory_source")
+        activation_status = self._activation_status(
+            acceptance,
+            spec_status,
+            limitations,
+        )
+        attestation = RuntimeAttestation(
+            package_id=surface.package_id,
+            artifact_version=surface.artifact_version,
+            archive_sha256=surface.archive_sha256 or "",
+            manifest_sha256=surface.manifest_sha256,
+            substrate_id=self.profile.substrate_id,
+            loaded_component_hashes=surface.loaded_component_hashes,
+            spec_check_status=spec_status,
+            activation_status=activation_status,
+            limitations=tuple(dict.fromkeys(limitations)),
+            source_kind=surface.source_kind,
+            content_set_sha256=surface.content_set_sha256,
+        )
+        package_identity = dict(surface.package_identity)
+        return RuntimeCompatibilityResult(
+            declaration=declaration,
+            operator_acceptance=acceptance,
+            attestation=attestation,
+            checks=checks,
+            attestation_sha256=canonical_sha256(attestation.to_dict()),
+            schema_validated=True,
+            package_identity=package_identity,
+            package_identity_sha256=canonical_sha256(package_identity),
+            canonical_records={},
         )
 
     def _build_declaration(self, surface):

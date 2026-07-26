@@ -7,6 +7,7 @@ ENV_NAMES = (
     "OPENAI_API_KEY",
     "BOIS_LLM",
     "OPENAI_MODEL",
+    "OPENAI_REASONING_EFFORT",
 )
 
 
@@ -24,7 +25,8 @@ def test_default_env_files_load_local_secrets_over_tracked_settings(
     (tmp_path / ".env").write_text(
         "OPENAI_API_KEY=\n"
         "BOIS_LLM=openai\n"
-        "OPENAI_MODEL=gpt-4o\n",
+        "OPENAI_MODEL=gpt-5.6-terra\n"
+        "OPENAI_REASONING_EFFORT=medium\n",
         encoding="utf-8",
     )
     (tmp_path / ".env.local").write_text(
@@ -36,7 +38,8 @@ def test_default_env_files_load_local_secrets_over_tracked_settings(
 
     assert os.environ["OPENAI_API_KEY"] == "local-secret"
     assert os.environ["BOIS_LLM"] == "openai"
-    assert os.environ["OPENAI_MODEL"] == "gpt-4o"
+    assert os.environ["OPENAI_MODEL"] == "gpt-5.6-terra"
+    assert os.environ["OPENAI_REASONING_EFFORT"] == "medium"
 
 
 def test_process_environment_has_priority_over_both_env_files(

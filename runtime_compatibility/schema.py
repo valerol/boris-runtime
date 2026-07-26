@@ -5,7 +5,10 @@ import re
 from collections.abc import Mapping
 from datetime import datetime
 
-from runtime_compatibility.errors import RuntimeContractError
+from runtime_compatibility.errors import (
+    RuntimeContractError,
+    RuntimeInstanceValidationError,
+)
 
 
 SUPPORTED_SCHEMA_KEYS = frozenset({
@@ -44,6 +47,45 @@ def validate_schema_definition(document, definition_name, instance):
         )
     _validate_supported_schema(schema, definition_name, document)
     _validate_instance(schema, instance, definition_name, document)
+
+
+def validate_schema_reference(document, reference, instance):
+    if not isinstance(document, Mapping):
+        raise RuntimeContractError(
+            "The package-owned schema document must be an object."
+        )
+    _resolve_reference(document, reference)
+    try:
+        from jsonschema import exceptions, validators
+    except ImportError as exc:
+        raise RuntimeContractError(
+            "The jsonschema package is required for package-owned schemas."
+        ) from exc
+
+    wrapper = {
+        "$schema": document.get(
+            "$schema",
+            "https://json-schema.org/draft/2020-12/schema",
+        ),
+        "$defs": document.get("$defs", {}),
+        "$ref": reference,
+    }
+    try:
+        validator_class = validators.validator_for(wrapper)
+        validator_class.check_schema(wrapper)
+        validator_class(wrapper).validate(instance)
+    except exceptions.ValidationError as exc:
+        raise RuntimeInstanceValidationError(
+            f"The instance does not conform to {reference}."
+        ) from exc
+    except exceptions.SchemaError as exc:
+        raise RuntimeContractError(
+            f"The package-owned schema {reference} is invalid."
+        ) from exc
+    except Exception as exc:
+        raise RuntimeContractError(
+            f"The package-owned schema {reference} could not be resolved."
+        ) from exc
 
 
 def _validate_supported_schema(schema, path, document, seen_refs=None):

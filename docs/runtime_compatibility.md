@@ -22,7 +22,8 @@ source and the `semantic_evaluation` scope is accepted.
 
 ## Package contracts
 
-The verifier reads these paths from the loaded package:
+Legacy and release-envelope verification reads these paths from the loaded
+package:
 
 - `schema/RUNTIME_SCHEMAS.json`;
 - `runtime/RUNTIME_TEMPLATES.json`;
@@ -36,13 +37,18 @@ no hard-coded version allowlist. A future package can pass only when its own
 contract uses the supported schema vocabulary and its declared capabilities
 match the receiving Runtime profile. Unsupported contract features fail closed.
 
-The verifier recognizes both runtime-contract dialects:
+The verifier recognizes three runtime-contract dialects:
 
 - legacy `VALIDATION_SPEC.required_checks` IDs are executed through the
   explicit Runtime registry;
 - release-envelope `mandatory_checks` are matched exactly against the
   cryptographically bound `VALIDATION_RECEIPT.json`, while receiving-Runtime
-  capability checks are still performed independently.
+  capability checks are still performed independently;
+- public Core v2 is verified through the normalized `CoreSurface` contract:
+  exact source binding, passive-data boundary, adapter projection, Predicate
+  DSL, deontic and gate compatibility, norm-type coverage, selector coverage,
+  accepted-layer boundary, phase-complete selection, and declared context
+  capacity.
 
 An unknown, duplicate, malformed, missing, or non-passing check prevents
 `spec_check_status=PASS`. The legacy registry covers all declared legacy
@@ -109,9 +115,18 @@ Its limitations are explicit:
 
 These limitations do not disappear when the specification checks pass.
 
-The current Core v2.23 release passes the receiving profile, including its
-`ERROR` predicate result and extended operator set. A formal predicate `ERROR`
-maps to `REPAIR`; it is not treated as an ordinary unknown.
+The public Core v2.31 contract adds `all_https`, `all_items_fact`,
+`allowed_pair`, `contains`, `count_equals`, `not_equals`, `rank_at_least`, and
+`schema_valid`. Runtime implements the complete operator set published in its
+operational semantics and preserves four-valued results. A typed predicate
+`ERROR` maps to `REPAIR`; it is not treated as an ordinary unknown.
+
+Core v2.31 also publishes a minimum context window for every phase. Runtime
+requires `BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS` to be at least the largest
+declared minimum before it attests the package for semantic execution. This is
+an operator declaration about the configured model, not a value inferred from
+the model name. Missing or insufficient capacity produces `HOLD` before the
+semantic LLM call.
 
 ## Operator decision
 
