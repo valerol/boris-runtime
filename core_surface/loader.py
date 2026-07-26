@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import stat
 import zipfile
 from collections.abc import Mapping
@@ -40,6 +41,8 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
         archive_hash = sha256_hex(path.read_bytes())
     else:
         raise PackageLayoutError(f"Core Surface source is not a directory or ZIP: {source}")
+
+    payloads = _normalize_public_manifest_path_case(payloads)
     content_set_hash = _hash_content_set(payloads)
 
     if MANIFEST_PATH not in payloads:
@@ -209,6 +212,68 @@ def _resolve_directory_root(path: Path) -> Path:
             "Directory must be a package root or contain exactly one package root."
         )
     return candidates[0]
+
+
+def _normalize_public_manifest_path_case(
+    payloads: dict[str, bytes],
+) -> dict[str, bytes]:
+    """Use public-v2 manifest spelling for unambiguous case-only path differences."""
+
+    manifest_payload = payloads.get(MANIFEST_PATH)
+    if manifest_payload is None:
+        return payloads
+    try:
+        raw = json.loads(manifest_payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return payloads
+    if not isinstance(raw, dict) or not {
+        "release_id",
+        "artifact_version",
+        "canonical_authority",
+        "artifact_sets",
+        "file_count",
+        "files",
+    }.issubset(raw):
+        return payloads
+
+    declared = raw.get("files")
+    if not isinstance(declared, list) or not all(
+        isinstance(path, str) for path in declared
+    ):
+        return payloads
+
+    declared_by_casefold = {}
+    for path in declared:
+        canonical = validate_relative_path(path)
+        folded = canonical.casefold()
+        previous = declared_by_casefold.get(folded)
+        if previous is not None and previous != canonical:
+            raise PackageLayoutError(
+                "Public Core manifest contains case-colliding paths: "
+                f"{previous!r}, {canonical!r}"
+            )
+        declared_by_casefold[folded] = canonical
+
+    actual_by_casefold = {}
+    for path in payloads:
+        folded = path.casefold()
+        previous = actual_by_casefold.get(folded)
+        if previous is not None and previous != path:
+            raise PackageLayoutError(
+                "Core package contains case-colliding paths: "
+                f"{previous!r}, {path!r}"
+            )
+        actual_by_casefold[folded] = path
+
+    normalized = {}
+    for path, payload in payloads.items():
+        target = declared_by_casefold.get(path.casefold(), path)
+        if target in normalized:
+            raise PackageLayoutError(
+                f"Core package path normalization collides at {target!r}."
+            )
+        normalized[target] = payload
+    return normalized
 
 
 def _safe_zip_parts(filename: str) -> tuple[str, ...]:

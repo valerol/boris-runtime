@@ -23,7 +23,9 @@ private Runtime package source:
 ```bash
 BORIS_CORE_PACKAGE=/opt/boris-core
 BOIS_LLM=openai
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5.6-terra
+OPENAI_REASONING_EFFORT=medium
+BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
 ```
 
 Tracked `.env` also declares `OPENAI_API_KEY=` and
@@ -68,13 +70,17 @@ Public Core v2 releases declare per-phase context requirements. Configure the
 Runtime service with the actual semantic model capacity:
 
 ```ini
-BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=524288
+OPENAI_MODEL=gpt-5.6-terra
+OPENAI_REASONING_EFFORT=medium
+BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
 ```
 
-For Core v2.31 this is the minimum acceptable value. The selected model must
-really support that capacity; the variable is an operator assertion, not a
-request to the provider. Runtime compatibility stays at `HOLD` when the value
-is missing or lower.
+Core v2.31 requires at least 524,288 tokens. GPT-5.6 Terra supports a
+1,050,000-token context window and structured outputs, while balancing
+semantic quality and cost. The capacity variable is an operator assertion,
+not a request to the provider. Runtime compatibility stays at `HOLD` when the
+value is missing or lower than the Core requirement. Keep all three settings
+aligned when overriding the deployment defaults.
 
 `/opt/boris-core` is the server-owned checkout used by Runtime at the current
 project stage. Runtime binds this directory to its manifest, reproducible
@@ -82,6 +88,11 @@ content-set hash, and verified component hashes. The configured repository
 selection authorizes only the `semantic_evaluation` scope required by this
 route. Do not package the checkout into an exact ZIP and do not create a
 deployment-side `operator-acceptance.json`.
+
+For public-v2 packages, Runtime treats manifest path spelling as canonical and
+normalizes only unambiguous case-only differences in the directory or archive
+transport. Case collisions, missing or additional paths, size differences,
+and checksum differences still fail closed.
 
 Exact ZIP plus explicit `OperatorAcceptance` remains an optional archive
 compatibility path; it is not the production deployment protocol.

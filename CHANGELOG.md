@@ -17,6 +17,12 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   `BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS`. Public Core v2 phase-complete sets
   and boot/phase capsule context are never silently narrowed to fit an
   undersized model.
+- Selected `gpt-5.6-terra` with explicit medium reasoning and its
+  1,050,000-token context capacity for Core v2.31 semantic execution. GPT-5.6
+  calls omit the legacy temperature control when reasoning is enabled.
+- Normalize unambiguous case-only public-v2 transport path differences to the
+  spelling declared by the manifest. Case collisions, inventory differences,
+  and checksum mismatches remain fatal.
 - Guaranteed a valid non-empty `candidate_result` after a resumed route leaves
   `HOLD`. The Semantic Executor prompt now requires candidate material for
   `PASS`, `STOP`, and `REPAIR`; if the provider still returns `{}`, Runtime

@@ -570,6 +570,7 @@ def test_openai_adapter_keeps_protocol_and_structured_contracts_separate(
     monkeypatch,
 ):
     requests = []
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "medium")
 
     class FakeCompletions:
         @staticmethod
@@ -591,17 +592,63 @@ def test_openai_adapter_keeps_protocol_and_structured_contracts_separate(
         "openai",
         SimpleNamespace(OpenAI=lambda **kwargs: fake_client),
     )
-    adapter = OpenAIAdapter(api_key="test-key")
+    adapter = OpenAIAdapter(model="gpt-4o", api_key="test-key")
 
     adapter.call("protocol")
     adapter.call_structured("semantic", "Semantic contract.")
 
     assert "response_format" not in requests[0]
+    assert requests[0]["temperature"] == 0
+    assert "reasoning_effort" not in requests[0]
     assert requests[0]["messages"][0]["content"].endswith(
         "type, content, and metadata."
     )
     assert requests[1]["response_format"] == {"type": "json_object"}
     assert requests[1]["messages"][0]["content"] == "Semantic contract."
+
+
+def test_openai_adapter_uses_reasoning_without_legacy_temperature(
+    monkeypatch,
+):
+    requests = []
+
+    class FakeCompletions:
+        @staticmethod
+        def create(**kwargs):
+            requests.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="{}"),
+                    )
+                ]
+            )
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(OpenAI=lambda **kwargs: fake_client),
+    )
+    adapter = OpenAIAdapter(
+        model="gpt-5.6-terra",
+        api_key="test-key",
+        reasoning_effort="medium",
+    )
+
+    adapter.call_structured("semantic", "Semantic contract.")
+
+    assert requests == [{
+        "model": "gpt-5.6-terra",
+        "messages": [
+            {"role": "system", "content": "Semantic contract."},
+            {"role": "user", "content": "semantic"},
+        ],
+        "reasoning_effort": "medium",
+        "response_format": {"type": "json_object"},
+    }]
 
 
 def build_surface():

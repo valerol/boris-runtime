@@ -4,6 +4,9 @@ import json
 from llm.errors import LLMConfigurationError, LLMProviderError
 
 
+REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
+
+
 class LLMAdapter:
     debug_prompt_enabled = False
 
@@ -72,7 +75,13 @@ class OpenAIAdapter(LLMAdapter):
 
     adapter_name = "openai"
 
-    def __init__(self, model=None, api_key=None, debug_prompt_enabled=False):
+    def __init__(
+        self,
+        model=None,
+        api_key=None,
+        debug_prompt_enabled=False,
+        reasoning_effort=None,
+    ):
         resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not resolved_api_key:
             raise LLMConfigurationError(
@@ -83,6 +92,24 @@ class OpenAIAdapter(LLMAdapter):
 
         self.client = OpenAI(api_key=resolved_api_key)
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        configured_effort = reasoning_effort
+        if configured_effort is None and self.model.startswith("gpt-5"):
+            configured_effort = os.getenv("OPENAI_REASONING_EFFORT")
+        if configured_effort is None and self.model.startswith("gpt-5.6"):
+            configured_effort = "medium"
+        self.reasoning_effort = (
+            str(configured_effort).strip().lower()
+            if configured_effort is not None
+            else None
+        )
+        if (
+            self.reasoning_effort is not None
+            and self.reasoning_effort not in REASONING_EFFORTS
+        ):
+            raise LLMConfigurationError(
+                "OPENAI_REASONING_EFFORT must be one of: "
+                + ", ".join(sorted(REASONING_EFFORTS))
+            )
         self.debug_prompt_enabled = debug_prompt_enabled
 
     def call(self, prompt: str) -> str:
@@ -115,8 +142,11 @@ class OpenAIAdapter(LLMAdapter):
         request = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0,
         }
+        if self.reasoning_effort is None:
+            request["temperature"] = 0
+        else:
+            request["reasoning_effort"] = self.reasoning_effort
         if json_mode:
             request["response_format"] = {"type": "json_object"}
         try:

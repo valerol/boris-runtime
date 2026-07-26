@@ -120,9 +120,11 @@ package status and does not activate a package.
 - declared legacy catalog or release normative counts;
 - explicit grouping by native package layer.
 
-Public Core v2 additionally requires exact case-sensitive agreement between
-the manifest inventory, checksum entries, and actual paths. Runtime does not
-repair or case-fold signed package paths.
+Public Core v2 treats manifest path spelling as canonical. Runtime normalizes
+only an unambiguous case-only transport difference to that spelling before
+verification. It still requires exact agreement between the normalized
+inventory and checksum entries and rejects case collisions, missing or extra
+paths, size changes, and hash changes.
 
 ## Deliberately deferred
 

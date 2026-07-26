@@ -93,15 +93,17 @@ selection and model settings belong in tracked `.env`:
 
 ```bash
 BOIS_LLM=openai
-OPENAI_MODEL=gpt-4o
-BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=
+OPENAI_MODEL=gpt-5.6-terra
+OPENAI_REASONING_EFFORT=medium
+BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
 ```
 
-For a Core contract that declares phase context budgets, set
-`BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS` to the actual context capacity of the
-configured semantic model. Core v2.31 requires at least `524288`. Runtime
-fails closed when the declaration is absent or insufficient; it does not
-silently narrow the phase-complete norm set.
+GPT-5.6 Terra supplies a 1,050,000-token context window and supports the
+structured Chat Completions contract used by the Runtime. Core v2.31 requires
+at least `524288`. Runtime fails closed when the capacity declaration is
+absent or insufficient; it does not silently narrow the phase-complete norm
+set. Keep the model, reasoning effort, and capacity declaration aligned when
+overriding these settings.
 
 ## Private Runtime API
 

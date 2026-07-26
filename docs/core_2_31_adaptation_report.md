@@ -8,17 +8,21 @@ loaded, integrity-checked, normalized, attested, selected phase-completely, and
 passed to the existing Semantic Executor without adding request- or
 domain-specific logic.
 
-Production activation is not yet possible with the currently checked-out
-`boris-core` repository and current server model configuration:
+The two operational incompatibilities are now resolved inside Runtime:
 
 1. `MANIFEST.json` and `CHECKSUMS.json` declare
-   `runtime/operator_acceptance.json`, but the Git tree contains
-   `runtime/OPERATOR_ACCEPTANCE.json`. Exact case-sensitive inventory
-   validation correctly rejects this package.
+   `runtime/operator_acceptance.json`, while the Git tree contains
+   `runtime/OPERATOR_ACCEPTANCE.json`. Runtime now maps this one-to-one
+   case-only transport difference to the manifest spelling before strict
+   inventory and checksum verification. `boris-core` is unchanged.
 2. Core 2.31 declares a minimum context window of 524,288 tokens for phases
-   C03 and C07. The previously configured `gpt-4o` route does not satisfy that
-   declaration. Runtime now fails closed until the deployed model and
-   `BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS` both meet the requirement.
+   C03 and C07. The Runtime deployment configuration now selects
+   `gpt-5.6-terra` with explicit `medium` reasoning and declares the model's
+   1,050,000-token context capacity.
+
+Production activation now requires publishing and deploying this Runtime
+revision, updating the server checkout to Core 2.31, and restarting the
+Runtime process.
 
 No case-specific test, fixture, norm, selector, or production branch was added.
 
@@ -29,12 +33,12 @@ small; the semantic contract migration was not.
 
 | Area | Complexity | Reason |
 |---|---:|---|
-| Package size and inventory | Low | Raise the safety envelope and add an exact public-v2 manifest/checksum verifier. |
+| Package size and inventory | Low | Raise the safety envelope, normalize only unambiguous case-only transport differences, and run the exact public-v2 manifest/checksum verifier. |
 | Canonical norm loading | Medium | Replace TSV assumptions with typed `CORE_CANON.norms` while preserving legacy contracts. |
 | Applicability selection | High | Core 2.31 requires phase-complete selection and disables task-specific narrowing. |
 | Predicate execution | High | Add eight operators and separate applicability from violation semantics. |
 | Semantic prompt materialization | High | Preserve all selected records plus boot/phase capsule context without truncation. |
-| Model/runtime operations | High | C03/C07 require a 524,288-token context window and a corresponding model change. |
+| Model/runtime operations | Medium | C03/C07 require a 524,288-token context window; the selected Terra route must keep its model, reasoning, timeout, and declared capacity aligned. |
 | Future Core updates | Low to medium if public-v2 remains stable | Package changes stay inside the adapter and capability profile. A new semantic contract still requires an explicit adapter revision. |
 
 The adaptation touched the package boundary, compatibility layer, and semantic
@@ -70,7 +74,9 @@ paths through request handling.
 ## Core 2.31 behavior now supported
 
 - `public-core-v2` manifest detection;
-- exact case-sensitive manifest inventory;
+- manifest-canonical path spelling with one-to-one case-only transport
+  normalization;
+- exact normalized manifest inventory with collision rejection;
 - SHA-256 and size verification for every checksum entry;
 - release/canon identity binding;
 - 364 canonical norms from `machine/CORE_CANON.json`;
@@ -87,17 +93,16 @@ paths through request handling.
 
 ## Verification evidence
 
-The unchanged repository regression suite passes:
+The repository regression suite passes:
 
 ```text
-236 passed, 11 skipped
+237 passed, 11 skipped
 ```
 
-Using a temporary diagnostic copy of Core 2.31 with only the path-case defect
-normalized:
+Using the unchanged `boris-core` 2.31 checkout directly:
 
 - Runtime Compatibility: `PASS / ACCEPTED_IN_SCOPE` when configured with
-  524,288 context tokens;
+  the selected model's 1,050,000-token context capacity;
 - 20/20 published operational predicate vectors match;
 - 10/10 typed critical norm contracts match positive and negative fixtures;
 - 12/12 phase gate schemas return `TRUE` for the published positive context
@@ -113,17 +118,17 @@ scenario is embedded in Runtime.
 
 ## Required deployment actions
 
-1. Correct the path case in `boris-core` and regenerate/revalidate the exact
-   release inventory if its checksums or release receipts require it.
-2. Deploy a semantic model whose real context capacity is at least 524,288
-   tokens.
-3. Set `BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS` to that real capacity.
-4. Keep the MCP and reverse-proxy request timeouts long enough for the
+1. Publish and deploy the compatible Runtime revision.
+2. Keep the tracked semantic configuration:
+   `OPENAI_MODEL=gpt-5.6-terra`,
+   `OPENAI_REASONING_EFFORT=medium`, and
+   `BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000`.
+3. Keep the MCP and reverse-proxy request timeouts long enough for the
    phase-complete semantic call; the tracked MCP timeout is now 300 seconds.
-5. Deploy the compatible Runtime.
-6. Update `/opt/boris-core` to the corrected Core 2.31 package.
-7. Restart Runtime so its process-local `CoreSurface` cache reloads.
-8. Confirm the live `core_ref.artifact_version` is `2.31` and Runtime
+4. Update `/opt/boris-core` to the current Core 2.31 checkout without renaming
+   or modifying Core files.
+5. Restart Runtime so its process-local `CoreSurface` cache reloads.
+6. Confirm the live `core_ref.artifact_version` is `2.31` and Runtime
    Compatibility is `PASS / ACCEPTED_IN_SCOPE`.
 
 ## Reducing future rewrite cost
