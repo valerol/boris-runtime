@@ -23,6 +23,7 @@ from tests.test_execution import (
     build_service,
     compiler_payload,
 )
+from application.execution import SemanticInputCompilationError
 from tests.test_semantic_executor import (
     AutoCalculator,
     build_accepted_compatibility,
@@ -30,7 +31,7 @@ from tests.test_semantic_executor import (
 )
 
 
-def test_host_prepare_and_submit_use_one_signed_validated_work_order(
+def test_host_prepare_and_submit_use_two_signed_validated_work_orders(
     monkeypatch,
 ):
     monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
@@ -42,45 +43,67 @@ def test_host_prepare_and_submit_use_one_signed_validated_work_order(
     )
     codec, _registry = configure_host_executor(service)
 
-    work_order = service.prepare_host(
+    compilation_order = service.prepare_host(
         "Explain the runtime.",
         session_id="host-session",
     )
 
-    assert work_order["work_order_version"] == (
-        "boris-semantic-work-order/0.1"
+    assert compilation_order["work_order_version"] == (
+        "boris-semantic-work-order/0.2"
     )
-    assert work_order["status"] == "semantic_work_order"
-    assert work_order["semantic_provider"] == "CHATGPT_HOST"
-    assert work_order["phase"] == "C03"
-    assert work_order["minimum_context_window_tokens"] >= 0
+    assert compilation_order["work_order_type"] == "COMPILATION"
+    assert compilation_order["status"] == "semantic_work_order"
+    assert compilation_order["semantic_provider"] == "CHATGPT_HOST_ONLY"
+    assert "phase" not in compilation_order
+    assert compilation_order["minimum_context_window_tokens"] == 0
     assert "host_model_identity_not_attested" in (
-        work_order["limitations"]
+        compilation_order["limitations"]
     )
-    assert "SEMANTIC_CALCULATION_DATA" in work_order["semantic_prompt"]
-    assert work_order["submission_contract"]["operation"] == "submit"
-    assert work_order["submission_contract"][
+    assert "SEMANTIC_INPUT_COMPILER_DATA" in (
+        compilation_order["semantic_prompt"]
+    )
+    assert compilation_order["submission_contract"]["operation"] == "submit"
+    assert compilation_order["submission_contract"][
         "work_order_token"
     ].startswith("hw1.")
-    assert set(work_order["bindings"]) == {
+    assert set(compilation_order["bindings"]) == {
         "attestation_sha256",
-        "semantic_input_sha256",
-        "semantic_view_sha256",
+        "semantic_source_sha256",
+        "compiler_catalog_sha256",
         "semantic_prompt_sha256",
         "response_schema_sha256",
     }
     assert all(
         len(value) == 64
-        for value in work_order["bindings"].values()
+        for value in compilation_order["bindings"].values()
     )
     assert api_calculator.calls == 0
-    assert len(adapter.calls) == 1
+    assert len(adapter.calls) == 0
     assert events == [
         "core_surface",
         "operator_acceptance",
         "runtime_compatibility",
-        "semantic_input_compiler",
     ]
+
+    jsonschema.validate(
+        source,
+        compilation_order["response_schema"],
+    )
+    work_order = service.submit_host(
+        work_order_id=compilation_order["work_order_id"],
+        work_order_token=compilation_order["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_input=source,
+        session_id="host-session",
+    )
+    assert work_order["work_order_type"] == "CALCULATION"
+    assert work_order["phase"] == "C03"
+    assert "SEMANTIC_CALCULATION_DATA" in work_order["semantic_prompt"]
+    assert "semantic_result" in work_order["submission_contract"][
+        "required_arguments"
+    ]
+    assert len(adapter.calls) == 0
 
     semantic_result = valid_semantic_result(surface, source)
     jsonschema.validate(
@@ -97,7 +120,7 @@ def test_host_prepare_and_submit_use_one_signed_validated_work_order(
     )
 
     assert result["status"] == "semantic_candidate"
-    assert result["semantic_provider"] == "CHATGPT_HOST"
+    assert result["semantic_provider"] == "CHATGPT_HOST_ONLY"
     assert result["host_work_order_id"] == work_order["work_order_id"]
     assert result["gate"] == "PASS"
     assert result["candidate_result"] == {
@@ -123,7 +146,9 @@ def test_host_work_order_is_single_use(monkeypatch):
         surface=surface,
     )
     configure_host_executor(service)
-    work_order = service.prepare_host(
+    work_order = prepare_calculation_work_order(
+        service,
+        source,
         "Explain the runtime.",
         session_id="single-use",
     )
@@ -154,7 +179,9 @@ def test_invalid_host_token_does_not_consume_valid_work_order(monkeypatch):
         surface=surface,
     )
     configure_host_executor(service)
-    work_order = service.prepare_host(
+    work_order = prepare_calculation_work_order(
+        service,
+        source,
         "Explain the runtime.",
         session_id="tamper-test",
     )
@@ -189,7 +216,9 @@ def test_host_submission_rejects_wrong_session_and_current_scope(
         surface=surface,
     )
     configure_host_executor(service)
-    wrong_session_order = service.prepare_host(
+    wrong_session_order = prepare_calculation_work_order(
+        service,
+        source,
         "Explain the runtime.",
         session_id="bound-session",
     )
@@ -207,7 +236,9 @@ def test_host_submission_rejects_wrong_session_and_current_scope(
             session_id="other-session",
         )
 
-    scope_order = service.prepare_host(
+    scope_order = prepare_calculation_work_order(
+        service,
+        source,
         "Explain the runtime.",
         session_id="scope-session",
     )
@@ -249,7 +280,9 @@ def test_malformed_host_result_is_rejected_and_consumes_attempt(monkeypatch):
         surface=surface,
     )
     configure_host_executor(service)
-    work_order = service.prepare_host(
+    work_order = prepare_calculation_work_order(
+        service,
+        source,
         "Explain the runtime.",
         session_id="invalid-result",
     )
@@ -275,6 +308,76 @@ def test_malformed_host_result_is_rejected_and_consumes_attempt(monkeypatch):
             semantic_result=valid_semantic_result(surface, source),
             **arguments,
         )
+
+
+def test_malformed_host_compilation_is_rejected_and_consumes_attempt(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    source = compiler_payload("Explain the runtime.")
+    service, _adapter, _api_calculator, _events = build_service(source)
+    configure_host_executor(service)
+    work_order = service.prepare_host(
+        "Explain the runtime.",
+        session_id="invalid-compilation",
+    )
+    arguments = {
+        "work_order_id": work_order["work_order_id"],
+        "work_order_token": work_order["submission_contract"][
+            "work_order_token"
+        ],
+        "session_id": "invalid-compilation",
+    }
+    malformed = dict(source)
+    malformed["phase"] = "C99"
+
+    with pytest.raises(
+        SemanticInputCompilationError,
+        match="not allowed by the verified Core Surface",
+    ):
+        service.submit_host(
+            semantic_input=malformed,
+            **arguments,
+        )
+
+    with pytest.raises(HostWorkOrderAlreadyConsumed):
+        service.submit_host(
+            semantic_input=source,
+            **arguments,
+        )
+
+
+def test_host_only_route_never_constructs_api_adapter(monkeypatch):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    surface = build_surface()
+    source = compiler_payload("Explain the runtime.")
+    service, _adapter, _api_calculator, _events = build_service(
+        source,
+        surface=surface,
+    )
+    configure_host_executor(service)
+
+    def reject_api_adapter():
+        raise AssertionError("Host-only route constructed the API adapter.")
+
+    service.llm_adapter_factory = reject_api_adapter
+    calculation_order = prepare_calculation_work_order(
+        service,
+        source,
+        "Explain the runtime.",
+        session_id="zero-api",
+    )
+    result = service.submit_host(
+        work_order_id=calculation_order["work_order_id"],
+        work_order_token=calculation_order["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_result=valid_semantic_result(surface, source),
+        session_id="zero-api",
+    )
+
+    assert result["gate"] == "PASS"
+    assert result["semantic_provider"] == "CHATGPT_HOST_ONLY"
 
 
 def test_host_work_order_expires_and_requires_a_dedicated_secret(
@@ -309,7 +412,7 @@ def test_host_work_order_expires_and_requires_a_dedicated_secret(
             work_order_token=work_order["submission_contract"][
                 "work_order_token"
             ],
-            semantic_result=valid_semantic_result(surface, source),
+            semantic_input=source,
             session_id="expiry-test",
         )
 
@@ -378,7 +481,7 @@ def test_host_prepare_accepts_signed_hold_resume_without_recompiling(
 
     assert first["gate"] == "HOLD"
     assert result["gate"] == "PASS"
-    assert result["semantic_provider"] == "CHATGPT_HOST"
+    assert result["semantic_provider"] == "CHATGPT_HOST_ONLY"
     assert len(adapter.calls) == 1
     assert api_calculator.calls == 1
     assert events.count("semantic_input_compiler") == 1
@@ -390,6 +493,27 @@ def configure_host_executor(service):
     service.host_work_order_codec_factory = lambda: codec
     service.host_work_order_registry = registry
     return codec, registry
+
+
+def prepare_calculation_work_order(
+    service,
+    semantic_input,
+    user_input,
+    *,
+    session_id,
+):
+    compilation_order = service.prepare_host(
+        user_input,
+        session_id=session_id,
+    )
+    return service.submit_host(
+        work_order_id=compilation_order["work_order_id"],
+        work_order_token=compilation_order["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_input=semantic_input,
+        session_id=session_id,
+    )
 
 
 def valid_semantic_result(surface, payload):

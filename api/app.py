@@ -135,6 +135,7 @@ def execute_runtime(request: RuntimeExecutionRequest):
             return execution_service.submit_host(
                 work_order_id=request.work_order_id,
                 work_order_token=request.work_order_token,
+                semantic_input=request.semantic_input,
                 semantic_result=request.semantic_result,
                 session_id=session_id,
             )

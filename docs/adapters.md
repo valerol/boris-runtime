@@ -39,10 +39,10 @@ the resource.
 The same tool also exposes an optional `operation` discriminator:
 
 - omitted or `execute` uses the configured API calculator;
-- `prepare` returns a signed `CHATGPT_HOST` SemanticWorkOrder for either an
-  initial input or signed HOLD resume;
-- `submit` forwards exactly one work-order ID, token, and semantic result to
-  the private API.
+- `prepare` returns a signed `CHATGPT_HOST_ONLY` `COMPILATION` work order for
+  initial input, or a `CALCULATION` work order for a signed HOLD resume;
+- `submit` forwards exactly one work-order ID, token, and the stage-specific
+  `semantic_input` or `semantic_result` to the private API.
 
 The MCP adapter does not calculate or validate the work order itself. It keeps
 the large semantic prompt in `structuredContent` and returns only a concise

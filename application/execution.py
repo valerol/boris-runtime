@@ -29,14 +29,23 @@ from application.context_provider import (
     CoreSurfaceProvider,
 )
 from application.host_executor import (
+    CALCULATION_WORK_ORDER,
+    COMPILATION_WORK_ORDER,
     HOST_EXECUTOR_LIMITATIONS,
     HOST_SEMANTIC_PROVIDER,
+    MAX_HOST_SEMANTIC_INPUT_CHARACTERS,
+    MAX_HOST_SEMANTIC_RESULT_CHARACTERS,
     HostWorkOrderCodec,
+    HostWorkOrderStateMismatch,
     InMemoryHostWorkOrderRegistry,
+    InvalidHostWorkOrder,
     SubmittedSemanticCalculator,
+    build_host_compilation_work_order,
     build_host_work_order,
     consume_host_work_order,
+    require_current_compilation_scope,
     require_current_host_scope,
+    validate_host_submission_payload,
 )
 from application.runtime_mode import developer_mode_enabled
 from llm.config import build_lazy_llm_adapter
@@ -46,6 +55,7 @@ from runtime_compatibility import (
 )
 from runtime_compatibility.errors import RuntimeAttestationError
 from semantic_executor import (
+    CoreReference,
     LLMSemanticCalculator,
     SemanticCalculationError,
     SemanticExecutor,
@@ -179,6 +189,37 @@ class SemanticInputCompiler:
         user_input: str,
         context: Mapping | None = None,
     ) -> SemanticInput:
+        source, catalog, prompt = self.prepare(
+            surface,
+            user_input,
+            context=context,
+        )
+        if not hasattr(self.llm_adapter, "call_structured"):
+            raise SemanticInputCompilationError(
+                "The configured LLM port does not support structured calls."
+            )
+        try:
+            raw_output = self.llm_adapter.call_structured(
+                prompt,
+                (
+                    "Return only the strict SemanticInput JSON contract. "
+                    "Do not return analysis or hidden reasoning."
+                ),
+            )
+        except SemanticInputCompilationError:
+            raise
+        except Exception as exc:
+            raise SemanticInputCompilationError(
+                "Structured SemanticInput compilation failed."
+            ) from exc
+        return self.validate_submission(raw_output, source, catalog)
+
+    def prepare(
+        self,
+        surface,
+        user_input: str,
+        context: Mapping | None = None,
+    ) -> tuple[dict, Mapping, str]:
         text = str(user_input or "").strip()
         if not text:
             raise SemanticInputCompilationError(
@@ -200,27 +241,14 @@ class SemanticInputCompiler:
             raise SemanticInputCompilationError(
                 "Semantic input compiler prompt exceeds the application limit."
             )
-        if not hasattr(self.llm_adapter, "call_structured"):
-            raise SemanticInputCompilationError(
-                "The configured LLM port does not support structured calls."
-            )
-        try:
-            raw_output = self.llm_adapter.call_structured(
-                prompt,
-                (
-                    "Return only the strict SemanticInput JSON contract. "
-                    "Do not return analysis or hidden reasoning."
-                ),
-            )
-        except SemanticInputCompilationError:
-            raise
-        except Exception as exc:
-            raise SemanticInputCompilationError(
-                "Structured SemanticInput compilation failed."
-            ) from exc
-        return self._validate(raw_output, source, catalog)
+        return source, catalog, prompt
 
-    def _validate(self, raw_output, source, catalog) -> SemanticInput:
+    @staticmethod
+    def validate_submission(
+        raw_output,
+        source,
+        catalog,
+    ) -> SemanticInput:
         payload = _decode_compiler_output(raw_output)
         _require_exact_fields(payload, SEMANTIC_INPUT_FIELDS, "SemanticInput")
 
@@ -402,20 +430,35 @@ class ExecutionService:
         compatibility.require_semantic_evaluation(surface)
 
         if continuation_state is None:
-            adapter = self.llm_adapter_factory()
-            compiler = self.compiler_factory(adapter)
-            semantic_input = compiler.compile(
+            compiler = self.compiler_factory(None)
+            source, catalog, semantic_prompt = compiler.prepare(
                 surface,
                 text,
                 context=context,
             )
-        else:
-            require_continuation_core(continuation_state, surface)
-            semantic_input = resume_semantic_input(
-                continuation_state,
-                resume,
+            response_schema = semantic_input_response_schema(
+                source,
+                catalog,
+            )
+            return build_host_compilation_work_order(
+                codec=codec,
+                registry=self.host_work_order_registry,
+                source_material=source,
+                compiler_catalog=catalog,
+                semantic_prompt=semantic_prompt,
+                response_schema=response_schema,
+                session_id=resolved_session_id,
+                source_text=text,
+                core_ref=CoreReference.from_surface(surface).to_dict(),
+                resume_count=resume_count,
+                attestation_sha256=compatibility.attestation_sha256,
             )
 
+        require_continuation_core(continuation_state, surface)
+        semantic_input = resume_semantic_input(
+            continuation_state,
+            resume,
+        )
         view = SemanticViewBuilder().build(surface, semantic_input)
         return build_host_work_order(
             codec=codec,
@@ -434,10 +477,10 @@ class ExecutionService:
         *,
         work_order_id: str,
         work_order_token: str,
-        semantic_result: Mapping,
+        semantic_input: Mapping | None = None,
+        semantic_result: Mapping | None = None,
         session_id: str | None = None,
     ) -> dict:
-        calculator = SubmittedSemanticCalculator(semantic_result)
         codec = self.host_work_order_codec_factory()
         state = consume_host_work_order(
             codec=codec,
@@ -465,6 +508,80 @@ class ExecutionService:
         compatibility.require_semantic_evaluation(surface)
         timings["runtime_compatibility"] = _elapsed_ms(stage_started)
 
+        if state.work_order_type == COMPILATION_WORK_ORDER:
+            if semantic_result is not None or semantic_input is None:
+                raise InvalidHostWorkOrder(
+                    "Compilation work order requires semantic_input only."
+                )
+            submitted_input = validate_host_submission_payload(
+                semantic_input,
+                field_name="semantic_input",
+                maximum_characters=MAX_HOST_SEMANTIC_INPUT_CHARACTERS,
+            )
+            if (
+                state.source_material is None
+                or state.compiler_catalog is None
+            ):
+                raise HostWorkOrderStateMismatch(
+                    "Compilation work-order state is incomplete."
+                )
+            current_catalog = SemanticViewBuilder().applicability_catalog(
+                surface
+            )
+            current_prompt = build_semantic_input_prompt(
+                surface,
+                state.source_material,
+                current_catalog,
+            )
+            current_schema = semantic_input_response_schema(
+                state.source_material,
+                current_catalog,
+            )
+            require_current_compilation_scope(
+                state,
+                core_ref=CoreReference.from_surface(surface).to_dict(),
+                attestation_sha256=compatibility.attestation_sha256,
+                source_material=state.source_material,
+                compiler_catalog=current_catalog,
+                semantic_prompt=current_prompt,
+                response_schema=current_schema,
+            )
+            compiled_input = SemanticInputCompiler.validate_submission(
+                submitted_input,
+                state.source_material,
+                current_catalog,
+            )
+            view = SemanticViewBuilder().build(surface, compiled_input)
+            return build_host_work_order(
+                codec=codec,
+                registry=self.host_work_order_registry,
+                semantic_input=compiled_input,
+                view=view,
+                session_id=state.session_id,
+                source_text=state.source_text,
+                resume_count=state.resume_count,
+                resumed=state.resumed,
+                attestation_sha256=compatibility.attestation_sha256,
+            )
+
+        if state.work_order_type != CALCULATION_WORK_ORDER:
+            raise HostWorkOrderStateMismatch(
+                "Host work order has an unsupported type."
+            )
+        if semantic_input is not None or semantic_result is None:
+            raise InvalidHostWorkOrder(
+                "Calculation work order requires semantic_result only."
+            )
+        submitted_result = validate_host_submission_payload(
+            semantic_result,
+            field_name="semantic_result",
+            maximum_characters=MAX_HOST_SEMANTIC_RESULT_CHARACTERS,
+        )
+        calculator = SubmittedSemanticCalculator(submitted_result)
+        if state.semantic_input is None:
+            raise HostWorkOrderStateMismatch(
+                "Calculation work-order state is incomplete."
+            )
         view = SemanticViewBuilder().build(surface, state.semantic_input)
         require_current_host_scope(
             state,
@@ -729,6 +846,49 @@ def build_semantic_input_prompt(surface, source, catalog) -> str:
     )
 
 
+def semantic_input_response_schema(source, catalog) -> dict:
+    string_array = {
+        "type": "array",
+        "maxItems": MAX_COMPILER_LIST_ITEMS,
+        "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": MAX_COMPILER_TEXT_CHARACTERS,
+        },
+        "uniqueItems": True,
+    }
+    selector_array = lambda values: {
+        **string_array,
+        "items": {"enum": list(values)},
+    }
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "urn:boris:semantic-input-compilation:1",
+        "type": "object",
+        "additionalProperties": False,
+        "required": sorted(SEMANTIC_INPUT_FIELDS),
+        "properties": {
+            "phenomenon": {"const": source["phenomenon"]},
+            "phase": {"enum": list(catalog["phases"])},
+            "facts": {"const": source["facts"]},
+            "unknowns": string_array,
+            "evidence": {"const": source["evidence"]},
+            "authority": {"const": source["authority"]},
+            "active_layers": selector_array(catalog["layers"]),
+            "triggers": selector_array(catalog["triggers"]),
+            "applicability_scopes": selector_array(
+                catalog["applicability_scopes"]
+            ),
+            "requested_norm_refs": selector_array(catalog["norm_refs"]),
+            "evaluate_inactive": {"const": False},
+        },
+        "x-runtime-validation": (
+            "SemanticInputCompiler.validate_submission is authoritative and "
+            "additionally checks source preservation and explicit norm requests."
+        ),
+    }
+
+
 def _source_semantic_material(user_input: str, context: Mapping | None) -> dict:
     if context is None:
         context = {}
@@ -866,7 +1026,7 @@ def _build_execution_trace(
             "runtime_compatibility": "invoked",
             "semantic_input_compiler": (
                 (
-                    "invoked_during_host_prepare"
+                    "invoked_chatgpt_host_submission"
                     if semantic_provider == HOST_SEMANTIC_PROVIDER
                     and not continuation.get("resumed")
                     else "not_invoked_host_resume"

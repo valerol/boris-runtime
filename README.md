@@ -15,10 +15,9 @@ external actions, domain physiology, or long-term memory.
 Core release package
   -> core_surface
   -> runtime_compatibility
-  -> application.execution.SemanticInputCompiler
-  -> semantic_executor
-     -> OPENAI_API calculator
-     -> or signed CHATGPT_HOST work order
+  -> OPENAI_API SemanticInputCompiler + semantic calculator
+     or signed CHATGPT_HOST_ONLY compilation + calculation work orders
+  -> semantic_executor validation and gate constraints
   -> ExecutionCandidate
   -> HOLD handoff / signed stateless continuation
   -> private HTTP /runtime/execute
@@ -113,11 +112,12 @@ absent or insufficient; it does not silently narrow the phase-complete norm
 set. Keep the model, reasoning effort, and capacity declaration aligned when
 overriding these settings.
 
-The experimental `CHATGPT_HOST` route replaces only the phase-complete
-Semantic Executor calculator call. The smaller `SemanticInputCompiler` still
-uses `BOIS_LLM`, because Runtime must select and mechanically build the exact
-phase view before it can issue a work order. Therefore this PoC reduces the
-large API call but is not yet a zero-API route.
+The `CHATGPT_HOST_ONLY` route uses no Runtime LLM call. ChatGPT first completes
+a signed `COMPILATION` work order. Runtime validates the submitted
+`SemanticInput`, selects the exact phase-complete Semantic View, and returns a
+signed `CALCULATION` work order. ChatGPT completes that work order and Runtime
+performs the ordinary strict validation and deterministic gate constraints.
+The `OPENAI_API` route remains available for autonomous clients.
 
 ## Private Runtime API
 
@@ -193,10 +193,10 @@ Invalid Core source binding, invalid compiled input, and provider failures
 return controlled fail-closed errors. An archive source with missing or
 mismatched server acceptance also fails closed.
 
-### Experimental ChatGPT-hosted calculation
+### Experimental ChatGPT-hosted execution
 
-The same endpoint supports an optional two-call calculator protocol. Prepare a
-work order:
+The same endpoint supports an optional host-only protocol with one prepare and
+two submit calls. Prepare a compilation work order:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/runtime/execute \
@@ -209,11 +209,10 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
   }'
 ```
 
-The response has `status: "semantic_work_order"`, provider `CHATGPT_HOST`, the
-complete `semantic_prompt`, an exact response JSON Schema, five binding
-digests, the Core-declared minimum context window, and a signed
-`work_order_token`. ChatGPT calculates one
-`semantic_result` and submits it to the same endpoint:
+The response has `status: "semantic_work_order"`,
+`work_order_type: "COMPILATION"`, provider `CHATGPT_HOST_ONLY`, the complete
+compiler prompt, an exact response JSON Schema, binding digests, and a signed
+`work_order_token`. ChatGPT compiles one `semantic_input` and submits it:
 
 ```json
 {
@@ -221,15 +220,30 @@ digests, the Core-declared minimum context window, and a signed
   "session_id": "host-test",
   "work_order_id": "<exact prepared ID>",
   "work_order_token": "hw1...",
-  "semantic_result": {"<exact work-order result>": "..."}
+  "semantic_input": {"<exact compiled SemanticInput>": "..."}
 }
 ```
 
-Runtime accepts the work order only once, re-verifies current Core and
-RuntimeAttestation, rebuilds the exact Semantic View, and passes the submitted
-object through the existing `SemanticCalculationValidator` and deterministic
-gate constraints. A resulting operator-owned HOLD can be resumed with
-`operation: "prepare"` plus the ordinary signed `resume` object.
+Runtime accepts that order only once, re-verifies Core and
+RuntimeAttestation, validates the input, and returns a
+`work_order_type: "CALCULATION"` order with the Core-declared minimum context
+window. Submit its result with the new exact ID and token:
+
+```json
+{
+  "operation": "submit",
+  "session_id": "host-test",
+  "work_order_id": "<exact calculation ID>",
+  "work_order_token": "hw1...",
+  "semantic_result": {"<exact semantic calculation>": "..."}
+}
+```
+
+Runtime re-verifies the exact Semantic View and passes the result through the
+existing `SemanticCalculationValidator` and deterministic gate constraints.
+Both work orders are single-use. An operator-owned HOLD can be resumed with
+`operation: "prepare"` plus the ordinary signed `resume` object; resume skips
+compilation and starts directly with a `CALCULATION` work order.
 
 This is contract isolation, not a clean model context: ChatGPT still sees the
 current conversation and host instructions. Pending work orders live in a
@@ -275,8 +289,8 @@ with the private API over HTTP and does not import Runtime internals, load Core
 packages, call LLMs, or store memory.
 
 Calls without `operation` retain the existing API-calculator behavior.
-`operation=prepare` and `operation=submit` opt into `CHATGPT_HOST`; no second
-MCP tool is registered.
+`operation=prepare` and `operation=submit` opt into `CHATGPT_HOST_ONLY`; no
+second MCP tool is registered.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
 `ui://boris/developer-surface-v2.html`. The MCP Apps component displays the

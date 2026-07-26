@@ -22,6 +22,7 @@ class BorisExecuteRequest(BaseModel):
     resume: BorisExecuteResume | None = None
     work_order_id: constr(strip_whitespace=True, min_length=1) | None = None
     work_order_token: constr(strip_whitespace=True, min_length=1) | None = None
+    semantic_input: dict[str, Any] | None = None
     semantic_result: dict[str, Any] | None = None
 
     @model_validator(mode="after")
@@ -29,6 +30,7 @@ class BorisExecuteRequest(BaseModel):
         host_fields = (
             self.work_order_id,
             self.work_order_token,
+            self.semantic_input,
             self.semantic_result,
         )
         if self.operation in {"execute", "prepare"}:
@@ -49,9 +51,15 @@ class BorisExecuteRequest(BaseModel):
                 raise ValueError(
                     "Submit mode cannot replace work-order-bound input or context."
                 )
-            if any(value is None for value in host_fields):
+            if self.work_order_id is None or self.work_order_token is None:
                 raise ValueError(
-                    "Submit mode requires work_order_id, work_order_token, "
-                    "and semantic_result."
+                    "Submit mode requires work_order_id and work_order_token."
+                )
+            if (self.semantic_input is None) == (
+                self.semantic_result is None
+            ):
+                raise ValueError(
+                    "Submit mode requires exactly one of semantic_input or "
+                    "semantic_result."
                 )
         return self

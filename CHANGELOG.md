@@ -4,20 +4,21 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-- Added the experimental `CHATGPT_HOST` Semantic Executor provider behind the
+- Extended the experimental host provider to `CHATGPT_HOST_ONLY` behind the
   existing `boris.execute` tool. `operation=prepare` returns a signed
-  `boris-semantic-work-order/0.1`; `operation=submit` accepts one ChatGPT-hosted
-  semantic result and routes it through the existing strict validator and
-  deterministic gate guards.
-- Bound every host work order to the exact session, Core reference,
-  RuntimeAttestation, `SemanticInput`, Semantic View, calculator prompt, output
-  schema, phase, and selected scope with HMAC-SHA256 digests. Host submissions
+  `COMPILATION` work order; the first `operation=submit` validates
+  `semantic_input` and returns a signed `CALCULATION` work order; the second
+  submission validates `semantic_result` and returns the candidate.
+- Versioned the two-stage contract as `boris-semantic-work-order/0.2` and bound
+  each stage to the exact session, Core reference, RuntimeAttestation, source
+  material, compiler catalog, `SemanticInput`, Semantic View, prompt, output
+  schema, phase, and selected scope with HMAC-SHA256 digests. Both submissions
   are TTL-limited, size-limited, and single-use.
 - Preserved the existing `OPENAI_API` execution route and the sole public MCP
-  tool. The PoC replaces only the large semantic-calculator call; the
-  application `SemanticInputCompiler` still uses the configured Runtime LLM.
-  Pending host work orders are held in a bounded single-process registry and
-  are not BORIS memory or state events.
+  tool. The host-only route never constructs the Runtime API adapter, while
+  signed HOLD resume skips compilation and starts directly at `CALCULATION`.
+  Pending work orders remain in a bounded single-process registry and are not
+  BORIS memory or state events.
 - Disclose the Core minimum context requirement in every host work order and
   retain explicit limitations because Runtime cannot attest the exact ChatGPT
   model identity or effective context capacity.

@@ -76,20 +76,27 @@ class FakeExecutionService:
         *,
         work_order_id,
         work_order_token,
-        semantic_result,
+        semantic_input=None,
+        semantic_result=None,
         session_id=None,
     ):
         self.host_calls.append((
             "submit",
             work_order_id,
             work_order_token,
+            semantic_input,
             semantic_result,
             session_id,
         ))
         if self.error:
             raise self.error
+        if semantic_input is not None:
+            return host_work_order_packet(
+                session_id,
+                work_order_type="CALCULATION",
+            )
         packet = execution_packet(session_id, gate="PASS")
-        packet["semantic_provider"] = "CHATGPT_HOST"
+        packet["semantic_provider"] = "CHATGPT_HOST_ONLY"
         packet["host_work_order_id"] = work_order_id
         return packet
 
@@ -131,7 +138,8 @@ def test_runtime_execute_prepare_and_submit_route_one_host_work_order(
     assert prepared.status_code == 200
     work_order = prepared.json()
     assert work_order["status"] == "semantic_work_order"
-    assert work_order["semantic_provider"] == "CHATGPT_HOST"
+    assert work_order["work_order_type"] == "COMPILATION"
+    assert work_order["semantic_provider"] == "CHATGPT_HOST_ONLY"
     assert service.host_calls == [(
         "prepare",
         "Explain BOIS Runtime",
@@ -140,7 +148,20 @@ def test_runtime_execute_prepare_and_submit_route_one_host_work_order(
         None,
     )]
 
-    submitted = client.post(
+    compiled = {
+        "phenomenon": {"input": "Explain BOIS Runtime", "context": {}},
+        "phase": "C03",
+        "facts": {},
+        "unknowns": [],
+        "evidence": [],
+        "authority": {},
+        "active_layers": [],
+        "triggers": [],
+        "applicability_scopes": [],
+        "requested_norm_refs": [],
+        "evaluate_inactive": False,
+    }
+    calculated = client.post(
         "/runtime/execute",
         json={
             "operation": "submit",
@@ -149,17 +170,33 @@ def test_runtime_execute_prepare_and_submit_route_one_host_work_order(
             "work_order_token": work_order[
                 "submission_contract"
             ]["work_order_token"],
+            "semantic_input": compiled,
+        },
+    )
+    assert calculated.status_code == 200
+    calculation_order = calculated.json()
+    assert calculation_order["work_order_type"] == "CALCULATION"
+
+    submitted = client.post(
+        "/runtime/execute",
+        json={
+            "operation": "submit",
+            "session_id": "host-api",
+            "work_order_id": calculation_order["work_order_id"],
+            "work_order_token": calculation_order[
+                "submission_contract"
+            ]["work_order_token"],
             "semantic_result": {"candidate_result": {"summary": "Host"}},
         },
     )
-
     assert submitted.status_code == 200
     assert submitted.json()["status"] == "semantic_candidate"
-    assert submitted.json()["semantic_provider"] == "CHATGPT_HOST"
+    assert submitted.json()["semantic_provider"] == "CHATGPT_HOST_ONLY"
     assert service.host_calls[-1] == (
         "submit",
         "work-order-1",
         "hw1.payload.signature",
+        None,
         {"candidate_result": {"summary": "Host"}},
         "host-api",
     )
@@ -638,15 +675,18 @@ def execution_packet(session_id, gate="HOLD"):
     return packet
 
 
-def host_work_order_packet(session_id):
-    return {
-        "work_order_version": "boris-semantic-work-order/0.1",
+def host_work_order_packet(session_id, work_order_type="COMPILATION"):
+    is_compilation = work_order_type == "COMPILATION"
+    packet = {
+        "work_order_version": "boris-semantic-work-order/0.2",
         "work_order_id": "work-order-1",
+        "work_order_type": work_order_type,
         "session_id": session_id,
         "status": "semantic_work_order",
-        "semantic_provider": "CHATGPT_HOST",
-        "phase": "C03",
-        "minimum_context_window_tokens": 524288,
+        "semantic_provider": "CHATGPT_HOST_ONLY",
+        "minimum_context_window_tokens": (
+            0 if is_compilation else 524288
+        ),
         "core_ref": {
             "package_id": "BOIS_TEST_CORE",
             "artifact_version": "2.31",
@@ -661,8 +701,17 @@ def host_work_order_packet(session_id):
         "response_schema": {"type": "object"},
         "bindings": {
             "attestation_sha256": "1" * 64,
-            "semantic_input_sha256": "2" * 64,
-            "semantic_view_sha256": "3" * 64,
+            **(
+                {
+                    "semantic_source_sha256": "2" * 64,
+                    "compiler_catalog_sha256": "3" * 64,
+                }
+                if is_compilation
+                else {
+                    "semantic_input_sha256": "2" * 64,
+                    "semantic_view_sha256": "3" * 64,
+                }
+            ),
             "semantic_prompt_sha256": "4" * 64,
             "response_schema_sha256": "5" * 64,
         },
@@ -673,7 +722,11 @@ def host_work_order_packet(session_id):
                 "operation",
                 "work_order_id",
                 "work_order_token",
-                "semantic_result",
+                (
+                    "semantic_input"
+                    if is_compilation
+                    else "semantic_result"
+                ),
             ],
             "work_order_token": "hw1.payload.signature",
         },
@@ -682,3 +735,6 @@ def host_work_order_packet(session_id):
             "single_process_registry",
         ],
     }
+    if not is_compilation:
+        packet["phase"] = "C03"
+    return packet
