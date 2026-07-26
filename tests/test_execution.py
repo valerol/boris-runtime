@@ -3,8 +3,10 @@ from dataclasses import replace
 
 import pytest
 
+from core_surface import NormRecord
 from application.continuation import (
     ContinuationStateMismatch,
+    IncompleteOperatorResolution,
     InvalidContinuationToken,
 )
 from application.execution import (
@@ -146,14 +148,19 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
     assert result["candidate_result"] is None
     assert result["candidate_unavailable_reason"]
     assert result["hold"]["handoff_version"] == (
-        "boris-hold-handoff/1.0"
+        "boris-hold-handoff/1.1"
     )
     assert result["hold"]["status"] == "operator_input_required"
     assert result["hold"]["continuation_token"].startswith("v1.")
     assert result["hold"]["expires_at"]
-    assert result["hold"]["required_operator_input"]["fields"] == [
+    required = result["hold"]["required_operator_input"]
+    assert required["semantic_unknowns"] == []
+    assert required["predicate_inputs"] == [
         {
-            "path": "authorization.granted",
+            "input_id": "authorization.granted",
+            "target_path": "authorization.granted",
+            "resolution_kind": "operator_observation",
+            "expected_type": "boolean",
             "norm_refs": ["N-ACTION"],
             "constraints": [
                 {
@@ -162,8 +169,85 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
                     "expected": True,
                 }
             ],
+            "question": (
+                "Provide the observed value for Core selector "
+                "authorization.granted. The value that makes a predicate "
+                "true is not assumed."
+            ),
         }
     ]
+    assert "authorization.granted = true" not in required["question"]
+
+
+def test_hold_maps_semantic_unknown_path_without_conflating_predicate_input(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "u" * 32)
+    text = "Evaluate an action."
+    surface = build_surface()
+    action = surface.get_norm("N-ACTION")
+    action_fields = dict(action.fields)
+    action_fields["predicate"] = "authorization.status"
+    action_fields["when"] = json.dumps({
+        "op": "fact",
+        "path": "violation.N-GEN-001",
+        "equals": True,
+    }, separators=(",", ":"))
+    updated_action = NormRecord(
+        norm_id=action.norm_id,
+        layer=action.layer,
+        norm_type=action.norm_type,
+        fields=action_fields,
+    )
+    updated_base = tuple(
+        updated_action if item.norm_id == action.norm_id else item
+        for item in surface.norms_for_layer("BASE")
+    )
+    surface = replace(
+        surface,
+        norms_by_layer={
+            **dict(surface.norms_by_layer),
+            "BASE": updated_base,
+        },
+        _norm_index={
+            **dict(surface._norm_index),
+            action.norm_id: updated_action,
+        },
+    )
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+        surface=surface,
+    )
+    calculator.result_unknowns = {
+        "N-ACTION": ["authorization.status remains unknown."],
+    }
+
+    result = service.execute(text, session_id="path-aware-handoff")
+
+    required = result["hold"]["required_operator_input"]
+    assert required["semantic_unknowns"] == [
+        {
+            "unknown_id": "authorization.status",
+            "description": "authorization.status remains unknown.",
+            "target_path": "authorization.status",
+            "resolution_kind": "operator_value",
+            "expected_type": "json",
+            "norm_refs": ["N-ACTION"],
+            "question": (
+                "Provide the operator-confirmed value for "
+                "authorization.status."
+            ),
+        }
+    ]
+    assert [
+        item["target_path"]
+        for item in required["predicate_inputs"]
+    ] == ["violation.N-GEN-001"]
+    assert all(
+        "UNKNOWN formal predicate" not in item["description"]
+        for item in required["semantic_unknowns"]
+    )
 
 
 def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
@@ -172,12 +256,24 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
     monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
     monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "r" * 32)
     text = "Evaluate an action."
+    context = {
+        "unknowns": ["authorization.granted remains unknown."],
+    }
     service, adapter, calculator, events = build_service(
-        compiler_payload(text, triggers=["action"]),
+        compiler_payload(text, context, triggers=["action"]),
     )
 
-    first = service.execute(text, session_id="resume-route")
-    unknowns = first["hold"]["required_operator_input"]["unknowns"]
+    first = service.execute(
+        text,
+        session_id="resume-route",
+        context=context,
+    )
+    semantic_unknowns = first["hold"][
+        "required_operator_input"
+    ]["semantic_unknowns"]
+    assert [item["unknown_id"] for item in semantic_unknowns] == [
+        "authorization.granted"
+    ]
     second = service.execute(
         session_id="resume-route",
         resume={
@@ -185,7 +281,7 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
             "operator_input": {
                 "statement": "I authorize this semantic evaluation.",
                 "values": {"authorization.granted": True},
-                "resolved_unknowns": unknowns,
+                "resolved_unknowns": ["authorization.granted"],
             },
         },
     )
@@ -210,6 +306,33 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
         "continuation_token"
         not in json.dumps(trace, ensure_ascii=False)
     )
+
+
+def test_resume_requires_every_signed_hold_target_before_recalculation(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "c" * 32)
+    text = "Evaluate an action."
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+    first = service.execute(text, session_id="incomplete-resolution")
+
+    with pytest.raises(
+        IncompleteOperatorResolution,
+        match="does not close every signed HOLD target",
+    ):
+        service.execute(
+            session_id="incomplete-resolution",
+            resume={
+                "continuation_token": first["hold"][
+                    "continuation_token"
+                ],
+                "operator_input": "Continue.",
+            },
+        )
+
+    assert calculator.calls == 1
 
 
 def test_resume_rejects_tampered_token(monkeypatch):
@@ -485,8 +608,8 @@ def test_developer_runtime_mode_adds_safe_combined_trace_only(monkeypatch):
     assert "Return only the Phase 4F" not in serialized
 
 
-def build_service(compiler_output):
-    surface = build_surface()
+def build_service(compiler_output, surface=None):
+    surface = surface or build_surface()
     compatibility = build_accepted_compatibility(surface)
     events = []
     adapter = CompilerAdapter(compiler_output, events)

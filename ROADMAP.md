@@ -9,8 +9,9 @@ Current implemented boundary:
 - isolated, non-executing Semantic Executor;
 - Semantic Input compilation and the `boris-execution/1.0` candidate envelope;
 - sole public MCP entry `boris.execute`;
-- signed stateless HOLD handoff and resume through the same tool;
-- developer-only visual MCP surface with model-hidden safe trace;
+- signed path-aware HOLD handoff and complete-target resume through the same
+  tool;
+- developer-only visual MCP surface v2 with model-hidden safe trace;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;
 - stateless answer validation;

@@ -127,10 +127,10 @@ The response uses `execution_version: "boris-execution/1.0"` and
 `status: "semantic_candidate"`. It includes the constrained gate, candidate
 result, norm results, unknowns, conflicts, alternatives, and explicit
 limitations. `HOLD`, `STOP`, and `REPAIR` are normal HTTP 200 Runtime results.
-Every `HOLD` includes a structured `hold` handoff with the exact operator
-question, unresolved items, any formal predicate input paths, and a signed
-`continuation_token`. Resume the same semantic route without resending the
-original input:
+Every `HOLD` includes a `boris-hold-handoff/1.1` handoff. It separates
+path-aware `semantic_unknowns` from Core-declared `predicate_inputs` instead
+of implying that a human-readable unknown and a formal selector are the same
+field. Resume the same semantic route without resending the original input:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/runtime/execute \
@@ -140,9 +140,9 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
     "resume": {
       "continuation_token": "v1...",
       "operator_input": {
-        "statement": "Conditional analysis is allowed.",
+        "statement": "I confirm the supplied authorization value.",
         "values": {"authorization.granted": true},
-        "resolved_unknowns": ["Authorization is unknown."]
+        "resolved_unknowns": []
       }
     }
   }'
@@ -151,7 +151,10 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
 The token binds the exact `SemanticInput`, Core identity, session, HOLD targets,
 and expiry. Resume skips the Semantic Input compiler, applies only signed
 operator-input paths, and recalculates the same non-mutating semantic route. A
-plain-text `operator_input` is also accepted as operator evidence. Empty
+plain-text `operator_input` is accepted only when it closes all targetless
+semantic unknowns and no typed path remains. Runtime returns
+`incomplete_operator_resolution` without recalculation when any signed target
+is missing. Empty
 `candidate_result: {}` is never exposed: `HOLD` uses `null` plus
 `candidate_unavailable_reason`; other gates require a non-empty candidate.
 Invalid Core source binding, invalid compiled input, and provider failures
@@ -193,9 +196,9 @@ with the private API over HTTP and does not import Runtime internals, load Core
 packages, call LLMs, or store memory.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
-`ui://boris/developer-surface-v1.html`. The MCP Apps component displays the
-phase, constrained gate, candidate, HOLD form, and complete safe trace. The
-trace is delivered only through tool-result `_meta`; it is absent from
+`ui://boris/developer-surface-v2.html`. The MCP Apps component displays the
+phase, constrained gate, candidate, path-aware HOLD form, and complete safe
+trace. The trace is delivered only through tool-result `_meta`; it is absent from
 model-visible `content` and `structuredContent`. The component resumes a HOLD
 by calling the same `boris.execute` tool. Production mode publishes no
 Developer Surface resource. No public `boris.frame` alias is registered.

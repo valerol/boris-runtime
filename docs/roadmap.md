@@ -52,9 +52,13 @@
   identity, session, HOLD targets, expiry, and resume count;
 - resume through the same `boris.execute` without a second public tool;
 - exact semantic-input reconstruction without repeated input compilation;
-- structured operator evidence and signed formal-predicate input paths;
+- path-aware semantic unknowns kept separate from signed formal-predicate
+  input paths;
+- explicit completeness check before semantic recalculation;
+- no automatic suggestion of the predicate-matching value as an operator
+  decision;
 - developer-only MCP Apps resource
-  `ui://boris/developer-surface-v1.html`;
+  `ui://boris/developer-surface-v2.html`;
 - complete safe trace delivered to the component through model-hidden `_meta`;
 - production MCP tool without a linked Developer Surface.
 

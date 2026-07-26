@@ -101,8 +101,9 @@ memory. The `boris-execution/1.0` envelope requires:
 
 - a non-empty conditional `candidate_result`, or `candidate_result: null` with
   `candidate_unavailable_reason`;
-- `hold.required_operator_input` with the operator question, unresolved items,
-  and any input paths used by formal predicates that evaluated to `UNKNOWN`;
+- `hold.required_operator_input` with separate path-aware semantic unknowns
+  and Core selector inputs used by formal predicates that evaluated to
+  `UNKNOWN`;
 - an HMAC-SHA256 `continuation_token` bound to the exact `SemanticInput`, Core
   identity, session, HOLD targets, expiry, and resume count.
 
@@ -110,9 +111,11 @@ Resume uses the same `/runtime/execute` and `boris.execute` entry. Runtime
 verifies the signature, expiry, session, and current Core identity before any
 semantic LLM call. It reconstructs the signed `SemanticInput`, records the
 operator statement as evidence, applies only values for paths declared in the
-signed handoff, and reruns Semantic Executor without calling
-`SemanticInputCompiler` again. A new HOLD issues a new token containing the
-updated semantic input.
+signed handoff, verifies that every signed target is closed, and only then
+reruns Semantic Executor without calling `SemanticInputCompiler` again. A new
+HOLD issues a new token containing the updated semantic input. Formal predicate
+constraints remain diagnostic: Runtime never preselects the value that would
+make a predicate true.
 
 This mechanism is stateless: Runtime stores no unfinished cycle. Consequently,
 an unexpired token can be replayed and cannot be individually revoked. Short
@@ -123,7 +126,7 @@ write long-term memory, or authorize an external action.
 ## MCP Developer Surface
 
 In `BORIS_RUNTIME_MODE=dev`, the sole `boris.execute` descriptor links to the
-versioned MCP Apps resource `ui://boris/developer-surface-v1.html`. The
+versioned MCP Apps resource `ui://boris/developer-surface-v2.html`. The
 component receives:
 
 - the candidate and handoff through model-visible `structuredContent`;

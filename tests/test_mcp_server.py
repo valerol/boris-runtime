@@ -91,7 +91,7 @@ def test_developer_execute_moves_trace_to_component_only_metadata():
     assert response["_meta"]["developer_trace"] == packet[
         "developer_trace"
     ]
-    assert response["_meta"]["developer_surface_version"] == "1.0"
+    assert response["_meta"]["developer_surface_version"] == "2.0"
 
 
 def test_boris_execute_forwards_resume_to_runtime():
@@ -150,13 +150,21 @@ def _execution_packet():
             "no_external_action",
         ],
         "hold": {
-            "handoff_version": "boris-hold-handoff/1.0",
+            "handoff_version": "boris-hold-handoff/1.1",
             "status": "operator_input_required",
             "reason": "Material information remains unresolved.",
             "required_operator_input": {
                 "question": "Provide the missing information.",
-                "unknowns": ["Independent review is absent."],
-                "fields": [],
+                "semantic_unknowns": [{
+                    "unknown_id": "unknown-001",
+                    "description": "Independent review is absent.",
+                    "target_path": None,
+                    "resolution_kind": "operator_statement",
+                    "expected_type": "text",
+                    "norm_refs": [],
+                    "question": "Resolve: Independent review is absent.",
+                }],
+                "predicate_inputs": [],
                 "response_contract": {},
             },
             "continuation_token": "v1.payload.signature",

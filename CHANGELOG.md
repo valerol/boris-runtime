@@ -4,6 +4,17 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Replaced the ambiguous HOLD field list with
+  `boris-hold-handoff/1.1`: path-aware semantic unknowns and Core-declared
+  predicate inputs are now signed and presented separately. Validation issue
+  summaries are no longer treated as operator-resolvable unknowns, and
+  predicate constraints no longer preselect the value that makes a predicate
+  true.
+- Require explicit closure of every signed semantic unknown and predicate
+  input before resume can call Semantic Executor. Incomplete input returns a
+  controlled `incomplete_operator_resolution` without recalculation.
+- Versioned the updated path-aware MCP component as
+  `ui://boris/developer-surface-v2.html`.
 - Closed the `HOLD` operator handoff with a structured question, unresolved
   targets, formal predicate input paths, and an HMAC-SHA256 stateless
   continuation token bound to the exact `SemanticInput`, Core identity,
@@ -16,7 +27,7 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   only with `candidate_unavailable_reason`; every other gate requires a
   non-empty candidate.
 - Added the developer-only MCP Apps resource
-  `ui://boris/developer-surface-v1.html` with an interactive HOLD resume form,
+  `ui://boris/developer-surface-v2.html` with an interactive HOLD resume form,
   constrained-gate summary, candidate projection, and expandable safe trace.
   The trace now travels only through component-only tool-result `_meta`; it is
   absent from model-visible `content` and `structuredContent`. Production mode

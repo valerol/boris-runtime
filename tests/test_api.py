@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 import api.app as app_module
 from api.models import RuntimeExecutionRequest, RuntimeFrameRequest
 from application.context_provider import CoreSurfaceUnavailable
+from application.continuation import IncompleteOperatorResolution
 from application.execution import (
     OperatorAcceptanceUnavailable,
     SemanticInputCompilationError,
@@ -243,6 +244,35 @@ def test_runtime_execute_resume_delegates_signed_handoff(monkeypatch):
     ]
 
 
+def test_runtime_execute_reports_incomplete_operator_resolution(monkeypatch):
+    service = FakeExecutionService(
+        error=IncompleteOperatorResolution(
+            "Operator input does not close every signed HOLD target."
+        )
+    )
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={
+            "session_id": "execution-test",
+            "resume": {
+                "continuation_token": "v1.payload.signature",
+                "operator_input": "Continue.",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "incomplete_operator_resolution",
+        "detail": (
+            "Operator input does not close every signed HOLD target."
+        ),
+        "session_id": "execution-test",
+    }
+
+
 def test_runtime_execute_requires_input_xor_resume():
     neither = client.post("/runtime/execute", json={})
     both = client.post(
@@ -404,13 +434,21 @@ def execution_packet(session_id, gate="HOLD"):
     }
     if gate == "HOLD":
         packet["hold"] = {
-            "handoff_version": "boris-hold-handoff/1.0",
+            "handoff_version": "boris-hold-handoff/1.1",
             "status": "operator_input_required",
             "reason": "Material information remains unresolved.",
             "required_operator_input": {
                 "question": "Provide the missing information.",
-                "unknowns": ["Permission is unknown."],
-                "fields": [],
+                "semantic_unknowns": [{
+                    "unknown_id": "unknown-001",
+                    "description": "Permission is unknown.",
+                    "target_path": None,
+                    "resolution_kind": "operator_statement",
+                    "expected_type": "text",
+                    "norm_refs": [],
+                    "question": "Resolve: Permission is unknown.",
+                }],
+                "predicate_inputs": [],
                 "response_contract": {
                     "statement": "Plain text.",
                     "values": "Optional object.",
