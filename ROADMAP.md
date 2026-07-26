@@ -11,6 +11,8 @@ Current implemented boundary:
 - sole public MCP entry `boris.execute`;
 - signed path-aware HOLD handoff and complete-target resume through the same
   tool;
+- deterministic non-empty candidate projection for any non-`HOLD` route,
+  including resume;
 - developer-only visual MCP surface v2 with model-hidden safe trace;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;

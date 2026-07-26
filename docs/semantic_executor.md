@@ -157,6 +157,15 @@ the final gate at `HOLD`; the wire envelope then uses
 `candidate_result: null` and a mandatory `candidate_unavailable_reason`.
 `PASS`, `STOP`, and `REPAIR` require a non-empty candidate result.
 
+The calculator prompt requires non-empty candidate material for every
+non-`HOLD` suggested gate. As a deterministic contract guard, if the validated
+calculation still contains an empty object and the constrained gate is
+`PASS`, `STOP`, or `REPAIR`, Semantic Executor creates a
+`boris-candidate-projection/1.0`. It contains only the constrained gate and the
+already validated norm results, unknowns, conflicts, and alternatives. The
+trace records `CANDIDATE_RESULT_PROJECTED`; the projection does not infer a
+new semantic conclusion or claim execution.
+
 Semantic Executor remains stateless. The application-level HOLD handoff signs
 the exact `SemanticInput` and later reconstructs it for resume; this does not
 change the isolated executor contract, write memory, or admit a state

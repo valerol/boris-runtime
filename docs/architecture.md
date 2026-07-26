@@ -117,6 +117,14 @@ HOLD issues a new token containing the updated semantic input. Formal predicate
 constraints remain diagnostic: Runtime never preselects the value that would
 make a predicate true.
 
+After resume, a non-`HOLD` calculation cannot escape with an empty public
+candidate. The LLM contract requires candidate material, while Semantic
+Executor provides a deterministic `boris-candidate-projection/1.0` fallback
+from the validated calculation if the provider returns `{}` anyway. The
+fallback preserves the constrained gate, is identified by
+`CANDIDATE_RESULT_PROJECTED` in the trace, and does not implement review,
+policy admission, state mutation, memory, or external action.
+
 This mechanism is stateless: Runtime stores no unfinished cycle. Consequently,
 an unexpired token can be replayed and cannot be individually revoked. Short
 TTL, server-secret rotation, request rate limits, and later persistent cycle

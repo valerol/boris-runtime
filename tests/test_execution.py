@@ -308,6 +308,59 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
     )
 
 
+def test_resume_projects_non_hold_candidate_when_calculator_returns_empty(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "p" * 32)
+    text = "Evaluate an action."
+    context = {
+        "unknowns": ["authorization.granted remains unknown."],
+    }
+    service, adapter, calculator, events = build_service(
+        compiler_payload(text, context, triggers=["action"]),
+    )
+    calculator.mutate = lambda payload, _view: payload.update(
+        candidate_result={}
+    )
+
+    first = service.execute(
+        text,
+        session_id="projected-resume-route",
+        context=context,
+    )
+    second = service.execute(
+        session_id="projected-resume-route",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "statement": "I authorize this semantic evaluation.",
+                "values": {"authorization.granted": True},
+                "resolved_unknowns": ["authorization.granted"],
+            },
+        },
+    )
+
+    assert first["gate"] == "HOLD"
+    assert first["candidate_result"] is None
+    assert second["gate"] == "PASS"
+    assert second["candidate_result"]["status"] == "CANDIDATE_ONLY"
+    assert second["candidate_result"]["projection_version"] == (
+        "boris-candidate-projection/1.0"
+    )
+    assert second["candidate_result"]["gate"] == "PASS"
+    assert "hold" not in second
+    assert len(adapter.calls) == 1
+    assert calculator.calls == 2
+    assert events.count("semantic_input_compiler") == 1
+    assert {
+        issue["code"]
+        for issue in second["developer_trace"]["semantic_execution"][
+            "validation_issues"
+        ]
+    } >= {"CANDIDATE_RESULT_PROJECTED"}
+
+
 def test_resume_requires_every_signed_hold_target_before_recalculation(
     monkeypatch,
 ):

@@ -4,6 +4,11 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Guaranteed a valid non-empty `candidate_result` after a resumed route leaves
+  `HOLD`. The Semantic Executor prompt now requires candidate material for
+  `PASS`, `STOP`, and `REPAIR`; if the provider still returns `{}`, Runtime
+  emits a trace-marked `boris-candidate-projection/1.0` containing only the
+  already validated semantic calculation.
 - Replaced the ambiguous HOLD field list with
   `boris-hold-handoff/1.1`: path-aware semantic unknowns and Core-declared
   predicate inputs are now signed and presented separately. Validation issue
