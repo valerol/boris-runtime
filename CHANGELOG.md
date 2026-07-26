@@ -4,6 +4,9 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Clarified the Semantic Executor prompt contract so source-only `norm_type`,
+  `modality`, `when`, `predicate`, and `formulation` remain in `semantic_view`
+  and are not copied into the strict seven-field `norm_results` output.
 - Replaced the obsolete `.env.example` workflow with tracked non-secret
   settings in `.env` and ignored secret overrides in `.env.local`; Runtime
   loads both while MCP loads only non-secret settings, preserving
