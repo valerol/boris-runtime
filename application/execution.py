@@ -9,6 +9,18 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
+from application.continuation import (
+    ContinuationCodec,
+    ContinuationStateMismatch,
+    build_hold_handoff,
+    continuation_count,
+    continuation_source_input,
+    continuation_text,
+    require_continuation_core,
+    resume_semantic_input,
+    resume_token,
+    trace_handoff,
+)
 from application.context_packet import sanitize_public_value
 from application.context_provider import (
     ContextProvider,
@@ -23,6 +35,7 @@ from runtime_compatibility import (
 from runtime_compatibility.errors import RuntimeAttestationError
 from semantic_executor import (
     LLMSemanticCalculator,
+    SemanticCalculationError,
     SemanticExecutor,
     SemanticInput,
     SemanticViewBuilder,
@@ -293,6 +306,7 @@ class ExecutionService:
         compiler_factory=None,
         calculator_factory=None,
         context_provider=None,
+        continuation_codec_factory=None,
     ):
         self.surface_provider = surface_provider or CoreSurfaceProvider()
         self.acceptance_provider = (
@@ -315,17 +329,46 @@ class ExecutionService:
         self.context_provider = (
             context_provider or ContextProvider(self.surface_provider)
         )
+        self.continuation_codec_factory = (
+            continuation_codec_factory or ContinuationCodec.from_environment
+        )
 
     def execute(
         self,
-        user_input: str,
+        user_input: str | None = None,
         session_id: str | None = None,
         context: Mapping | None = None,
+        resume: Mapping | None = None,
     ) -> dict:
-        text = str(user_input or "").strip()
-        if not text:
-            raise ValueError("Execution input must not be empty.")
-        resolved_session_id = session_id or str(uuid4())
+        if resume is None:
+            text = str(user_input or "").strip()
+            if not text:
+                raise ValueError("Execution input must not be empty.")
+            if context is not None and not isinstance(context, Mapping):
+                raise ValueError("Execution context must be an object.")
+            resolved_session_id = session_id or str(uuid4())
+            continuation_state = None
+            resume_count = 0
+        else:
+            if user_input is not None or context:
+                raise ValueError(
+                    "A continuation request cannot replace token-bound input or context."
+                )
+            codec = self.continuation_codec_factory()
+            continuation_state = codec.verify(
+                resume_token(resume)
+            )
+            token_session_id = continuation_text(
+                continuation_state,
+                "session_id",
+            )
+            if session_id is not None and session_id != token_session_id:
+                raise ContinuationStateMismatch(
+                    "Continuation session_id does not match the signed state."
+                )
+            resolved_session_id = token_session_id
+            resume_count = continuation_count(continuation_state) + 1
+            text = continuation_source_input(continuation_state)
         timings = {}
         started = perf_counter()
 
@@ -346,10 +389,19 @@ class ExecutionService:
         timings["runtime_compatibility"] = _elapsed_ms(stage_started)
 
         adapter = self.llm_adapter_factory()
-        compiler = self.compiler_factory(adapter)
-        stage_started = perf_counter()
-        semantic_input = compiler.compile(surface, text, context=context)
-        timings["semantic_input_compile"] = _elapsed_ms(stage_started)
+        if continuation_state is None:
+            compiler = self.compiler_factory(adapter)
+            stage_started = perf_counter()
+            semantic_input = compiler.compile(surface, text, context=context)
+            timings["semantic_input_compile"] = _elapsed_ms(stage_started)
+        else:
+            require_continuation_core(continuation_state, surface)
+            stage_started = perf_counter()
+            semantic_input = resume_semantic_input(
+                continuation_state,
+                resume,
+            )
+            timings["continuation_resume"] = _elapsed_ms(stage_started)
 
         calculator = self.calculator_factory(adapter)
         executor = SemanticExecutor(
@@ -361,13 +413,27 @@ class ExecutionService:
         candidate = executor.execute(semantic_input)
         timings["semantic_executor"] = _elapsed_ms(stage_started)
 
+        candidate_result = candidate.to_dict()["candidate_result"]
+        candidate_unavailable_reason = None
+        if not candidate_result:
+            if candidate.gate != "HOLD":
+                raise SemanticCalculationError(
+                    "A non-HOLD ExecutionCandidate must contain a non-empty "
+                    "candidate_result."
+                )
+            candidate_result = None
+            candidate_unavailable_reason = (
+                "The semantic calculation did not produce a conditional "
+                "candidate while material HOLD conditions remain unresolved."
+            )
+
         envelope = {
             "execution_version": EXECUTION_VERSION,
             "session_id": resolved_session_id,
             "status": "semantic_candidate",
             "phase": candidate.phase,
             "gate": candidate.gate,
-            "candidate_result": candidate.to_dict()["candidate_result"],
+            "candidate_result": candidate_result,
             "norm_results": [
                 result.to_dict()
                 for result in candidate.norm_results
@@ -380,6 +446,19 @@ class ExecutionService:
             "alternatives": candidate.to_dict()["alternatives"],
             "limitations": list(PUBLIC_LIMITATIONS),
         }
+        if candidate_unavailable_reason is not None:
+            envelope["candidate_unavailable_reason"] = (
+                candidate_unavailable_reason
+            )
+        if candidate.gate == "HOLD":
+            codec = self.continuation_codec_factory()
+            envelope["hold"] = build_hold_handoff(
+                codec,
+                semantic_input,
+                candidate,
+                resolved_session_id,
+                resume_count,
+            )
         if developer_mode_enabled():
             stage_started = perf_counter()
             frame = self.context_provider.frame(
@@ -394,6 +473,11 @@ class ExecutionService:
                 candidate,
                 compatibility,
                 timings,
+                continuation={
+                    "resumed": continuation_state is not None,
+                    "resume_count": resume_count,
+                    "handoff": trace_handoff(envelope.get("hold")),
+                },
             )
         return envelope
 
@@ -517,6 +601,7 @@ def _build_execution_trace(
     candidate,
     compatibility,
     timings,
+    continuation=None,
 ):
     trace = {
         "trace_version": "boris-execution-trace/1.0",
@@ -539,6 +624,9 @@ def _build_execution_trace(
             "formal_predicate_results": dict(
                 candidate.trace.formal_predicate_results
             ),
+            "required_inputs": candidate.trace.to_dict()[
+                "required_inputs"
+            ],
             "norm_results": [
                 result.to_dict()
                 for result in candidate.norm_results
@@ -554,7 +642,20 @@ def _build_execution_trace(
         "stages": {
             "core_surface": "invoked",
             "runtime_compatibility": "invoked",
-            "semantic_input_compiler": "invoked",
+            "semantic_input_compiler": (
+                "not_invoked_resume"
+                if continuation and continuation.get("resumed")
+                else "invoked"
+            ),
+            "hold_continuation": (
+                "resumed"
+                if continuation and continuation.get("resumed")
+                else (
+                    "issued"
+                    if continuation and continuation.get("handoff")
+                    else "not_required"
+                )
+            ),
             "semantic_executor": "invoked",
             "independent_reviewer": "not_implemented",
             "policy_kernel": "not_implemented",
@@ -564,6 +665,11 @@ def _build_execution_trace(
             "external_action": "not_invoked",
         },
         "stage_timings_ms": dict(timings),
+        "continuation": continuation or {
+            "resumed": False,
+            "resume_count": 0,
+            "handoff": None,
+        },
         "warnings": [
             "Lexical projection is observability, not semantic applicability.",
             "This result is an ExecutionCandidate, not an admitted or executed action.",

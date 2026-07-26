@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, constr, model_validator
 
 
 class RuntimeFrameRequest(BaseModel):
@@ -50,10 +50,57 @@ class RuntimeFrameResponse(BaseModel):
     runtime_generated_prompt: str
 
 
+class RuntimeOperatorInput(BaseModel):
+    statement: str = ""
+    values: dict[str, Any] = Field(default_factory=dict)
+    resolved_unknowns: list[str] | None = None
+
+
+class RuntimeExecutionResume(BaseModel):
+    continuation_token: constr(strip_whitespace=True, min_length=1)
+    operator_input: str | RuntimeOperatorInput
+
+
 class RuntimeExecutionRequest(BaseModel):
-    input: constr(strip_whitespace=True, min_length=1)
+    input: constr(strip_whitespace=True, min_length=1) | None = None
     session_id: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
+    resume: RuntimeExecutionResume | None = None
+
+    @model_validator(mode="after")
+    def validate_route(self):
+        if (self.input is None) == (self.resume is None):
+            raise ValueError(
+                "Provide exactly one of input or resume."
+            )
+        if self.resume is not None and self.context:
+            raise ValueError(
+                "Continuation context is bound by continuation_token."
+            )
+        return self
+
+
+class RuntimeRequiredInput(BaseModel):
+    path: str
+    norm_refs: list[str] = Field(default_factory=list)
+    constraints: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RuntimeRequiredOperatorInput(BaseModel):
+    question: str
+    unknowns: list[str] = Field(default_factory=list)
+    fields: list[RuntimeRequiredInput] = Field(default_factory=list)
+    response_contract: dict[str, str] = Field(default_factory=dict)
+
+
+class RuntimeHoldHandoff(BaseModel):
+    handoff_version: Literal["boris-hold-handoff/1.0"]
+    status: Literal["operator_input_required"]
+    reason: str
+    required_operator_input: RuntimeRequiredOperatorInput
+    continuation_token: str
+    expires_at: str
+    resume_count: int = 0
 
 
 class RuntimeExecutionResponse(BaseModel):
@@ -62,13 +109,48 @@ class RuntimeExecutionResponse(BaseModel):
     status: Literal["semantic_candidate"]
     phase: str
     gate: Literal["PASS", "HOLD", "STOP", "REPAIR"]
-    candidate_result: dict[str, Any] = Field(default_factory=dict)
+    candidate_result: dict[str, Any] | None
+    candidate_unavailable_reason: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     norm_results: list[dict[str, Any]] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     alternatives: list[dict[str, Any]] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
-    developer_trace: dict[str, Any] | None = None
+    hold: RuntimeHoldHandoff | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    developer_trace: dict[str, Any] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def validate_execution_envelope(self):
+        if self.candidate_result == {}:
+            raise ValueError("candidate_result must not be an empty object.")
+        if (
+            self.candidate_result is None
+            and not self.candidate_unavailable_reason
+        ):
+            raise ValueError(
+                "A null candidate_result requires candidate_unavailable_reason."
+            )
+        if (
+            self.candidate_result is not None
+            and self.candidate_unavailable_reason is not None
+        ):
+            raise ValueError(
+                "candidate_unavailable_reason requires a null candidate_result."
+            )
+        if self.gate == "HOLD" and self.hold is None:
+            raise ValueError("A HOLD result requires a hold handoff.")
+        if self.gate != "HOLD" and self.hold is not None:
+            raise ValueError("Only a HOLD result may contain a hold handoff.")
+        return self
 
 
 ValidationMode = Literal["deterministic", "semantic", "hybrid"]

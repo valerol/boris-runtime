@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+
 from pydantic import ValidationError
 
 from llm.config import PROJECT_ROOT, load_env_file
@@ -11,8 +13,9 @@ SERVER_INSTRUCTIONS = (
     "BORIS exposes one public tool: boris.execute. Use it for the Runtime's "
     "semantic evaluation route. Present its ExecutionCandidate without replacing "
     "it with an independent answer or weakening HOLD, STOP, or REPAIR. "
-    "Server developer mode adds the safe projection and semantic trace. The result is "
-    "not independently reviewed, policy-admitted, state-mutating, or executed."
+    "For HOLD, ask for required_operator_input and resume only through the signed "
+    "continuation. Developer trace is component-only. The result is not independently "
+    "reviewed, policy-admitted, state-mutating, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -20,12 +23,48 @@ TOOL_ANNOTATIONS = {
     "openWorldHint": False,
     "destructiveHint": False,
 }
+DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v1.html"
+DEVELOPER_SURFACE_MIME_TYPE = "text/html;profile=mcp-app"
+DEVELOPER_SURFACE_PATH = (
+    Path(__file__).resolve().parent
+    / "ui"
+    / "developer_surface_v1.html"
+)
+DEVELOPER_TOOL_META = {
+    "ui": {
+        "resourceUri": DEVELOPER_SURFACE_URI,
+        "visibility": ["model", "app"],
+    },
+    "openai/outputTemplate": DEVELOPER_SURFACE_URI,
+    "openai/widgetAccessible": True,
+    "openai/toolInvocation/invoking": "Calculating BORIS route…",
+    "openai/toolInvocation/invoked": "BORIS route ready",
+}
+DEVELOPER_RESOURCE_META = {
+    "ui": {
+        "prefersBorder": True,
+        "csp": {
+            "connectDomains": [],
+            "resourceDomains": [],
+        },
+    },
+    "openai/widgetDescription": (
+        "BORIS Developer Surface showing the constrained gate, HOLD handoff, "
+        "candidate, and complete safe developer trace."
+    ),
+    "openai/widgetPrefersBorder": True,
+    "openai/widgetCSP": {
+        "connect_domains": [],
+        "resource_domains": [],
+    },
+}
 
 
 def boris_execute(
-    input: str,
+    input: str | None = None,
     session_id: str | None = None,
     context: dict | None = None,
+    resume: dict | None = None,
 ):
     config = load_config()
     with RuntimeAPIClient(
@@ -36,20 +75,23 @@ def boris_execute(
             input=input,
             session_id=session_id,
             context=context,
+            resume=resume,
             client=client,
         )
 
 
 def run_boris_execute(
-    input: str,
+    input: str | None = None,
     session_id: str | None = None,
     context: dict | None = None,
+    resume: dict | None = None,
     client=None,
 ):
     request = BorisExecuteRequest(
         input=input,
         session_id=session_id,
         context=context or {},
+        resume=resume,
     )
     if client is not None:
         return _execute_runtime(request, client)
@@ -64,10 +106,17 @@ def run_boris_execute(
 
 def _execute_runtime(request, runtime_client):
     try:
+        execution_arguments = {
+            "input": request.input,
+            "session_id": request.session_id,
+            "context": request.context,
+        }
+        if request.resume is not None:
+            execution_arguments["resume"] = (
+                request.resume.model_dump()
+            )
         runtime_payload = runtime_client.execute(
-            input=request.input,
-            session_id=request.session_id,
-            context=request.context,
+            **execution_arguments,
         )
         return normalize_execution_tool_result(runtime_payload)
     except RuntimeAPIError as exc:
@@ -110,39 +159,55 @@ def normalize_execution_tool_result(payload):
         sort_keys=True,
         indent=2,
     )
-    developer_instruction = ""
-    if developer_trace is not None:
-        developer_json = json.dumps(
-            developer_trace,
-            ensure_ascii=False,
-            sort_keys=True,
-            indent=2,
-        )
-        developer_instruction = (
-            "Developer mode is active. Present the complete safe developer_trace "
-            "as formatted JSON before the Runtime candidate; do not hide, shorten, "
-            "or omit its projection or semantic diagnostics.\n\n"
-            "developer_trace:\n"
-            f"{developer_json}"
-            "\n\n"
-        )
-    return {
-        "structuredContent": dict(payload),
+    result = {
+        "structuredContent": candidate_payload,
         "content": [
             {
                 "type": "text",
-                "text": (
-                    developer_instruction
-                    + "Present the Runtime ExecutionCandidate below as the result. "
-                    "Do not replace it with an independently generated answer, do "
-                    "not weaken its gate, and do not claim review, policy admission, "
-                    "state mutation, tool use, or external action.\n\n"
-                    "ExecutionCandidate:\n"
-                    f"{candidate_json}"
+                "text": _candidate_instruction(
+                    candidate_payload,
+                    candidate_json,
                 ),
             }
         ],
     }
+    if developer_trace is not None:
+        result["_meta"] = {
+            "developer_surface_version": "1.0",
+            "developer_trace": developer_trace,
+        }
+    return result
+
+
+def _candidate_instruction(payload, candidate_json):
+    if payload.get("gate") == "HOLD":
+        hold = payload.get("hold")
+        required = (
+            hold.get("required_operator_input", {})
+            if isinstance(hold, dict)
+            else {}
+        )
+        question = required.get(
+            "question",
+            "Operator input is required before this route can continue.",
+        )
+        return (
+            "BORIS returned HOLD. Do not replace it with an independently "
+            "generated answer and do not weaken the gate. Present the operator "
+            f"question exactly: {question} Continue only by calling the same "
+            "boris.execute tool with resume.continuation_token and "
+            "resume.operator_input from the operator.\n\n"
+            "ExecutionCandidate:\n"
+            f"{candidate_json}"
+        )
+    return (
+        "Present the Runtime ExecutionCandidate below as the result. "
+        "Do not replace it with an independently generated answer, do "
+        "not weaken its gate, and do not claim review, policy admission, "
+        "state mutation, tool use, or external action.\n\n"
+        "ExecutionCandidate:\n"
+        f"{candidate_json}"
+    )
 
 
 def to_call_tool_result(envelope, call_tool_result_cls, text_content_cls):
@@ -156,6 +221,7 @@ def to_call_tool_result(envelope, call_tool_result_cls, text_content_cls):
         ],
         structuredContent=envelope.get("structuredContent"),
         isError=bool(envelope.get("isError", False)),
+        _meta=envelope.get("_meta"),
     )
 
 
@@ -182,26 +248,49 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         transport_security=transport_security,
     )
 
+    if resolved_config.developer_surface:
+        @mcp.resource(
+            DEVELOPER_SURFACE_URI,
+            name="BORIS Developer Surface",
+            title="BORIS Developer Surface",
+            description=(
+                "Interactive developer-only projection for boris.execute."
+            ),
+            mime_type=DEVELOPER_SURFACE_MIME_TYPE,
+            meta=DEVELOPER_RESOURCE_META,
+        )
+        def developer_surface() -> str:
+            return DEVELOPER_SURFACE_PATH.read_text(encoding="utf-8")
+
     @mcp.tool(
         name="boris.execute",
+        title="Execute BORIS semantic route",
         annotations=ToolAnnotations(**TOOL_ANNOTATIONS),
+        meta=(
+            DEVELOPER_TOOL_META
+            if resolved_config.developer_surface
+            else None
+        ),
     )
     def tool_boris_execute(
-        input: str,
+        input: str | None = None,
         session_id: str | None = None,
         context: dict | None = None,
+        resume: dict | None = None,
     ) -> CallToolResult:
         """Run the read-only BORIS semantic route.
 
-        Returns an ExecutionCandidate. Server developer mode adds the safe
-        projection and semantic trace. The candidate is not independently reviewed,
-        policy-admitted, state-mutating, or executed.
+        Provide input for an initial calculation or resume for a signed HOLD
+        continuation. Returns an ExecutionCandidate. Server developer mode adds
+        a visual safe projection and semantic trace. It is not independently reviewed.
+        The candidate is not policy-admitted, state-mutating, or executed.
         """
         try:
             envelope = boris_execute(
                 input=input,
                 session_id=session_id,
                 context=context,
+                resume=resume,
             )
         except ValidationError as exc:
             envelope = {

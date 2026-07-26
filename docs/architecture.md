@@ -80,6 +80,7 @@ ChatGPT
   -> private POST /runtime/execute
   -> ExecutionService
   -> ExecutionCandidate envelope
+  -> signed HOLD handoff when operator input is required
 ```
 
 The MCP tool list is exactly `{"boris.execute"}`. There is no public
@@ -92,6 +93,49 @@ results, unknowns, conflicts, alternatives, and explicit limitations.
 
 `HOLD`, `STOP`, and `REPAIR` remain normal Runtime results. The MCP presentation
 layer must not weaken them or substitute a separate ChatGPT answer.
+
+## Stateless HOLD continuation
+
+`HOLD` now closes over an explicit operator handoff without introducing Runtime
+memory. The `boris-execution/1.0` envelope requires:
+
+- a non-empty conditional `candidate_result`, or `candidate_result: null` with
+  `candidate_unavailable_reason`;
+- `hold.required_operator_input` with the operator question, unresolved items,
+  and any input paths used by formal predicates that evaluated to `UNKNOWN`;
+- an HMAC-SHA256 `continuation_token` bound to the exact `SemanticInput`, Core
+  identity, session, HOLD targets, expiry, and resume count.
+
+Resume uses the same `/runtime/execute` and `boris.execute` entry. Runtime
+verifies the signature, expiry, session, and current Core identity before any
+semantic LLM call. It reconstructs the signed `SemanticInput`, records the
+operator statement as evidence, applies only values for paths declared in the
+signed handoff, and reruns Semantic Executor without calling
+`SemanticInputCompiler` again. A new HOLD issues a new token containing the
+updated semantic input.
+
+This mechanism is stateless: Runtime stores no unfinished cycle. Consequently,
+an unexpired token can be replayed and cannot be individually revoked. Short
+TTL, server-secret rotation, request rate limits, and later persistent cycle
+state are the applicable controls. The token does not admit a state event,
+write long-term memory, or authorize an external action.
+
+## MCP Developer Surface
+
+In `BORIS_RUNTIME_MODE=dev`, the sole `boris.execute` descriptor links to the
+versioned MCP Apps resource `ui://boris/developer-surface-v1.html`. The
+component receives:
+
+- the candidate and handoff through model-visible `structuredContent`;
+- concise gate-preserving instructions through `content`;
+- the full sanitized `boris-execution-trace/1.0` only through tool-result
+  `_meta`.
+
+The component renders the constrained gate, phase, candidate, structured
+operator form, semantic summary, and expandable complete trace. Its Resume
+action uses MCP Apps `tools/call` to invoke the same `boris.execute`; there is
+no second debug or continuation tool. It has no external assets or network
+allowlist. Production mode neither links nor publishes the UI resource.
 
 ## Internal context path
 
@@ -148,8 +192,10 @@ Developer execution mode embeds this lexical projection and trace in a separate
 `boris-execution-trace/1.0` envelope together with the compiled
 `SemanticInput`, Core reference, RuntimeAttestation, semantic selection and
 predicate results, suggested and constrained gates, validation issues, stage
-ledger, and timings. It excludes compiler/calculator prompts, chain-of-thought,
-server secrets, environment data, and absolute source paths.
+ledger, continuation status, and timings. Runtime returns it to the MCP adapter,
+which moves it to component-only tool-result `_meta`. It excludes
+compiler/calculator prompts, continuation tokens, chain-of-thought, server
+secrets, environment data, and absolute source paths.
 
 If the configured Core package is absent or invalid, the API returns
 `core_surface_unavailable` with HTTP 503. It does not fall back to local

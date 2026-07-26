@@ -28,5 +28,12 @@ The MCP tool list is exactly `{"boris.execute"}`. The former public
 available for lexical projection diagnostics, and `/runtime/validate` remains a
 private stateless answer-validation service.
 
+Initial input and signed HOLD resume are two request forms of the same
+`boris.execute` tool. In developer mode the tool descriptor links one
+versioned MCP Apps resource. The adapter moves Runtime `developer_trace` from
+the HTTP payload into tool-result `_meta`, while keeping the candidate and
+handoff in `structuredContent`. Production mode registers neither the link nor
+the resource.
+
 There is no compatibility `adapters.llm` module. Callers use
 `llm.llm_adapter` directly.

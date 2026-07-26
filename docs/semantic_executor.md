@@ -151,6 +151,17 @@ weaken an existing `STOP` or `REPAIR`.
 Provider failures, empty structured output, and malformed calculations become
 controlled `SemanticCalculationError` rejections.
 
+An empty calculator `candidate_result` is not a public candidate. At the
+application boundary it is accepted only when deterministic constraints leave
+the final gate at `HOLD`; the wire envelope then uses
+`candidate_result: null` and a mandatory `candidate_unavailable_reason`.
+`PASS`, `STOP`, and `REPAIR` require a non-empty candidate result.
+
+Semantic Executor remains stateless. The application-level HOLD handoff signs
+the exact `SemanticInput` and later reconstructs it for resume; this does not
+change the isolated executor contract, write memory, or admit a state
+transition.
+
 ## Statement-Type Debt
 
 Phase 4F does not map the nine human-readable statement types onto the three

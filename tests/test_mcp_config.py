@@ -11,6 +11,7 @@ def test_mcp_config_defaults(monkeypatch):
         "BORIS_MCP_HOST",
         "BORIS_MCP_PORT",
         "BORIS_MCP_PATH",
+        "BORIS_RUNTIME_MODE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -22,6 +23,7 @@ def test_mcp_config_defaults(monkeypatch):
     assert config.host == "127.0.0.1"
     assert config.port == 9000
     assert config.path == "/mcp"
+    assert config.developer_surface is False
 
 
 def test_mcp_config_env_overrides(monkeypatch):
@@ -31,6 +33,7 @@ def test_mcp_config_env_overrides(monkeypatch):
     monkeypatch.setenv("BORIS_MCP_HOST", "0.0.0.0")
     monkeypatch.setenv("BORIS_MCP_PORT", "9100")
     monkeypatch.setenv("BORIS_MCP_PATH", "custom-mcp")
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
 
     config = load_config()
 
@@ -40,6 +43,7 @@ def test_mcp_config_env_overrides(monkeypatch):
     assert config.host == "0.0.0.0"
     assert config.port == 9100
     assert config.path == "/custom-mcp"
+    assert config.developer_surface is True
 
 
 def test_mcp_config_invalid_timeout_fails_clearly(monkeypatch):

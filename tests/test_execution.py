@@ -3,6 +3,10 @@ from dataclasses import replace
 
 import pytest
 
+from application.continuation import (
+    ContinuationStateMismatch,
+    InvalidContinuationToken,
+)
 from application.execution import (
     ExecutionService,
     OperatorAcceptanceProvider,
@@ -121,6 +125,134 @@ def test_execution_service_runs_one_semantic_candidate_route(monkeypatch):
     ]
     assert len(adapter.calls) == 1
     assert calculator.calls == 1
+
+
+def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "h" * 32)
+    text = "Evaluate an action."
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+    calculator.mutate = lambda payload, _view: payload.update(
+        candidate_result={}
+    )
+
+    result = service.execute(text, session_id="hold-handoff")
+
+    assert result["gate"] == "HOLD"
+    assert result["candidate_result"] is None
+    assert result["candidate_unavailable_reason"]
+    assert result["hold"]["handoff_version"] == (
+        "boris-hold-handoff/1.0"
+    )
+    assert result["hold"]["status"] == "operator_input_required"
+    assert result["hold"]["continuation_token"].startswith("v1.")
+    assert result["hold"]["expires_at"]
+    assert result["hold"]["required_operator_input"]["fields"] == [
+        {
+            "path": "authorization.granted",
+            "norm_refs": ["N-ACTION"],
+            "constraints": [
+                {
+                    "operator": "fact",
+                    "path_role": "path",
+                    "expected": True,
+                }
+            ],
+        }
+    ]
+
+
+def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "r" * 32)
+    text = "Evaluate an action."
+    service, adapter, calculator, events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+
+    first = service.execute(text, session_id="resume-route")
+    unknowns = first["hold"]["required_operator_input"]["unknowns"]
+    second = service.execute(
+        session_id="resume-route",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "statement": "I authorize this semantic evaluation.",
+                "values": {"authorization.granted": True},
+                "resolved_unknowns": unknowns,
+            },
+        },
+    )
+
+    assert first["gate"] == "HOLD"
+    assert second["gate"] == "PASS"
+    assert second["candidate_result"] == {"status": "CANDIDATE_ONLY"}
+    assert "hold" not in second
+    assert len(adapter.calls) == 1
+    assert calculator.calls == 2
+    assert events.count("semantic_input_compiler") == 1
+    assert calculator.last_view.get_candidate(
+        "N-ACTION"
+    ).formal_predicate_result == "TRUE"
+    trace = second["developer_trace"]
+    assert trace["continuation"]["resumed"] is True
+    assert trace["continuation"]["resume_count"] == 1
+    assert trace["stages"]["semantic_input_compiler"] == (
+        "not_invoked_resume"
+    )
+    assert (
+        "continuation_token"
+        not in json.dumps(trace, ensure_ascii=False)
+    )
+
+
+def test_resume_rejects_tampered_token(monkeypatch):
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "t" * 32)
+    text = "Evaluate an action."
+    service, _adapter, _calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+    first = service.execute(text, session_id="tamper-route")
+    token = first["hold"]["continuation_token"]
+    replacement = "A" if token[-1] != "A" else "B"
+
+    with pytest.raises(InvalidContinuationToken):
+        service.execute(
+            session_id="tamper-route",
+            resume={
+                "continuation_token": token[:-1] + replacement,
+                "operator_input": "Continue.",
+            },
+        )
+
+
+def test_resume_is_bound_to_signed_session(monkeypatch):
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "s" * 32)
+    text = "Evaluate an action."
+    service, _adapter, _calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+    first = service.execute(text, session_id="signed-session")
+
+    with pytest.raises(
+        ContinuationStateMismatch,
+        match="session_id",
+    ):
+        service.execute(
+            session_id="different-session",
+            resume={
+                "continuation_token": first["hold"][
+                    "continuation_token"
+                ],
+                "operator_input": "Continue.",
+            },
+        )
 
 
 def test_compatibility_is_required_before_any_semantic_llm_call():

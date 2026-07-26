@@ -388,6 +388,7 @@ class ExecutionTrace:
     active_layers: tuple[str, ...]
     candidate_norm_refs: tuple[str, ...]
     formal_predicate_results: Mapping[str, str]
+    required_inputs: tuple[Mapping[str, Any], ...]
     selection: Mapping[str, Any]
     calculator_called: bool
     llm_suggested_gate: str
@@ -400,6 +401,14 @@ class ExecutionTrace:
             "formal_predicate_results",
             MappingProxyType(dict(self.formal_predicate_results)),
         )
+        object.__setattr__(
+            self,
+            "required_inputs",
+            tuple(
+                freeze_value(dict(item))
+                for item in self.required_inputs
+            ),
+        )
         object.__setattr__(self, "selection", freeze_value(dict(self.selection)))
 
     def to_dict(self) -> dict[str, Any]:
@@ -411,6 +420,7 @@ class ExecutionTrace:
             "active_layers": list(self.active_layers),
             "candidate_norm_refs": list(self.candidate_norm_refs),
             "formal_predicate_results": dict(self.formal_predicate_results),
+            "required_inputs": thaw_value(self.required_inputs),
             "selection": thaw_value(self.selection),
             "calculator_called": self.calculator_called,
             "llm_suggested_gate": self.llm_suggested_gate,

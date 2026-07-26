@@ -15,6 +15,11 @@ from api.models import (
     RuntimeValidationResponse,
 )
 from application.context_provider import ContextProvider, CoreSurfaceUnavailable
+from application.continuation import (
+    ContinuationStateMismatch,
+    ContinuationUnavailable,
+    InvalidContinuationToken,
+)
 from application.execution import (
     ExecutionService,
     OperatorAcceptanceUnavailable,
@@ -97,8 +102,8 @@ def frame_runtime(request: RuntimeFrameRequest):
 @app.post(
     "/runtime/execute",
     response_model=RuntimeExecutionResponse,
-    response_model_exclude_none=True,
     responses={
+        400: {"model": RuntimeErrorResponse},
         409: {"model": RuntimeErrorResponse},
         500: {"model": RuntimeErrorResponse},
         502: {"model": RuntimeErrorResponse},
@@ -106,12 +111,42 @@ def frame_runtime(request: RuntimeFrameRequest):
     },
 )
 def execute_runtime(request: RuntimeExecutionRequest):
-    session_id = request.session_id or str(uuid4())
+    session_id = request.session_id
+    if session_id is None and request.resume is None:
+        session_id = str(uuid4())
     try:
+        execution_arguments = {
+            "session_id": session_id,
+            "context": request.context,
+        }
+        if request.resume is not None:
+            execution_arguments["resume"] = (
+                request.resume.model_dump()
+            )
         return execution_service.execute(
             request.input,
+            **execution_arguments,
+        )
+    except InvalidContinuationToken as exc:
+        return _error_response(
+            400,
+            "invalid_continuation",
+            exc,
             session_id=session_id,
-            context=request.context,
+        )
+    except ContinuationStateMismatch as exc:
+        return _error_response(
+            409,
+            "continuation_state_mismatch",
+            exc,
+            session_id=session_id,
+        )
+    except ContinuationUnavailable as exc:
+        return _error_response(
+            503,
+            "continuation_unavailable",
+            exc,
+            session_id=session_id,
         )
     except CoreSurfaceUnavailable as exc:
         return _error_response(
