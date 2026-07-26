@@ -148,6 +148,37 @@ create persistent Runtime state.
 The return value is an `ExecutionCandidate`, not an executed action or
 `KernelDecision`.
 
+## Experimental ChatGPT host calculator
+
+```python
+work_order = service.prepare_host(
+    "Evaluate this phenomenon.",
+    session_id="correlation-id",
+    context={"facts": {}, "evidence": [], "authority": {}},
+)
+
+# The current ChatGPT host calculates only work_order["semantic_prompt"]
+# and returns one object matching work_order["response_schema"].
+result = service.submit_host(
+    work_order_id=work_order["work_order_id"],
+    work_order_token=work_order["submission_contract"][
+        "work_order_token"
+    ],
+    semantic_result=semantic_result,
+    session_id=work_order["session_id"],
+)
+```
+
+The host work-order secret and TTL are configured through
+`BORIS_HOST_EXECUTOR_SECRET` and
+`BORIS_HOST_WORK_ORDER_TTL_SECONDS`. A work order is bound to the exact Core,
+attestation, input, view, prompt, schema, session, phase, and scope. It can be
+submitted once. The PoC registry is in-memory and single-process.
+
+`prepare_host()` still uses the configured LLM for `SemanticInputCompiler`;
+`submit_host()` performs no LLM call and reuses the normal semantic validator
+and deterministic gate guards.
+
 ## LLM port
 
 Location: `llm/llm_adapter.py`.

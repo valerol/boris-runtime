@@ -29,12 +29,13 @@ BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
 ```
 
 Tracked `.env` also declares `OPENAI_API_KEY=` and
-`BORIS_CONTINUATION_SECRET=` as empty secret placeholders. Store the real
-values only in ignored `.env.local`:
+`BORIS_CONTINUATION_SECRET=` and `BORIS_HOST_EXECUTOR_SECRET=` as empty secret
+placeholders. Store the real values only in ignored `.env.local`:
 
 ```bash
 OPENAI_API_KEY=...
 BORIS_CONTINUATION_SECRET=...
+BORIS_HOST_EXECUTOR_SECRET=...
 ```
 
 Generate at least 32 random bytes, for example:
@@ -48,6 +49,12 @@ verify stateless HOLD continuation tokens. Keep
 `BORIS_CONTINUATION_TTL_SECONDS=3600` from tracked `.env` unless a shorter
 operator-response window is desired. The accepted range is 60 through 86400
 seconds. Changing the secret invalidates every unexpired continuation token.
+
+Generate a separate value for `BORIS_HOST_EXECUTOR_SECRET`. It signs
+`CHATGPT_HOST` work-order tokens. The default
+`BORIS_HOST_WORK_ORDER_TTL_SECONDS=900` may be set from 60 through 86400
+seconds. Rotating this secret invalidates outstanding work-order tokens; the
+in-memory registry is also cleared by every Runtime restart.
 
 Runtime entry points load `.env` followed by `.env.local`. Existing process
 variables remain authoritative; otherwise `.env.local` overrides tracked
@@ -109,7 +116,9 @@ Available public MCP tools:
   compatibility, compiles a strict `SemanticInput`, invokes the existing
   Semantic Executor, and returns a non-mutating `ExecutionCandidate`. A HOLD
   returns a signed operator handoff; resume calls the same tool and bypasses
-  repeated input compilation.
+  repeated input compilation. The optional `operation=prepare` and
+  `operation=submit` forms move only the semantic calculator into the current
+  ChatGPT host; the normal call continues to use the API calculator.
 
 There is no public `boris.frame` alias. Frame diagnostics and answer validation
 remain available through the private Runtime API and are not registered as
@@ -181,6 +190,17 @@ Do not expose `/runtime/execute`, `/runtime/frame`, or `/runtime/validate`
 directly to the public internet. The public boundary is `/mcp`; all Runtime API
 routes remain on the private interface.
 
+The `CHATGPT_HOST` PoC stores pending one-shot work orders in the Runtime
+process. Run the Runtime API with one worker, or configure sticky routing to the
+same worker for prepare and submit. A multi-worker or restart-safe deployment
+requires the deferred persistent atomic registry. This transaction registry is
+not BORIS memory and does not admit a state transition.
+
+The work order exposes the Core minimum context-window requirement, but the MCP
+server cannot attest the exact ChatGPT model or effective window. Host results
+therefore retain `host_model_identity_not_attested` and
+`host_context_capacity_not_attested` limitations.
+
 `/runtime/execute` returns `boris-execution/1.0` with
 `status: "semantic_candidate"`. `PASS`, `HOLD`, `STOP`, and `REPAIR` are normal
 HTTP 200 Runtime results. Core-source compatibility rejection, invalid
@@ -251,13 +271,14 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS. Use boris.execute for the Runtime semantic route. Present its ExecutionCandidate without replacing it with an independent answer or weakening HOLD, STOP, or REPAIR. For HOLD, request the specified operator input and resume only through the signed continuation.
+Connects ChatGPT to BORIS through the sole boris.execute tool. Preserve every ExecutionCandidate gate. For CHATGPT_HOST, call operation=prepare, calculate only the signed SemanticWorkOrder, and call operation=submit once with its exact ID, token, and semantic_result; do not answer between those calls. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
 
 Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
-`boris-execution-trace/1.0`. The execution request has no mode selector.
+`boris-execution-trace/1.0`. The execution request has no observability-mode
+selector; `operation` selects only the calculator protocol.
 The MCP server reads the same non-secret mode setting and links
 `boris.execute` to `ui://boris/developer-surface-v2.html`. The component
 receives the complete safe trace through tool-result `_meta`, hidden from the

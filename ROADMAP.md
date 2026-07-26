@@ -18,6 +18,8 @@ Current implemented boundary:
   without issuing a continuation token;
 - deterministic non-empty candidate projection for any non-`HOLD` route,
   including resume;
+- experimental signed `CHATGPT_HOST` prepare/submit calculation through the
+  same `boris.execute`, with the existing API calculator retained;
 - developer-only visual MCP surface v2 with model-hidden safe trace;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;
@@ -34,6 +36,8 @@ Immediate next stage:
 
 Following stages:
 
+- durable multi-worker work-order registry and a host-side
+  `SemanticInputCompiler` if a zero-API ChatGPT route is required;
 - Policy Kernel;
 - admitted State Events and Cycle Guard;
 - domain physiology and memory;

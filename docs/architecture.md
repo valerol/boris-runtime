@@ -18,7 +18,8 @@ immutable CoreSurface + trusted server Core selection
   -> Runtime Compatibility
   -> application ExecutionService
   -> SemanticInputCompiler
-  -> SemanticExecutor
+  -> SemanticExecutor through OPENAI_API
+     or signed CHATGPT_HOST prepare/submit
   -> ExecutionCandidate
 ```
 
@@ -93,6 +94,75 @@ results, unknowns, conflicts, alternatives, and explicit limitations.
 
 `HOLD`, `STOP`, and `REPAIR` remain normal Runtime results. The MCP presentation
 layer must not weaken them or substitute a separate ChatGPT answer.
+
+## Experimental ChatGPT host executor
+
+The standard request keeps the existing calculator provider:
+
+```text
+boris.execute
+  -> POST /runtime/execute
+  -> SemanticInputCompiler
+  -> OPENAI_API semantic calculator
+  -> validated ExecutionCandidate
+```
+
+The optional host route uses two calls to the same tool:
+
+```text
+boris.execute operation=prepare
+  -> Runtime compatibility
+  -> API-backed SemanticInputCompiler
+  -> deterministic Semantic View
+  -> signed SemanticWorkOrder
+
+ChatGPT calculates one semantic_result
+
+boris.execute operation=submit
+  -> verify token and one-shot registry state
+  -> re-verify Core and RuntimeAttestation
+  -> rebuild and hash the Semantic View
+  -> SemanticCalculationValidator
+  -> deterministic gate constraints
+  -> ExecutionCandidate
+```
+
+The work order uses `boris-semantic-work-order/0.1` and binds:
+
+- session and work-order IDs;
+- Core reference and RuntimeAttestation SHA-256;
+- exact `SemanticInput` and Semantic View SHA-256;
+- calculator prompt and response-schema SHA-256;
+- phase, selected norms, active layers, triggers, and scopes through the
+  hashed view;
+- issue and expiry times.
+
+Submission is size-limited and single-use. An invalid calculation consumes
+that attempt; a fresh work order is required. The submitted object receives
+the same strict validation and gate constraints as an API-provider result.
+ChatGPT cannot alter a formal result, omit a selected norm, fabricate a Core
+reference, claim execution, or redirect Runtime-owned uncertainty without
+rejection.
+
+This boundary provides contract isolation only. The ChatGPT model still sees
+the current conversation, system and project instructions, and any other
+host-visible tool context. The PoC registry is bounded and in-memory, so work
+orders do not survive restart and require one Runtime API worker or sticky
+routing. Registry entries are transport transaction state, not domain memory,
+cycle objects, admitted state events, or Policy Kernel decisions.
+
+Runtime includes the Core-declared `minimum_context_window_tokens` in the work
+order, but ChatGPT does not expose a provider identity or capacity attestation
+to the MCP server. `host_model_identity_not_attested` and
+`host_context_capacity_not_attested` therefore remain explicit limitations in
+both the work order and resulting candidate. The existing RuntimeAttestation
+continues to bind the receiving Runtime substrate and Core compatibility; it
+is not reinterpreted as proof about the ChatGPT host.
+
+The current host route still uses the configured LLM for
+`SemanticInputCompiler`. A zero-API route would require a separate signed host
+compilation work order before Runtime can select the exact phase-complete
+Semantic View.
 
 ## Stateless HOLD continuation
 

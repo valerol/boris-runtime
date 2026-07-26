@@ -4,7 +4,13 @@ import sys
 from pathlib import Path
 
 import pytest
+import jsonschema
 
+from application.host_executor import (
+    HostWorkOrderCodec,
+    InMemoryHostWorkOrderRegistry,
+    build_host_work_order,
+)
 from core_surface import load_core_surface
 from runtime_compatibility import (
     OperatorAcceptance,
@@ -87,6 +93,49 @@ def current_core_compatibility(current_core_surface):
         current_core_surface,
         operator_acceptance=acceptance,
     )
+
+
+def test_current_core_builds_host_work_order_for_every_phase(
+    current_core_surface,
+    current_core_compatibility,
+):
+    current_core_compatibility.require_semantic_evaluation(
+        current_core_surface
+    )
+    for phase in (f"C{index:02d}" for index in range(12)):
+        semantic_input = SemanticInput(
+            phenomenon={"input": "Host work-order compatibility check."},
+            phase=phase,
+        )
+        view = SemanticViewBuilder().build(
+            current_core_surface,
+            semantic_input,
+        )
+        work_order = build_host_work_order(
+            codec=HostWorkOrderCodec("h" * 32),
+            registry=InMemoryHostWorkOrderRegistry(),
+            semantic_input=semantic_input,
+            view=view,
+            session_id=f"host-{phase}",
+            source_text="Host work-order compatibility check.",
+            resume_count=0,
+            resumed=False,
+            attestation_sha256=(
+                current_core_compatibility.attestation_sha256
+            ),
+        )
+        semantic_result = AutoCalculator().calculate(
+            view,
+            semantic_input,
+        )
+
+        jsonschema.validate(
+            semantic_result,
+            work_order["response_schema"],
+        )
+        assert work_order["phase"] == phase
+        assert work_order["semantic_prompt"]
+        assert work_order["submission_contract"]["operation"] == "submit"
 
 
 def test_current_core_runtime_compatibility_attestation(

@@ -57,6 +57,9 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
     assert "ExecutionCandidate" in execute_tool.description
     assert "not independently reviewed" in execute_tool.description
     assert "mode" not in execute_tool.inputSchema["properties"]
+    assert "operation" in execute_tool.inputSchema["properties"]
+    assert "work_order_id" in execute_tool.inputSchema["properties"]
+    assert "semantic_result" in execute_tool.inputSchema["properties"]
     assert "resume" in execute_tool.inputSchema["properties"]
     assert execute_tool.annotations.readOnlyHint is True
     assert execute_tool.annotations.openWorldHint is False

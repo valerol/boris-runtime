@@ -8,6 +8,7 @@ from application.execution import (
     OperatorAcceptanceUnavailable,
     SemanticInputCompilationError,
 )
+from application.host_executor import HostWorkOrderAlreadyConsumed
 
 
 client = TestClient(app_module.app)
@@ -31,6 +32,7 @@ class FakeExecutionService:
         self.gate = gate
         self.empty_candidate = empty_candidate
         self.calls = []
+        self.host_calls = []
 
     def execute(
         self,
@@ -55,6 +57,42 @@ class FakeExecutionService:
             )
         return packet
 
+    def prepare_host(
+        self,
+        user_input,
+        session_id=None,
+        context=None,
+        resume=None,
+    ):
+        self.host_calls.append(
+            ("prepare", user_input, session_id, context, resume)
+        )
+        if self.error:
+            raise self.error
+        return host_work_order_packet(session_id)
+
+    def submit_host(
+        self,
+        *,
+        work_order_id,
+        work_order_token,
+        semantic_result,
+        session_id=None,
+    ):
+        self.host_calls.append((
+            "submit",
+            work_order_id,
+            work_order_token,
+            semantic_result,
+            session_id,
+        ))
+        if self.error:
+            raise self.error
+        packet = execution_packet(session_id, gate="PASS")
+        packet["semantic_provider"] = "CHATGPT_HOST"
+        packet["host_work_order_id"] = work_order_id
+        return packet
+
 
 def test_health_returns_ok():
     response = client.get("/health")
@@ -70,6 +108,100 @@ def test_health_returns_ok():
 def test_runtime_request_schemas_do_not_expose_mode():
     assert "mode" not in RuntimeFrameRequest.model_json_schema()["properties"]
     assert "mode" not in RuntimeExecutionRequest.model_json_schema()["properties"]
+    assert "operation" in (
+        RuntimeExecutionRequest.model_json_schema()["properties"]
+    )
+
+
+def test_runtime_execute_prepare_and_submit_route_one_host_work_order(
+    monkeypatch,
+):
+    service = FakeExecutionService()
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    prepared = client.post(
+        "/runtime/execute",
+        json={
+            "operation": "prepare",
+            "input": "Explain BOIS Runtime",
+            "session_id": "host-api",
+        },
+    )
+
+    assert prepared.status_code == 200
+    work_order = prepared.json()
+    assert work_order["status"] == "semantic_work_order"
+    assert work_order["semantic_provider"] == "CHATGPT_HOST"
+    assert service.host_calls == [(
+        "prepare",
+        "Explain BOIS Runtime",
+        "host-api",
+        {},
+        None,
+    )]
+
+    submitted = client.post(
+        "/runtime/execute",
+        json={
+            "operation": "submit",
+            "session_id": "host-api",
+            "work_order_id": work_order["work_order_id"],
+            "work_order_token": work_order[
+                "submission_contract"
+            ]["work_order_token"],
+            "semantic_result": {"candidate_result": {"summary": "Host"}},
+        },
+    )
+
+    assert submitted.status_code == 200
+    assert submitted.json()["status"] == "semantic_candidate"
+    assert submitted.json()["semantic_provider"] == "CHATGPT_HOST"
+    assert service.host_calls[-1] == (
+        "submit",
+        "work-order-1",
+        "hw1.payload.signature",
+        {"candidate_result": {"summary": "Host"}},
+        "host-api",
+    )
+
+
+def test_runtime_execute_host_route_validates_contract_and_replay_error(
+    monkeypatch,
+):
+    invalid_prepare = client.post(
+        "/runtime/execute",
+        json={"operation": "prepare"},
+    )
+    invalid_submit = client.post(
+        "/runtime/execute",
+        json={
+            "operation": "submit",
+            "input": "must remain token-bound",
+            "work_order_id": "work-order-1",
+            "work_order_token": "hw1.payload.signature",
+            "semantic_result": {},
+        },
+    )
+    assert invalid_prepare.status_code == 422
+    assert invalid_submit.status_code == 422
+
+    service = FakeExecutionService(
+        error=HostWorkOrderAlreadyConsumed(
+            "Host work order has already been submitted."
+        )
+    )
+    monkeypatch.setattr(app_module, "execution_service", service)
+    replay = client.post(
+        "/runtime/execute",
+        json={
+            "operation": "submit",
+            "work_order_id": "work-order-1",
+            "work_order_token": "hw1.payload.signature",
+            "semantic_result": {},
+        },
+    )
+    assert replay.status_code == 409
+    assert replay.json()["error"] == "host_work_order_consumed"
 
 
 def test_runtime_frame_delegates_to_context_provider(monkeypatch):
@@ -504,3 +636,49 @@ def execution_packet(session_id, gate="HOLD"):
             "resume_count": 0,
         }
     return packet
+
+
+def host_work_order_packet(session_id):
+    return {
+        "work_order_version": "boris-semantic-work-order/0.1",
+        "work_order_id": "work-order-1",
+        "session_id": session_id,
+        "status": "semantic_work_order",
+        "semantic_provider": "CHATGPT_HOST",
+        "phase": "C03",
+        "minimum_context_window_tokens": 524288,
+        "core_ref": {
+            "package_id": "BOIS_TEST_CORE",
+            "artifact_version": "2.31",
+            "source_kind": "directory",
+            "archive_sha256": "",
+            "content_set_sha256": "a" * 64,
+            "manifest_sha256": "b" * 64,
+        },
+        "issued_at": "2026-07-26T12:00:00+00:00",
+        "expires_at": "2026-07-26T12:15:00+00:00",
+        "semantic_prompt": "Calculate the signed semantic work order.",
+        "response_schema": {"type": "object"},
+        "bindings": {
+            "attestation_sha256": "1" * 64,
+            "semantic_input_sha256": "2" * 64,
+            "semantic_view_sha256": "3" * 64,
+            "semantic_prompt_sha256": "4" * 64,
+            "response_schema_sha256": "5" * 64,
+        },
+        "submission_contract": {
+            "tool": "boris.execute",
+            "operation": "submit",
+            "required_arguments": [
+                "operation",
+                "work_order_id",
+                "work_order_token",
+                "semantic_result",
+            ],
+            "work_order_token": "hw1.payload.signature",
+        },
+        "limitations": [
+            "contract_isolation_only",
+            "single_process_registry",
+        ],
+    }

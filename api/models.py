@@ -62,22 +62,79 @@ class RuntimeExecutionResume(BaseModel):
 
 
 class RuntimeExecutionRequest(BaseModel):
+    operation: Literal["execute", "prepare", "submit"] = "execute"
     input: constr(strip_whitespace=True, min_length=1) | None = None
     session_id: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     resume: RuntimeExecutionResume | None = None
+    work_order_id: constr(strip_whitespace=True, min_length=1) | None = None
+    work_order_token: constr(strip_whitespace=True, min_length=1) | None = None
+    semantic_result: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_route(self):
-        if (self.input is None) == (self.resume is None):
-            raise ValueError(
-                "Provide exactly one of input or resume."
-            )
-        if self.resume is not None and self.context:
-            raise ValueError(
-                "Continuation context is bound by continuation_token."
-            )
+        host_fields = (
+            self.work_order_id,
+            self.work_order_token,
+            self.semantic_result,
+        )
+        if self.operation in {"execute", "prepare"}:
+            if (self.input is None) == (self.resume is None):
+                raise ValueError(
+                    "Provide exactly one of input or resume."
+                )
+            if self.resume is not None and self.context:
+                raise ValueError(
+                    "Continuation context is bound by continuation_token."
+                )
+            if any(value is not None for value in host_fields):
+                raise ValueError(
+                    "Host submission fields are allowed only in submit mode."
+                )
+        else:
+            if self.input is not None or self.resume is not None or self.context:
+                raise ValueError(
+                    "Submit mode cannot replace work-order-bound input or context."
+                )
+            if any(value is None for value in host_fields):
+                raise ValueError(
+                    "Submit mode requires work_order_id, work_order_token, "
+                    "and semantic_result."
+                )
         return self
+
+
+class RuntimeHostWorkOrderBindings(BaseModel):
+    attestation_sha256: str
+    semantic_input_sha256: str
+    semantic_view_sha256: str
+    semantic_prompt_sha256: str
+    response_schema_sha256: str
+
+
+class RuntimeHostSubmissionContract(BaseModel):
+    tool: Literal["boris.execute"]
+    operation: Literal["submit"]
+    required_arguments: list[str]
+    work_order_token: str
+
+
+class RuntimeHostWorkOrderResponse(BaseModel):
+    work_order_version: Literal["boris-semantic-work-order/0.1"]
+    work_order_id: str
+    session_id: str
+    status: Literal["semantic_work_order"]
+    semantic_provider: Literal["CHATGPT_HOST"]
+    phase: str
+    minimum_context_window_tokens: int = Field(ge=0)
+    core_ref: dict[str, str]
+    issued_at: str
+    expires_at: str
+    semantic_prompt: str
+    response_schema: dict[str, Any]
+    bindings: RuntimeHostWorkOrderBindings
+    submission_contract: RuntimeHostSubmissionContract
+    limitations: list[str] = Field(default_factory=list)
 
 
 class RuntimeSemanticUnknown(BaseModel):
@@ -163,6 +220,14 @@ class RuntimeExecutionResponse(BaseModel):
     execution_version: Literal["boris-execution/1.0"]
     session_id: str
     status: Literal["semantic_candidate"]
+    semantic_provider: Literal["CHATGPT_HOST"] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    host_work_order_id: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     phase: str
     gate: Literal["PASS", "HOLD", "STOP", "REPAIR"]
     candidate_result: dict[str, Any] | None
@@ -187,6 +252,12 @@ class RuntimeExecutionResponse(BaseModel):
 
     @model_validator(mode="after")
     def validate_execution_envelope(self):
+        if (self.semantic_provider is None) != (
+            self.host_work_order_id is None
+        ):
+            raise ValueError(
+                "Host provider and work-order ID must be present together."
+            )
         if self.candidate_result == {}:
             raise ValueError("candidate_result must not be an empty object.")
         if (

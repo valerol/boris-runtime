@@ -17,6 +17,8 @@ Core release package
   -> runtime_compatibility
   -> application.execution.SemanticInputCompiler
   -> semantic_executor
+     -> OPENAI_API calculator
+     -> or signed CHATGPT_HOST work order
   -> ExecutionCandidate
   -> HOLD handoff / signed stateless continuation
   -> private HTTP /runtime/execute
@@ -63,12 +65,18 @@ in the ignored `.env.local` file:
 ```bash
 OPENAI_API_KEY=...
 BORIS_CONTINUATION_SECRET=...
+BORIS_HOST_EXECUTOR_SECRET=...
 ```
 
 `BORIS_CONTINUATION_SECRET` must contain at least 32 bytes. It signs stateless
 HOLD continuation tokens and is used only by the private Runtime service.
 `BORIS_CONTINUATION_TTL_SECONDS` defaults to 3600 and may be set from 60 through
 86400 seconds.
+
+`BORIS_HOST_EXECUTOR_SECRET` must also contain at least 32 bytes. It signs the
+experimental ChatGPT-hosted semantic work orders independently of HOLD
+continuations. `BORIS_HOST_WORK_ORDER_TTL_SECONDS` defaults to 900 and accepts
+the same 60-through-86400 range.
 
 Runtime entry points load `.env` first and `.env.local` second. Values already
 present in the process environment have the highest priority; `.env.local`
@@ -104,6 +112,12 @@ at least `524288`. Runtime fails closed when the capacity declaration is
 absent or insufficient; it does not silently narrow the phase-complete norm
 set. Keep the model, reasoning effort, and capacity declaration aligned when
 overriding these settings.
+
+The experimental `CHATGPT_HOST` route replaces only the phase-complete
+Semantic Executor calculator call. The smaller `SemanticInputCompiler` still
+uses `BOIS_LLM`, because Runtime must select and mechanically build the exact
+phase view before it can issue a work order. Therefore this PoC reduces the
+large API call but is not yet a zero-API route.
 
 ## Private Runtime API
 
@@ -179,6 +193,53 @@ Invalid Core source binding, invalid compiled input, and provider failures
 return controlled fail-closed errors. An archive source with missing or
 mismatched server acceptance also fails closed.
 
+### Experimental ChatGPT-hosted calculation
+
+The same endpoint supports an optional two-call calculator protocol. Prepare a
+work order:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/runtime/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operation": "prepare",
+    "session_id": "host-test",
+    "input": "Explain the applicable BOIS constraints",
+    "context": {}
+  }'
+```
+
+The response has `status: "semantic_work_order"`, provider `CHATGPT_HOST`, the
+complete `semantic_prompt`, an exact response JSON Schema, five binding
+digests, the Core-declared minimum context window, and a signed
+`work_order_token`. ChatGPT calculates one
+`semantic_result` and submits it to the same endpoint:
+
+```json
+{
+  "operation": "submit",
+  "session_id": "host-test",
+  "work_order_id": "<exact prepared ID>",
+  "work_order_token": "hw1...",
+  "semantic_result": {"<exact work-order result>": "..."}
+}
+```
+
+Runtime accepts the work order only once, re-verifies current Core and
+RuntimeAttestation, rebuilds the exact Semantic View, and passes the submitted
+object through the existing `SemanticCalculationValidator` and deterministic
+gate constraints. A resulting operator-owned HOLD can be resumed with
+`operation: "prepare"` plus the ordinary signed `resume` object.
+
+This is contract isolation, not a clean model context: ChatGPT still sees the
+current conversation and host instructions. Pending work orders live in a
+bounded in-memory registry, expire after the configured TTL, do not survive a
+Runtime restart, and require one API worker or sticky routing. They are not
+BORIS memory, Policy Kernel state, or state events.
+Runtime also cannot attest the exact model identity or effective context window
+of the ChatGPT host. Both limits remain explicit in the work order and final
+candidate even when the existing Runtime substrate is compatible with Core.
+
 Set `BORIS_RUNTIME_MODE=dev` in the server `.env` to add the safe combined
 lexical and semantic trace:
 compiled `SemanticInput`, Core reference, RuntimeAttestation, selected norms,
@@ -212,6 +273,10 @@ python -m mcp_server.server
 The MCP server exposes one public read-only tool: `boris.execute`. It communicates
 with the private API over HTTP and does not import Runtime internals, load Core
 packages, call LLMs, or store memory.
+
+Calls without `operation` retain the existing API-calculator behavior.
+`operation=prepare` and `operation=submit` opt into `CHATGPT_HOST`; no second
+MCP tool is registered.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
 `ui://boris/developer-surface-v2.html`. The MCP Apps component displays the
