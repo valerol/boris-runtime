@@ -64,6 +64,18 @@ EnvironmentFile=-/opt/boris-runtime/.env
 
 Restrict the secret file to the service account, for example with mode `0600`.
 
+Public Core v2 releases declare per-phase context requirements. Configure the
+Runtime service with the actual semantic model capacity:
+
+```ini
+BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=524288
+```
+
+For Core v2.31 this is the minimum acceptable value. The selected model must
+really support that capacity; the variable is an operator assertion, not a
+request to the provider. Runtime compatibility stays at `HOLD` when the value
+is missing or lower.
+
 `/opt/boris-core` is the server-owned checkout used by Runtime at the current
 project stage. Runtime binds this directory to its manifest, reproducible
 content-set hash, and verified component hashes. The configured repository
@@ -73,6 +85,12 @@ deployment-side `operator-acceptance.json`.
 
 Exact ZIP plus explicit `OperatorAcceptance` remains an optional archive
 compatibility path; it is not the production deployment protocol.
+
+Updating files below `/opt/boris-core` does not hot-reload an already cached
+surface. Activate a verified Core update by restarting the Runtime service (or
+by explicitly clearing `CoreSurfaceProvider` in a controlled local process),
+then confirm that the live Core reference reports the intended
+`artifact_version`.
 
 Available public MCP tools:
 

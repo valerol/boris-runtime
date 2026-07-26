@@ -7,7 +7,13 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlparse
 
+from runtime_compatibility.errors import (
+    RuntimeContractError,
+    RuntimeInstanceValidationError,
+)
+from runtime_compatibility.schema import validate_schema_reference
 from semantic_executor.errors import SemanticViewError
 
 
@@ -22,9 +28,14 @@ DEFAULT_IDENTIFIER_PATTERN = (
 SUPPORTED_OPERATORS = frozenset({
     "all",
     "all_equal",
+    "all_https",
+    "all_items_fact",
     "all_references_resolve",
+    "allowed_pair",
     "always",
     "any",
+    "contains",
+    "count_equals",
     "enum_member",
     "equals",
     "equals_path",
@@ -38,9 +49,12 @@ SUPPORTED_OPERATORS = frozenset({
     "nonempty",
     "nonempty_scope",
     "not",
+    "not_equals",
+    "rank_at_least",
     "reference_resolves",
     "same_cycle",
     "same_subject",
+    "schema_valid",
     "scope_contains",
     "scope_equal",
     "scope_match",
@@ -192,6 +206,13 @@ class PredicateEvaluator:
             negate=True,
         )
 
+    def _evaluate_not_equals(self, expression, context):
+        return self._evaluate_equality(
+            expression,
+            context,
+            negate=True,
+        )
+
     def _evaluate_equality(self, expression, context, *, negate):
         self._require_exact_keys(
             expression,
@@ -221,6 +242,32 @@ class PredicateEvaluator:
             if all(
                 _json_equal(values[0], value)
                 for value in values[1:]
+            )
+            else FALSE
+        )
+
+    def _evaluate_allowed_pair(self, expression, context):
+        self._require_exact_keys(
+            expression,
+            {"op", "left_path", "right_path", "pairs"},
+        )
+        pairs = expression["pairs"]
+        if (
+            not _is_sequence(pairs)
+            or not pairs
+            or any(not _is_sequence(pair) or len(pair) != 2 for pair in pairs)
+        ):
+            return ERROR
+        left = self._resolve(context, expression["left_path"])
+        right = self._resolve(context, expression["right_path"])
+        if MISSING in (left, right):
+            return UNKNOWN
+        return (
+            TRUE
+            if any(
+                _json_equal(left, pair[0])
+                and _json_equal(right, pair[1])
+                for pair in pairs
             )
             else FALSE
         )
@@ -265,13 +312,15 @@ class PredicateEvaluator:
         self._require_exact_keys(expression, {"op", "path"})
         value = self._resolve(context, expression["path"])
         if value is MISSING:
-            return FALSE
+            return UNKNOWN
         return TRUE if self._is_valid_identifier(value) else FALSE
 
     def _evaluate_nonempty(self, expression, context):
         self._require_exact_keys(expression, {"op", "path"})
         value = self._resolve(context, expression["path"])
-        if value is MISSING or value is None:
+        if value is MISSING:
+            return UNKNOWN
+        if value is None:
             return FALSE
         if isinstance(value, str):
             return TRUE if value else FALSE
@@ -295,16 +344,131 @@ class PredicateEvaluator:
             return ERROR
         return TRUE if len(value) >= minimum else FALSE
 
+    def _evaluate_count_equals(self, expression, context):
+        self._require_exact_keys(expression, {"op", "path", "value"})
+        expected = expression["value"]
+        if (
+            isinstance(expected, bool)
+            or not isinstance(expected, int)
+            or expected < 0
+        ):
+            return ERROR
+        value = self._resolve(context, expression["path"])
+        if value is MISSING:
+            return UNKNOWN
+        if not _is_sequence(value):
+            return ERROR
+        return TRUE if len(value) == expected else FALSE
+
+    def _evaluate_contains(self, expression, context):
+        self._require_exact_keys(expression, {"op", "path", "value"})
+        value = self._resolve(context, expression["path"])
+        if value is MISSING:
+            return UNKNOWN
+        if not _is_sequence(value):
+            return ERROR
+        return (
+            TRUE
+            if any(_json_equal(item, expression["value"]) for item in value)
+            else FALSE
+        )
+
+    def _evaluate_all_https(self, expression, context):
+        self._require_exact_keys(expression, {"op", "path"})
+        value = self._resolve(context, expression["path"])
+        if value is MISSING:
+            return UNKNOWN
+        if not _is_sequence(value):
+            return ERROR
+        if not value:
+            return FALSE
+        for item in value:
+            if not isinstance(item, str):
+                return ERROR
+            parsed = urlparse(item)
+            if parsed.scheme != "https" or not parsed.netloc:
+                return FALSE
+        return TRUE
+
+    def _evaluate_all_items_fact(self, expression, context):
+        self._require_exact_keys(
+            expression,
+            {"op", "path", "child_path", "equals"},
+        )
+        value = self._resolve(context, expression["path"])
+        if value is MISSING:
+            return UNKNOWN
+        if not _is_sequence(value):
+            return ERROR
+        saw_unknown = False
+        for item in value:
+            if not isinstance(item, Mapping):
+                return ERROR
+            actual = self._resolve(item, expression["child_path"])
+            if actual is MISSING:
+                saw_unknown = True
+                continue
+            if not _json_equal(actual, expression["equals"]):
+                return FALSE
+        return UNKNOWN if saw_unknown else TRUE
+
+    def _evaluate_rank_at_least(self, expression, context):
+        self._require_exact_keys(
+            expression,
+            {"op", "path", "minimum", "order"},
+        )
+        order = expression["order"]
+        if (
+            not _is_sequence(order)
+            or not order
+            or len({_canonical_marker(item) for item in order}) != len(order)
+        ):
+            return ERROR
+        value = self._resolve(context, expression["path"])
+        if value is MISSING:
+            return UNKNOWN
+        value_marker = _canonical_marker(value)
+        minimum_marker = _canonical_marker(expression["minimum"])
+        markers = [_canonical_marker(item) for item in order]
+        if value_marker not in markers or minimum_marker not in markers:
+            return ERROR
+        return (
+            TRUE
+            if markers.index(value_marker) >= markers.index(minimum_marker)
+            else FALSE
+        )
+
+    def _evaluate_schema_valid(self, expression, context):
+        self._require_exact_keys(expression, {"op", "schema_ref"})
+        if self.surface is None:
+            return ERROR
+        reference = expression["schema_ref"]
+        if not isinstance(reference, str) or "#" not in reference:
+            return ERROR
+        path, pointer = reference.split("#", 1)
+        try:
+            document = self.surface.read_json(path)
+            validate_schema_reference(
+                document,
+                f"#{pointer}",
+                context,
+            )
+        except RuntimeInstanceValidationError:
+            return FALSE
+        except (
+            KeyError,
+            UnicodeDecodeError,
+            ValueError,
+            RuntimeContractError,
+        ):
+            return ERROR
+        return TRUE
+
     def _evaluate_nonempty_scope(self, expression, context):
         self._require_exact_keys(expression, {"op", "path"})
         value = self._resolve(context, expression["path"])
-        if (
-            value is MISSING
-            or value is None
-            or value == ""
-            or value == []
-        ):
-            return FALSE
+        if value is MISSING:
+            return UNKNOWN
         normalized = self._normalize_scope(value)
         return ERROR if normalized is None else TRUE
 
@@ -534,6 +698,7 @@ class ReferenceResolver:
     @classmethod
     def from_surface(cls, surface):
         registries = [
+            surface.norm_ids,
             _tsv_reference_values(
                 surface,
                 "assurance/REFERENCE_INDEX.tsv",
@@ -555,6 +720,12 @@ class ReferenceResolver:
                 "assurance/TEST_REGISTRY.json",
                 "tests",
                 "test_id",
+            ),
+            _json_reference_values(
+                surface,
+                "machine/OBJECT_MODEL.json",
+                "objects",
+                "object_type",
             ),
             _json_string_array(
                 surface,

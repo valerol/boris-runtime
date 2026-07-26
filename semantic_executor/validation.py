@@ -176,11 +176,26 @@ class SemanticCalculationValidator:
                     f"{norm_ref} operation mismatch: "
                     f"expected {candidate.operation}, got {operation}."
                 )
-            if predicate_result != candidate.formal_predicate_result:
-                raise SemanticCalculationError(
-                    f"{norm_ref} formal predicate mismatch: expected "
-                    f"{candidate.formal_predicate_result}, got {predicate_result}."
-                )
+            if candidate.predicate_mode == "legacy_formal":
+                if predicate_result != candidate.formal_predicate_result:
+                    raise SemanticCalculationError(
+                        f"{norm_ref} formal predicate mismatch: expected "
+                        f"{candidate.formal_predicate_result}, got "
+                        f"{predicate_result}."
+                    )
+            elif candidate.predicate_mode == "runtime_typed":
+                if predicate_result != candidate.formal_predicate_result:
+                    raise SemanticCalculationError(
+                        f"{norm_ref} typed violation result mismatch: expected "
+                        f"{candidate.formal_predicate_result}, got "
+                        f"{predicate_result}."
+                    )
+                if applicability != candidate.formal_applicability_result:
+                    raise SemanticCalculationError(
+                        f"{norm_ref} typed applicability result mismatch: "
+                        f"expected {candidate.formal_applicability_result}, "
+                        f"got {applicability}."
+                    )
             parsed.append(NormCalculation(
                 norm_ref=norm_ref,
                 layer=layer,

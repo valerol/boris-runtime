@@ -58,9 +58,51 @@ class NormRecord:
     layer: str
     norm_type: str
     fields: Mapping[str, str] = field(repr=False)
+    lifecycle_status: str = ""
+    available_for_evaluation: bool | None = None
+    available_for_application: bool | None = None
+    predicate_mode: str = "legacy_formal"
+    source_record: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
         object.__setattr__(self, "fields", MappingProxyType(dict(self.fields)))
+        if not self.lifecycle_status:
+            object.__setattr__(
+                self,
+                "lifecycle_status",
+                str(self.fields.get("card_status", "")).strip(),
+            )
+        if self.available_for_evaluation is None:
+            object.__setattr__(
+                self,
+                "available_for_evaluation",
+                str(
+                    self.fields.get("available_for_evaluation", "")
+                ).strip() == "TRUE",
+            )
+        if self.available_for_application is None:
+            object.__setattr__(
+                self,
+                "available_for_application",
+                str(
+                    self.fields.get("available_for_application", "")
+                ).strip() == "TRUE",
+            )
+        object.__setattr__(
+            self,
+            "source_record",
+            freeze_value(dict(self.source_record)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicabilityRecord:
+    required_phase: str
+    application_kind: str
+    triggers: tuple[str, ...]
+    reason: str
+    owner: str
+    review_status: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +124,23 @@ class CoreSurface:
     norms_by_layer: Mapping[str, tuple[NormRecord, ...]] = field(repr=False)
     _norm_index: Mapping[str, NormRecord] = field(repr=False)
     _payloads: Mapping[str, bytes] = field(repr=False)
+    applicability_by_norm: Mapping[
+        str,
+        tuple[ApplicabilityRecord, ...],
+    ] = field(default_factory=dict, repr=False)
+    phase_descriptions: Mapping[str, str] = field(
+        default_factory=dict,
+        repr=False,
+    )
+    phase_contexts: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict,
+        repr=False,
+    )
+    accepted_layers: tuple[str, ...] = ()
+    compatibility_contract: Mapping[str, Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
     manifest_dialect: str = "legacy-v1"
     release_package_id: str | None = None
     release_version: str | None = None
@@ -101,6 +160,34 @@ class CoreSurface:
         )
         object.__setattr__(self, "_norm_index", MappingProxyType(dict(self._norm_index)))
         object.__setattr__(self, "_payloads", MappingProxyType(dict(self._payloads)))
+        object.__setattr__(
+            self,
+            "applicability_by_norm",
+            MappingProxyType({
+                norm_id: tuple(records)
+                for norm_id, records in self.applicability_by_norm.items()
+            }),
+        )
+        object.__setattr__(
+            self,
+            "phase_descriptions",
+            MappingProxyType(dict(self.phase_descriptions)),
+        )
+        object.__setattr__(
+            self,
+            "phase_contexts",
+            freeze_value(dict(self.phase_contexts)),
+        )
+        object.__setattr__(
+            self,
+            "accepted_layers",
+            tuple(dict.fromkeys(self.accepted_layers)),
+        )
+        object.__setattr__(
+            self,
+            "compatibility_contract",
+            freeze_value(dict(self.compatibility_contract)),
+        )
 
     @property
     def base_norms(self) -> tuple[NormRecord, ...]:
@@ -124,6 +211,9 @@ class CoreSurface:
 
     def read_json(self, path: str) -> Any:
         return json.loads(self.read_bytes(path).decode("utf-8"))
+
+    def phase_context(self, phase: str) -> Mapping[str, Any]:
+        return self.phase_contexts.get(phase, MappingProxyType({}))
 
     @property
     def payload_paths(self) -> tuple[str, ...]:
@@ -180,4 +270,10 @@ class CoreSurface:
             },
             "norm_types": dict(sorted(norm_type_counts.items())),
             "norm_type_policy": "opaque_source_values",
+            "accepted_layers": list(self.accepted_layers),
+            "applicability_binding_count": sum(
+                len(records)
+                for records in self.applicability_by_norm.values()
+            ),
+            "phase_context_count": len(self.phase_contexts),
         }

@@ -94,7 +94,14 @@ selection and model settings belong in tracked `.env`:
 ```bash
 BOIS_LLM=openai
 OPENAI_MODEL=gpt-4o
+BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=
 ```
+
+For a Core contract that declares phase context budgets, set
+`BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS` to the actual context capacity of the
+configured semantic model. Core v2.31 requires at least `524288`. Runtime
+fails closed when the declaration is absent or insufficient; it does not
+silently narrow the phase-complete norm set.
 
 ## Private Runtime API
 

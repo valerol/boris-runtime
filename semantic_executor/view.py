@@ -28,6 +28,9 @@ from semantic_executor.predicates import (
 
 PHASE_APPLICABILITY_PATH = "assurance/NORM_PHASE_APPLICABILITY.tsv"
 MAX_CANDIDATE_NORMS = 64
+MAX_DECLARED_CANDIDATE_NORMS = 1024
+
+
 @dataclass(frozen=True, slots=True)
 class NormInterpretationProfile:
     supported_source_norm_types: frozenset[str] = SUPPORTED_SOURCE_NORM_TYPES
@@ -41,6 +44,14 @@ class SemanticViewBuilder:
         self.predicate_evaluator = predicate_evaluator or PredicateEvaluator()
 
     def build(self, surface: CoreSurface, semantic_input: SemanticInput) -> SemanticView:
+        if (
+            surface.phase_contexts
+            and semantic_input.phase not in surface.phase_contexts
+        ):
+            raise SemanticViewError(
+                f"Core contract does not publish an executable context for "
+                f"phase {semantic_input.phase!r}."
+            )
         predicate_dsl = self._require_machine_object(surface, "predicate_dsl")
         deontic = self._require_machine_object(surface, "deontic_semantics")
         gates = self._require_machine_object(
@@ -54,8 +65,16 @@ class SemanticViewBuilder:
         )
         bindings = self._load_bindings(surface)
         active_layers = tuple(dict.fromkeys(("BASE", *semantic_input.active_layers)))
+        if surface.accepted_layers:
+            unaccepted_layers = set(active_layers) - set(surface.accepted_layers)
+            if unaccepted_layers:
+                raise SemanticViewError(
+                    "Semantic input requests layers that are not accepted by "
+                    f"the loaded Core contract: {sorted(unaccepted_layers)}"
+                )
         active_scopes = {
             "ALL_PHASES",
+            "GLOBAL_CONTROL",
             semantic_input.phase,
             *semantic_input.applicability_scopes,
         }
@@ -76,23 +95,27 @@ class SemanticViewBuilder:
                     continue
 
                 explicitly_requested = record.norm_id in requested
-                if not explicitly_requested and not any(
-                    "*" in binding.triggers
-                    or input_triggers.intersection(binding.triggers)
+                phase_complete = any(
+                    binding.application_kind == "PHASE_COMPLETE"
                     for binding in norm_bindings
+                )
+                if (
+                    not phase_complete
+                    and not explicitly_requested
+                    and not any(
+                        "*" in binding.triggers
+                        or input_triggers.intersection(binding.triggers)
+                        for binding in norm_bindings
+                    )
                 ):
                     excluded["trigger"] += 1
                     continue
 
-                available_for_evaluation = _source_bool(
-                    record,
-                    "available_for_evaluation",
-                )
-                if not available_for_evaluation:
+                if not record.available_for_evaluation:
                     excluded["not_evaluable"] += 1
                     continue
 
-                active_card = record.fields.get("card_status") == "ACTIVE"
+                active_card = record.lifecycle_status == "ACTIVE"
                 if not active_card and not (
                     explicitly_requested and semantic_input.evaluate_inactive
                 ):
@@ -113,10 +136,25 @@ class SemanticViewBuilder:
                 "Requested norms are not eligible in the selected phase, layer, "
                 f"trigger, or lifecycle context: {sorted(missing_requested)}"
             )
-        if len(candidates) > MAX_CANDIDATE_NORMS:
+        declared_limit = surface.compatibility_contract.get(
+            "maximum_phase_candidate_count",
+            MAX_CANDIDATE_NORMS,
+        )
+        if (
+            isinstance(declared_limit, bool)
+            or not isinstance(declared_limit, int)
+            or declared_limit < 1
+            or declared_limit > MAX_DECLARED_CANDIDATE_NORMS
+        ):
+            raise SemanticViewError(
+                "Core contract candidate capacity is invalid or exceeds the "
+                f"Runtime safety limit of {MAX_DECLARED_CANDIDATE_NORMS}."
+            )
+        candidate_limit = declared_limit
+        if len(candidates) > candidate_limit:
             raise SemanticViewError(
                 f"Semantic candidate set exceeds the Phase 4F limit of "
-                f"{MAX_CANDIDATE_NORMS}: {len(candidates)}"
+                f"{candidate_limit}: {len(candidates)}"
             )
 
         candidates.sort(key=lambda item: (-item.priority, item.norm_ref))
@@ -128,6 +166,9 @@ class SemanticViewBuilder:
             predicate_dsl=predicate_dsl,
             deontic_semantics=deontic,
             gate_decision_semantics=gates,
+            execution_context=surface.phase_context(
+                semantic_input.phase
+            ),
             selection_trace={
                 "active_scopes": sorted(active_scopes),
                 "input_triggers": sorted(input_triggers),
@@ -148,6 +189,8 @@ class SemanticViewBuilder:
             for binding in norm_bindings
             if binding.required_phase != "ALL_PHASES"
         }
+        if surface.phase_contexts:
+            phases.intersection_update(surface.phase_contexts)
         triggers = {
             trigger
             for norm_bindings in bindings.values()
@@ -158,7 +201,9 @@ class SemanticViewBuilder:
         return {
             "phases": tuple(sorted(phases)),
             "triggers": tuple(sorted(triggers)),
-            "layers": tuple(sorted(surface.norms_by_layer)),
+            "layers": tuple(sorted(
+                surface.accepted_layers or surface.norms_by_layer
+            )),
             "applicability_scopes": tuple(sorted(phases)),
             "norm_refs": tuple(sorted(surface.norm_ids)),
         }
@@ -171,19 +216,46 @@ class SemanticViewBuilder:
         semantic_input,
         predicate_evaluator,
     ):
-        when = _json_object_field(record, "when")
-        formal_result = predicate_evaluator.evaluate(
-            when,
-            semantic_input.predicate_context(),
-        )
+        when = _optional_json_object_field(record, "when")
+        predicate_context = semantic_input.predicate_context()
+        if record.predicate_mode == "runtime_typed":
+            applicability_predicate = _json_object_field(
+                record,
+                "applicability_predicate",
+            )
+            violation_predicate = _json_object_field(
+                record,
+                "violation_predicate",
+            )
+            formal_applicability = predicate_evaluator.evaluate(
+                applicability_predicate,
+                predicate_context,
+            )
+            formal_result = predicate_evaluator.evaluate(
+                violation_predicate,
+                predicate_context,
+            )
+        elif record.predicate_mode == "semantic_interpreted":
+            applicability_predicate = {}
+            violation_predicate = {}
+            formal_applicability = "UNKNOWN"
+            formal_result = "UNKNOWN"
+        else:
+            applicability_predicate = when
+            violation_predicate = when
+            formal_result = predicate_evaluator.evaluate(
+                when,
+                predicate_context,
+            )
+            formal_applicability = formal_result
         operation = record.fields.get("operation", "").strip()
         modality = record.fields.get("modality", "").strip()
         operations = deontic.get("operations", {})
         modality_map = deontic.get("modality_map", {})
 
-        if record.fields.get("card_status") != "ACTIVE":
+        if record.lifecycle_status != "ACTIVE":
             interpretation_status = "EVALUATION_ONLY_INACTIVE"
-        elif not _source_bool(record, "available_for_application"):
+        elif not record.available_for_application:
             interpretation_status = "EVALUATION_ONLY_NOT_APPLICABLE"
         elif (
             record.norm_type
@@ -213,10 +285,15 @@ class SemanticViewBuilder:
             execution_mode=record.fields.get("execution_mode", "").strip(),
             priority=priority,
             when=when,
+            applicability_predicate=applicability_predicate,
+            violation_predicate=violation_predicate,
+            formal_applicability_result=formal_applicability,
             formal_predicate_result=formal_result,
+            predicate_mode=record.predicate_mode,
             bindings=bindings,
             interpretation_status=interpretation_status,
             source_fields=record.fields,
+            source_record=record.source_record,
         )
 
     @staticmethod
@@ -283,6 +360,18 @@ class SemanticViewBuilder:
 
     @staticmethod
     def _load_bindings(surface):
+        if surface.applicability_by_norm:
+            return {
+                norm_ref: tuple(ApplicabilityBinding(
+                    required_phase=record.required_phase,
+                    application_kind=record.application_kind,
+                    triggers=record.triggers,
+                    reason=record.reason,
+                    owner=record.owner,
+                    review_status=record.review_status,
+                ) for record in records)
+                for norm_ref, records in surface.applicability_by_norm.items()
+            }
         try:
             payload = surface.read_bytes(PHASE_APPLICABILITY_PATH)
         except KeyError as exc:
@@ -365,6 +454,13 @@ def _json_object_field(record, field):
     if not isinstance(value, dict):
         raise SemanticViewError(f"{record.norm_id}.{field} must be a JSON object.")
     return value
+
+
+def _optional_json_object_field(record, field):
+    raw = record.fields.get(field, "")
+    if not raw:
+        return {}
+    return _json_object_field(record, field)
 
 
 def _json_string_array(raw, label):

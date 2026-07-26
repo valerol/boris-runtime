@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 
+from runtime_compatibility.profile import SEMANTIC_CONTEXT_WINDOW_ENV
 from semantic_executor.errors import SemanticCalculationError
 from semantic_executor.models import SemanticInput, SemanticView
 
 
-MAX_SEMANTIC_PROMPT_CHARACTERS = 200000
+MAX_SEMANTIC_PROMPT_CHARACTERS = 4_000_000
 
 
 class LLMSemanticCalculator:
@@ -17,6 +19,7 @@ class LLMSemanticCalculator:
         self.last_prompt = None
 
     def calculate(self, view: SemanticView, semantic_input: SemanticInput):
+        self._require_context_capacity(view)
         prompt = build_semantic_calculation_prompt(view, semantic_input)
         if len(prompt) > MAX_SEMANTIC_PROMPT_CHARACTERS:
             raise SemanticCalculationError(
@@ -44,6 +47,25 @@ class LLMSemanticCalculator:
             )
         return output
 
+    @staticmethod
+    def _require_context_capacity(view):
+        minimum = view.execution_context.get(
+            "minimum_context_window_tokens",
+            0,
+        )
+        if not minimum:
+            return
+        raw = os.getenv(SEMANTIC_CONTEXT_WINDOW_ENV, "").strip()
+        try:
+            available = int(raw)
+        except ValueError:
+            available = 0
+        if available < minimum:
+            raise SemanticCalculationError(
+                f"{SEMANTIC_CONTEXT_WINDOW_ENV} must be at least {minimum} "
+                f"for Core phase {view.phase}; configured={available}."
+            )
+
 
 def build_semantic_calculation_prompt(
     view: SemanticView,
@@ -65,11 +87,21 @@ def build_semantic_calculation_prompt(
         "candidate_result. Copy core_ref and phase exactly. Return exactly one "
         "norm_results item for every supplied candidate and no other norm. Each "
         "item must contain exactly norm_ref, layer, operation, predicate_result, "
-        "applicability, reason, unknowns. Copy layer, operation, and the Runtime-"
-        "computed formal_predicate_result exactly into predicate_result. "
-        "Applicability is TRUE, FALSE, or UNKNOWN and may refine but must never "
-        "upgrade a FALSE, UNKNOWN, or ERROR formal predicate to TRUE. A formal "
-        "ERROR is a repair condition and should use UNKNOWN applicability. Each "
+        "applicability, reason, unknowns. Copy layer and operation exactly. "
+        "Follow each candidate's predicate_mode. For legacy_formal, copy "
+        "formal_predicate_result and never upgrade FALSE, UNKNOWN, or ERROR "
+        "applicability to TRUE. For runtime_typed, copy "
+        "formal_applicability_result into applicability and "
+        "formal_predicate_result into predicate_result; predicate_result is the "
+        "typed violation result, so FALSE means no violation. For "
+        "semantic_interpreted, determine applicability from the phenomenon and "
+        "the complete norm record, then use predicate_result for the semantic "
+        "violation result: TRUE means a violation is present, FALSE means it is "
+        "not present, UNKNOWN means material information is unresolved, and "
+        "ERROR means the norm cannot be evaluated. Applicability uses the same "
+        "four values; an applicability ERROR is a contract defect. Never treat "
+        "an internal "
+        "violation.* selector as operator-owned input. Each "
         "conflict must "
         "contain exactly norm_refs, kind, disposition, reason; disposition is "
         "HOLD or STOP. alternatives is an array of JSON objects describing "

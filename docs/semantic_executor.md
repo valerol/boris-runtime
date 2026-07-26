@@ -68,26 +68,31 @@ candidate norms.
 
 ## Semantic View
 
-The view reads, from the same verified package:
+The view reads only the stable immutable `CoreSurface`. Package paths and
+release dialects are resolved earlier by `core_surface.contracts`.
 
-- `assurance/NORM_CATALOG.tsv`;
-- `assurance/NORM_PHASE_APPLICABILITY.tsv`;
-- `machine/CORE_CANON.json#predicate_dsl`;
-- `machine/CORE_CANON.json#deontic_semantics`;
-- `machine/CORE_CANON.json#gate_decision_semantics`.
+For legacy packages, that adapter projects the norm and applicability TSV
+catalogs. For public Core v2, it projects the canonical JSON norm records,
+phase-complete selector, operational semantics, gate contracts, accepted
+layers, boot/phase capsules, and per-phase context budget.
 
 Candidate selection is mechanical:
 
 1. native layer;
 2. current phase, `ALL_PHASES`, or an explicit extra scope;
-3. wildcard, matching input trigger, or an explicit targeted evaluation;
+3. package selector completeness, or for legacy contracts a wildcard,
+   matching input trigger, or an explicit targeted evaluation;
 4. lifecycle availability for evaluation.
 
-The current phase and trigger select candidates only. Semantic applicability
-remains an LLM calculation.
+Public Core v2 declares task-specific narrowing disabled. Runtime therefore
+selects the complete accepted Base set for the phase; request triggers cannot
+remove norms. Semantic applicability for `KERNEL_INTERPRETED` norms remains an
+LLM calculation.
 
-The candidate set is limited to 64 norms. Oversized sets and calculation prompts
-are rejected rather than silently truncated.
+Legacy candidate sets retain the 64-norm safety limit. Public Core v2 supplies
+its maximum accepted phase count through the normalized compatibility
+contract, with an independent Runtime safety ceiling of 1,024 norms. Oversized
+sets and calculation prompts are rejected rather than silently truncated.
 
 ## Predicate DSL
 
@@ -98,15 +103,32 @@ legacy three-valued contract and the current four-valued contract:
 TRUE | FALSE | UNKNOWN | ERROR
 ```
 
-The current evaluator implements the Core v2.23 release operator vocabulary:
+The current evaluator implements the Core v2.31 release operator vocabulary:
 logical composition, literals, existence and non-empty checks, typed equality
 and enum membership, array bounds and uniqueness, identifier checks, scope
-relations, subject/cycle relations, and package reference resolution. Legacy
-`gte` and `scope_match` remain supported for older compatible sources.
+relations, subject/cycle relations, package reference resolution, typed pair
+membership, ordered ranks, array-wide facts, HTTPS collections, and local
+schema validation. Legacy `gte` and `scope_match` remain supported for older
+compatible sources.
 
 A missing path remains `UNKNOWN`. Material unknowns constrain the final
 candidate to `HOLD`; a formal `ERROR` is a predicate or type defect and
 constrains the gate to `REPAIR`.
+
+Public Core v2 separates predicate ownership:
+
+- `KERNEL_COMPUTED_TYPED_PREDICATE` records expose independent
+  `applicability_predicate` and `violation_predicate`; Runtime computes both
+  deterministically;
+- `KERNEL_INTERPRETED` records expose canonical semantic content for the
+  calculator; their applicability and violation result are semantic outputs;
+- internal `violation.*` selectors are never converted into operator-owned
+  inputs.
+
+The prompt includes the normalized phase execution context (boot capsule,
+phase capsule, and budget declaration). Runtime requires the configured model
+capacity to meet the Core phase minimum. It never drops norms to fit a smaller
+model context.
 
 ## LLM Contract
 

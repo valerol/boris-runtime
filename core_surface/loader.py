@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import csv
 import hashlib
-import io
 import stat
 import zipfile
-from collections import defaultdict
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
+from core_surface.contracts import normalize_contract
 from core_surface.errors import CatalogError, LifecycleError, PackageLayoutError
 from core_surface.integrity import (
     MANIFEST_PATH,
@@ -20,10 +18,9 @@ from core_surface.manifest import parse_manifest, validate_relative_path
 from core_surface.models import CoreSurface, NormRecord
 
 
-NORM_CATALOG_PATH = "assurance/NORM_CATALOG.tsv"
 MAX_FILE_COUNT = 256
 MAX_FILE_SIZE = 32 * 1024 * 1024
-MAX_PACKAGE_SIZE = 64 * 1024 * 1024
+MAX_PACKAGE_SIZE = 128 * 1024 * 1024
 PURPOSES = {"evaluation", "active"}
 IGNORED_DIRECTORY_NAMES = {".git"}
 
@@ -48,7 +45,10 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
     if MANIFEST_PATH not in payloads:
         raise PackageLayoutError("MANIFEST.json is missing from the package root.")
 
-    manifest = parse_manifest(payloads[MANIFEST_PATH])
+    manifest = parse_manifest(
+        payloads[MANIFEST_PATH],
+        payloads=payloads,
+    )
     if (
         manifest.root_directory is not None
         and manifest.root_directory != root_directory
@@ -60,19 +60,28 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
 
     _validate_lifecycle(manifest.status, purpose)
     validate_integrity(manifest, payloads)
-    machine_canon = validate_identity(
+    source_machine_canon = validate_identity(
         manifest,
         payloads,
         archive_sha256=archive_hash,
     )
-    release_flavor = manifest.release_flavor or machine_canon.get(
+    (
+        machine_canon,
+        norms_by_layer,
+        norm_index,
+        applicability_by_norm,
+        phase_descriptions,
+        phase_contexts,
+        accepted_layers,
+        compatibility_contract,
+    ) = normalize_contract(manifest, payloads)
+    release_flavor = manifest.release_flavor or source_machine_canon.get(
         "release_flavor"
     )
     if not isinstance(release_flavor, str) or not release_flavor.strip():
         raise PackageLayoutError(
             "The package does not expose a non-empty release flavor."
         )
-    norms_by_layer, norm_index = _load_norm_catalog(payloads)
     declared_counts = manifest.raw.get(
         "catalog_counts",
         manifest.raw.get("normative_counts"),
@@ -97,6 +106,11 @@ def load_core_surface(source, *, purpose="evaluation") -> CoreSurface:
         norms_by_layer=norms_by_layer,
         _norm_index=norm_index,
         _payloads=payloads,
+        applicability_by_norm=applicability_by_norm,
+        phase_descriptions=phase_descriptions,
+        phase_contexts=phase_contexts,
+        accepted_layers=accepted_layers,
+        compatibility_contract=compatibility_contract,
         manifest_dialect=manifest.manifest_dialect,
         release_package_id=manifest.release_package_id,
         release_version=manifest.release_version,
@@ -204,48 +218,6 @@ def _safe_zip_parts(filename: str) -> tuple[str, ...]:
     if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise PackageLayoutError(f"Unsafe ZIP path: {filename!r}")
     return path.parts
-
-
-def _load_norm_catalog(
-    payloads: dict[str, bytes],
-) -> tuple[dict[str, tuple[NormRecord, ...]], dict[str, NormRecord]]:
-    if NORM_CATALOG_PATH not in payloads:
-        raise CatalogError(f"Required norm catalog is missing: {NORM_CATALOG_PATH}")
-    try:
-        text = payloads[NORM_CATALOG_PATH].decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CatalogError(f"{NORM_CATALOG_PATH} is not valid UTF-8.") from exc
-
-    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
-    required_columns = {"norm_id", "layer", "norm_type"}
-    if not reader.fieldnames or not required_columns.issubset(reader.fieldnames):
-        raise CatalogError(f"{NORM_CATALOG_PATH} is missing required columns.")
-
-    layers = defaultdict(list)
-    index = {}
-    for row_number, row in enumerate(reader, start=2):
-        norm_id = (row.get("norm_id") or "").strip()
-        layer = (row.get("layer") or "").strip()
-        norm_type = (row.get("norm_type") or "").strip()
-        if not norm_id or not layer or not norm_type:
-            raise CatalogError(f"Incomplete norm identity on row {row_number}.")
-        if norm_id in index:
-            raise CatalogError(f"Duplicate norm ID: {norm_id}")
-        record = NormRecord(
-            norm_id=norm_id,
-            layer=layer,
-            norm_type=norm_type,
-            fields=row,
-        )
-        layers[layer].append(record)
-        index[norm_id] = record
-
-    if not index:
-        raise CatalogError(f"{NORM_CATALOG_PATH} contains no norms.")
-    return {
-        layer: tuple(records)
-        for layer, records in layers.items()
-    }, index
 
 
 def _validate_catalog_counts(

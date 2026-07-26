@@ -509,7 +509,10 @@ def build_semantic_input_prompt(surface, source, catalog) -> str:
         "triggers, applicability_scopes, requested_norm_refs, evaluate_inactive. "
         "Copy phenomenon, facts, evidence, and authority exactly from source. "
         "Preserve all supplied unknowns; add only material uncertainties disclosed "
-        "by the request or necessary missing information. Choose exactly one phase "
+        "by the request or necessary missing source information. Requested output "
+        "sections, questions to answer, analytical steps, and deliverables are "
+        "work for the semantic calculator, not unknown facts and not operator "
+        "resolution targets. Choose exactly one phase "
         "from allowed.phases. Use only listed triggers, layers, scopes, and norm "
         "references. requested_norm_refs may contain only a norm explicitly named "
         "in the input or supplied requested_norm_refs. Set evaluate_inactive to "
@@ -566,9 +569,14 @@ def _source_semantic_material(user_input: str, context: Mapping | None) -> dict:
 
 def _phase_hints(surface, allowed_phases) -> list[dict[str, str]]:
     hints = {
-        phase: {"phase": phase, "name": ""}
+        phase: {
+            "phase": phase,
+            "name": surface.phase_descriptions.get(phase, ""),
+        }
         for phase in allowed_phases
     }
+    if surface.phase_descriptions:
+        return list(hints.values())
     try:
         crosswalk = surface.read_json(PHASE_CROSSWALK_PATH)
     except (KeyError, UnicodeDecodeError, ValueError):

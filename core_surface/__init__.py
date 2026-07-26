@@ -7,10 +7,17 @@ from core_surface.errors import (
     PackageLayoutError,
 )
 from core_surface.loader import load_core_surface
-from core_surface.models import ComponentRecord, CoreSurface, ManifestRecord, NormRecord
+from core_surface.models import (
+    ApplicabilityRecord,
+    ComponentRecord,
+    CoreSurface,
+    ManifestRecord,
+    NormRecord,
+)
 
 
 __all__ = [
+    "ApplicabilityRecord",
     "CatalogError",
     "ComponentRecord",
     "CoreSurface",

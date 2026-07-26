@@ -5,6 +5,8 @@ The active roadmap is maintained in [docs/roadmap.md](docs/roadmap.md).
 Current implemented boundary:
 
 - Core Surface package trust;
+- versioned public Core v2.31 contract adaptation into the stable Runtime
+  surface;
 - Runtime compatibility and attestation;
 - isolated, non-executing Semantic Executor;
 - Semantic Input compilation and the `boris-execution/1.0` candidate envelope;
