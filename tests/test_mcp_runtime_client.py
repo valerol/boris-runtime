@@ -90,7 +90,8 @@ def test_execute_posts_to_runtime_execute_with_expected_body():
         "status": "semantic_candidate",
         "phase": "C03",
         "gate": "HOLD",
-        "candidate_result": {},
+        "candidate_result": None,
+        "candidate_unavailable_reason": "No safe candidate is available.",
         "norm_results": [],
         "unknowns": [],
         "conflicts": [],
@@ -130,6 +131,48 @@ def test_execute_posts_to_runtime_execute_with_expected_body():
         },
     }
     assert response == candidate
+
+
+def test_execute_resume_posts_only_signed_continuation_material():
+    captured = {}
+
+    def handler(request):
+        captured["body"] = json.loads(
+            request.content.decode("utf-8")
+        )
+        return httpx.Response(
+            200,
+            json={
+                "execution_version": "boris-execution/1.0",
+                "session_id": "test",
+                "status": "semantic_candidate",
+                "phase": "C03",
+                "gate": "PASS",
+                "candidate_result": {"summary": "Resumed candidate."},
+                "norm_results": [],
+                "unknowns": [],
+                "conflicts": [],
+                "alternatives": [],
+                "limitations": [],
+            },
+        )
+
+    client = RuntimeAPIClient(
+        "http://runtime.test",
+        transport=httpx.MockTransport(handler),
+    )
+    resume = {
+        "continuation_token": "v1.payload.signature",
+        "operator_input": "Conditional analysis is allowed.",
+    }
+
+    client.execute(session_id="test", resume=resume)
+
+    assert captured["body"] == {
+        "session_id": "test",
+        "context": {},
+        "resume": resume,
+    }
 
 
 def test_frame_runtime_error_json_is_available_on_runtime_api_error():

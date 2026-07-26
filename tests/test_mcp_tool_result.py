@@ -33,13 +33,19 @@ def test_execution_payload_becomes_candidate_tool_result():
         "conflicts": [],
         "alternatives": [],
         "limitations": ["not_independently_reviewed"],
+        "hold": {
+            "required_operator_input": {
+                "question": "Provide the missing information.",
+            },
+            "continuation_token": "v1.payload.signature",
+        },
     }
 
     result = normalize_execution_tool_result(payload)
 
     assert result["structuredContent"] == payload
     assert result["content"][0]["text"].startswith(
-        "Present the Runtime ExecutionCandidate"
+        "BORIS returned HOLD."
     )
     assert "Do not replace it with an independently generated answer" in (
         result["content"][0]["text"]

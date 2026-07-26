@@ -25,9 +25,10 @@ class FakeContextProvider:
 
 
 class FakeExecutionService:
-    def __init__(self, error=None, gate="HOLD"):
+    def __init__(self, error=None, gate="HOLD", empty_candidate=False):
         self.error = error
         self.gate = gate
+        self.empty_candidate = empty_candidate
         self.calls = []
 
     def execute(
@@ -35,11 +36,23 @@ class FakeExecutionService:
         user_input,
         session_id=None,
         context=None,
+        resume=None,
     ):
-        self.calls.append((user_input, session_id, context))
+        if resume is None:
+            self.calls.append((user_input, session_id, context))
+        else:
+            self.calls.append(
+                (user_input, session_id, context, resume)
+            )
         if self.error:
             raise self.error
-        return execution_packet(session_id, gate=self.gate)
+        packet = execution_packet(session_id, gate=self.gate)
+        if self.empty_candidate:
+            packet["candidate_result"] = None
+            packet["candidate_unavailable_reason"] = (
+                "No conditional candidate is available."
+            )
+        return packet
 
 
 def test_health_returns_ok():
@@ -177,6 +190,74 @@ def test_runtime_execute_hold_is_a_normal_runtime_result(monkeypatch):
     assert response.status_code == 200
     assert response.json()["gate"] == "HOLD"
     assert response.json()["status"] == "semantic_candidate"
+    assert response.json()["hold"]["status"] == (
+        "operator_input_required"
+    )
+
+
+def test_runtime_execute_preserves_explicit_null_hold_candidate(
+    monkeypatch,
+):
+    service = FakeExecutionService(
+        gate="HOLD",
+        empty_candidate=True,
+    )
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={"input": "Explain BOIS Runtime"},
+    )
+
+    assert response.status_code == 200
+    assert "candidate_result" in response.json()
+    assert response.json()["candidate_result"] is None
+    assert response.json()["candidate_unavailable_reason"] == (
+        "No conditional candidate is available."
+    )
+
+
+def test_runtime_execute_resume_delegates_signed_handoff(monkeypatch):
+    service = FakeExecutionService(gate="PASS")
+    monkeypatch.setattr(app_module, "execution_service", service)
+    resume = {
+        "continuation_token": "v1.payload.signature",
+        "operator_input": {
+            "statement": "Conditional analysis is allowed.",
+            "values": {},
+            "resolved_unknowns": ["Permission is unknown."],
+        },
+    }
+
+    response = client.post(
+        "/runtime/execute",
+        json={
+            "session_id": "execution-test",
+            "resume": resume,
+        },
+    )
+
+    assert response.status_code == 200
+    assert service.calls == [
+        (None, "execution-test", {}, resume)
+    ]
+
+
+def test_runtime_execute_requires_input_xor_resume():
+    neither = client.post("/runtime/execute", json={})
+    both = client.post(
+        "/runtime/execute",
+        json={
+            "input": "Initial input",
+            "resume": {
+                "continuation_token": "v1.payload.signature",
+                "operator_input": "Continue.",
+            },
+        },
+    )
+
+    assert neither.status_code == 422
+    assert both.status_code == 422
 
 
 def test_runtime_execute_missing_acceptance_fails_closed(monkeypatch):
@@ -303,7 +384,7 @@ def frame_packet(user_input, session_id):
 
 
 def execution_packet(session_id, gate="HOLD"):
-    return {
+    packet = {
         "execution_version": "boris-execution/1.0",
         "session_id": session_id,
         "status": "semantic_candidate",
@@ -321,3 +402,23 @@ def execution_packet(session_id, gate="HOLD"):
             "no_external_action",
         ],
     }
+    if gate == "HOLD":
+        packet["hold"] = {
+            "handoff_version": "boris-hold-handoff/1.0",
+            "status": "operator_input_required",
+            "reason": "Material information remains unresolved.",
+            "required_operator_input": {
+                "question": "Provide the missing information.",
+                "unknowns": ["Permission is unknown."],
+                "fields": [],
+                "response_contract": {
+                    "statement": "Plain text.",
+                    "values": "Optional object.",
+                    "resolved_unknowns": "Optional array.",
+                },
+            },
+            "continuation_token": "v1.payload.signature",
+            "expires_at": "2026-07-25T12:00:00+00:00",
+            "resume_count": 0,
+        }
+    return packet

@@ -7,7 +7,14 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from mcp_server.config import MCPServerConfig
-from mcp_server.server import TOOL_ANNOTATIONS, create_mcp_server, create_remote_app, main
+from mcp_server.server import (
+    DEVELOPER_SURFACE_MIME_TYPE,
+    DEVELOPER_SURFACE_URI,
+    TOOL_ANNOTATIONS,
+    create_mcp_server,
+    create_remote_app,
+    main,
+)
 
 
 def test_remote_transport_builds_app_with_configured_path_and_health():
@@ -50,6 +57,7 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
     assert "ExecutionCandidate" in execute_tool.description
     assert "not independently reviewed" in execute_tool.description
     assert "mode" not in execute_tool.inputSchema["properties"]
+    assert "resume" in execute_tool.inputSchema["properties"]
     assert execute_tool.annotations.readOnlyHint is True
     assert execute_tool.annotations.openWorldHint is False
     assert execute_tool.annotations.destructiveHint is False
@@ -58,6 +66,54 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
         "openWorldHint": False,
         "destructiveHint": False,
     }
+
+
+def test_developer_mode_links_one_ui_resource_to_execute_tool():
+    server = create_mcp_server(
+        MCPServerConfig(developer_surface=True)
+    )
+
+    tools = asyncio.run(server.list_tools())
+    resources = asyncio.run(server.list_resources())
+    contents = asyncio.run(
+        server.read_resource(DEVELOPER_SURFACE_URI)
+    )
+    execute_tool = next(
+        item for item in tools
+        if item.name == "boris.execute"
+    )
+
+    assert execute_tool.meta["ui"]["resourceUri"] == (
+        DEVELOPER_SURFACE_URI
+    )
+    assert execute_tool.meta["ui"]["visibility"] == [
+        "model",
+        "app",
+    ]
+    assert execute_tool.meta["openai/outputTemplate"] == (
+        DEVELOPER_SURFACE_URI
+    )
+    assert len(resources) == 1
+    assert str(resources[0].uri) == DEVELOPER_SURFACE_URI
+    assert contents[0].mime_type == DEVELOPER_SURFACE_MIME_TYPE
+    assert "BORIS Developer Surface" in contents[0].content
+    assert "tools/call" in contents[0].content
+    assert contents[0].meta["ui"]["csp"] == {
+        "connectDomains": [],
+        "resourceDomains": [],
+    }
+
+
+def test_production_mode_does_not_publish_developer_surface():
+    server = create_mcp_server(
+        MCPServerConfig(developer_surface=False)
+    )
+
+    tools = asyncio.run(server.list_tools())
+    resources = asyncio.run(server.list_resources())
+
+    assert tools[0].meta is None
+    assert resources == []
 
 
 def test_unsupported_transport_fails_clearly(monkeypatch):
@@ -102,9 +158,53 @@ async def test_streamable_http_client_receives_native_structured_content(monkeyp
     assert execution_result.structuredContent["status"] == "semantic_candidate"
     assert execution_result.structuredContent["gate"] == "HOLD"
     result_text = execution_result.content[0].text
-    assert result_text.startswith("Present the Runtime ExecutionCandidate")
+    assert result_text.startswith("BORIS returned HOLD.")
     assert "Do not replace it with an independently generated answer" in result_text
     assert '"structuredContent"' not in result_text
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_hides_trace_from_model_and_sends_it_to_ui_meta(
+    monkeypatch,
+):
+    import mcp_server.server as server_module
+
+    monkeypatch.setattr(
+        server_module,
+        "RuntimeAPIClient",
+        FakeDeveloperRuntimeAPIClient,
+    )
+    app = create_remote_app(MCPServerConfig(
+        path="/mcp",
+        developer_surface=True,
+    ))
+    transport = httpx.ASGITransport(app=app)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:9000",
+        ) as http_client:
+            async with streamable_http_client(
+                "http://127.0.0.1:9000/mcp",
+                http_client=http_client,
+            ) as (read_stream, write_stream, _get_session_id):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                ) as session:
+                    await session.initialize()
+                    result = await session.call_tool(
+                        "boris.execute",
+                        {"input": "Explain BOIS Runtime"},
+                    )
+
+    assert "developer_trace" not in result.structuredContent
+    assert "developer_trace" not in result.content[0].text
+    assert result.meta["developer_trace"] == {
+        "trace_version": "boris-execution-trace/1.0",
+        "semantic_execution": {"constrained_gate": "HOLD"},
+    }
 
 
 class FakeRuntimeAPIClient:
@@ -120,6 +220,16 @@ class FakeRuntimeAPIClient:
     def execute(self, input, session_id=None, context=None):
         packet = execution_packet()
         packet["session_id"] = session_id or packet["session_id"]
+        return packet
+
+
+class FakeDeveloperRuntimeAPIClient(FakeRuntimeAPIClient):
+    def execute(self, input, session_id=None, context=None):
+        packet = super().execute(input, session_id, context)
+        packet["developer_trace"] = {
+            "trace_version": "boris-execution-trace/1.0",
+            "semantic_execution": {"constrained_gate": "HOLD"},
+        }
         return packet
 
 
@@ -141,4 +251,18 @@ def execution_packet():
             "no_state_mutation",
             "no_external_action",
         ],
+        "hold": {
+            "handoff_version": "boris-hold-handoff/1.0",
+            "status": "operator_input_required",
+            "reason": "Material information remains unresolved.",
+            "required_operator_input": {
+                "question": "Provide the missing information.",
+                "unknowns": ["Independent review is absent."],
+                "fields": [],
+                "response_contract": {},
+            },
+            "continuation_token": "v1.payload.signature",
+            "expires_at": "2026-07-25T12:00:00+00:00",
+            "resume_count": 0,
+        },
     }

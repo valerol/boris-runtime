@@ -34,7 +34,7 @@ def test_boris_execute_calls_runtime_api_client_and_returns_candidate():
     assert response["structuredContent"] == packet
     assert response["content"][0]["type"] == "text"
     assert response["content"][0]["text"].startswith(
-        "Present the Runtime ExecutionCandidate"
+        "BORIS returned HOLD."
     )
     assert "Do not replace it with an independently generated answer" in (
         response["content"][0]["text"]
@@ -71,7 +71,7 @@ def test_boris_execute_surfaces_runtime_error_payload():
     }
 
 
-def test_developer_execute_instructs_chatgpt_to_show_trace_before_candidate():
+def test_developer_execute_moves_trace_to_component_only_metadata():
     packet = _execution_packet()
     packet["developer_trace"] = {
         "trace_version": "boris-execution-trace/1.0",
@@ -85,10 +85,36 @@ def test_developer_execute_instructs_chatgpt_to_show_trace_before_candidate():
     )
 
     text = response["content"][0]["text"]
-    assert text.startswith("Developer mode is active.")
-    assert text.index("developer_trace:") < text.index("ExecutionCandidate:")
-    assert '"trace_version": "boris-execution-trace/1.0"' in text
-    assert response["structuredContent"]["developer_trace"] == packet["developer_trace"]
+    assert text.startswith("BORIS returned HOLD.")
+    assert "developer_trace" not in text
+    assert "developer_trace" not in response["structuredContent"]
+    assert response["_meta"]["developer_trace"] == packet[
+        "developer_trace"
+    ]
+    assert response["_meta"]["developer_surface_version"] == "1.0"
+
+
+def test_boris_execute_forwards_resume_to_runtime():
+    client = FakeRuntimeClient(response=_execution_packet())
+    resume = {
+        "continuation_token": "v1.payload.signature",
+        "operator_input": "Conditional analysis is allowed.",
+    }
+
+    run_boris_execute(
+        session_id="test",
+        resume=resume,
+        client=client,
+    )
+
+    assert client.calls == [
+        {
+            "input": None,
+            "session_id": "test",
+            "context": {},
+            "resume": resume,
+        }
+    ]
 
 
 def test_mcp_adapter_does_not_import_runtime_internals():
@@ -123,4 +149,18 @@ def _execution_packet():
             "no_state_mutation",
             "no_external_action",
         ],
+        "hold": {
+            "handoff_version": "boris-hold-handoff/1.0",
+            "status": "operator_input_required",
+            "reason": "Material information remains unresolved.",
+            "required_operator_input": {
+                "question": "Provide the missing information.",
+                "unknowns": ["Independent review is absent."],
+                "fields": [],
+                "response_contract": {},
+            },
+            "continuation_token": "v1.payload.signature",
+            "expires_at": "2026-07-25T12:00:00+00:00",
+            "resume_count": 0,
+        },
     }

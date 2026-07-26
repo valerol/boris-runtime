@@ -22,6 +22,7 @@ class MCPServerConfig:
     path: str = DEFAULT_PATH
     allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS
     allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS
+    developer_surface: bool = False
 
 
 def load_config():
@@ -34,6 +35,9 @@ def load_config():
         path=_path_env("BORIS_MCP_PATH", DEFAULT_PATH),
         allowed_hosts=_csv_env("BORIS_MCP_ALLOWED_HOSTS"),
         allowed_origins=_csv_env("BORIS_MCP_ALLOWED_ORIGINS"),
+        developer_surface=(
+            os.getenv("BORIS_RUNTIME_MODE", "").strip().lower() == "dev"
+        ),
     )
 
 

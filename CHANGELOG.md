@@ -4,6 +4,23 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Closed the `HOLD` operator handoff with a structured question, unresolved
+  targets, formal predicate input paths, and an HMAC-SHA256 stateless
+  continuation token bound to the exact `SemanticInput`, Core identity,
+  session, expiry, and resume count.
+- Added resume to the sole `boris.execute` entry. Runtime verifies the signed
+  state, records operator evidence, accepts values only for paths declared by
+  the signed HOLD, skips repeated Semantic Input compilation, and recalculates
+  the same non-mutating semantic route.
+- Rejected empty public `candidate_result` objects. A `HOLD` may expose `null`
+  only with `candidate_unavailable_reason`; every other gate requires a
+  non-empty candidate.
+- Added the developer-only MCP Apps resource
+  `ui://boris/developer-surface-v1.html` with an interactive HOLD resume form,
+  constrained-gate summary, candidate projection, and expandable safe trace.
+  The trace now travels only through component-only tool-result `_meta`; it is
+  absent from model-visible `content` and `structuredContent`. Production mode
+  publishes no Developer Surface resource.
 - Clarified the Semantic Executor prompt contract so source-only `norm_type`,
   `modality`, `when`, `predicate`, and `formulation` remain in `semantic_view`
   and are not copied into the strict seven-field `norm_results` output.

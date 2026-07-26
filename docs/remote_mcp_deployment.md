@@ -26,12 +26,26 @@ BOIS_LLM=openai
 OPENAI_MODEL=gpt-4o
 ```
 
-Tracked `.env` also declares `OPENAI_API_KEY=` as an empty secret placeholder.
-Store the real value only in ignored `.env.local`:
+Tracked `.env` also declares `OPENAI_API_KEY=` and
+`BORIS_CONTINUATION_SECRET=` as empty secret placeholders. Store the real
+values only in ignored `.env.local`:
 
 ```bash
 OPENAI_API_KEY=...
+BORIS_CONTINUATION_SECRET=...
 ```
+
+Generate at least 32 random bytes, for example:
+
+```bash
+openssl rand -hex 32
+```
+
+Assign the output to `BORIS_CONTINUATION_SECRET`. Runtime uses it to sign and
+verify stateless HOLD continuation tokens. Keep
+`BORIS_CONTINUATION_TTL_SECONDS=3600` from tracked `.env` unless a shorter
+operator-response window is desired. The accepted range is 60 through 86400
+seconds. Changing the secret invalidates every unexpired continuation token.
 
 Runtime entry points load `.env` followed by `.env.local`. Existing process
 variables remain authoritative; otherwise `.env.local` overrides tracked
@@ -64,7 +78,9 @@ Available public MCP tools:
 
 - `boris.execute`: calls private `/runtime/execute`; Runtime verifies
   compatibility, compiles a strict `SemanticInput`, invokes the existing
-  Semantic Executor, and returns a non-mutating `ExecutionCandidate`.
+  Semantic Executor, and returns a non-mutating `ExecutionCandidate`. A HOLD
+  returns a signed operator handoff; resume calls the same tool and bypasses
+  repeated input compilation.
 
 There is no public `boris.frame` alias. Frame diagnostics and answer validation
 remain available through the private Runtime API and are not registered as
@@ -144,6 +160,12 @@ also reports missing or mismatched explicit acceptance through a controlled
 error.
 Production output omits diagnostic trace data.
 
+A `HOLD` response contains `hold.required_operator_input` and a signed
+`continuation_token`. The token contains the exact semantic continuation state
+but no server secret. It is replayable until expiry because this stage has no
+persistent token registry. Apply rate limits to `/mcp`, keep the TTL bounded,
+and rotate `BORIS_CONTINUATION_SECRET` to invalidate all outstanding tokens.
+
 `/runtime/frame` returns packets with `packet_version:
 "boris-context/2.0"`, `runtime_mode: "context_provider"`, `llm_called: false`,
 and Core Surface projection bounded to 6 chunks, 3000 characters per chunk,
@@ -197,18 +219,22 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS. Use boris.execute for the Runtime semantic route. Present its ExecutionCandidate without replacing it with an independent answer or weakening HOLD, STOP, or REPAIR.
+Connects ChatGPT to BORIS. Use boris.execute for the Runtime semantic route. Present its ExecutionCandidate without replacing it with an independent answer or weakening HOLD, STOP, or REPAIR. For HOLD, request the specified operator input and resume only through the signed continuation.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
 
 Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
 `boris-execution-trace/1.0`. The execution request has no mode selector.
-Through MCP, ChatGPT presents the complete safe
-trace before the candidate. The trace combines lexical projection,
-`SemanticInput`, RuntimeAttestation, norm and predicate results, constrained
-gate, validation issues, stage ledger, and timings. It contains no hidden
-prompts, chain-of-thought, server secrets, or absolute server paths.
+The MCP server reads the same non-secret mode setting and links
+`boris.execute` to `ui://boris/developer-surface-v1.html`. The component
+receives the complete safe trace through tool-result `_meta`, hidden from the
+model, and displays it alongside the candidate and HOLD resume form. The trace
+combines lexical projection, `SemanticInput`, RuntimeAttestation, norm and
+predicate results, constrained gate, validation issues, continuation status,
+stage ledger, and timings. It contains no continuation token, hidden prompts,
+chain-of-thought, server secrets, or absolute server paths. With any other mode,
+the MCP server does not publish the Developer Surface resource.
 
 Local smoke tests:
 

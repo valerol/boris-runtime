@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BORIS Developer Surface</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+      background: var(--color-background-primary, #f7f7f5);
+      color: var(--color-text-primary, #171717);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 0;
+      background:
+        radial-gradient(circle at top right, rgba(43, 116, 255, 0.12), transparent 36%),
+        var(--color-background-primary, #f7f7f5);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    .surface {
+      display: grid;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .header,
+    .summary,
+    .panel {
+      border: 1px solid var(--color-border-default, rgba(23, 23, 23, 0.14));
+      border-radius: 14px;
+      background: var(--color-background-secondary, rgba(255, 255, 255, 0.82));
+      box-shadow: 0 10px 28px rgba(23, 23, 23, 0.06);
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+    }
+
+    .identity {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 0;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      background: #171717;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 760;
+      letter-spacing: 0.08em;
+    }
+
+    h1,
+    h2,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    .subtitle,
+    .muted {
+      color: var(--color-text-secondary, #666666);
+      font-size: 12px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 7px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: rgba(23, 23, 23, 0.08);
+      font-size: 11px;
+      font-weight: 720;
+      letter-spacing: 0.04em;
+    }
+
+    .chip[data-gate="PASS"] {
+      background: rgba(24, 138, 77, 0.14);
+      color: #0a713b;
+    }
+
+    .chip[data-gate="HOLD"] {
+      background: rgba(213, 139, 16, 0.17);
+      color: #8a5500;
+    }
+
+    .chip[data-gate="STOP"],
+    .chip[data-gate="REPAIR"] {
+      background: rgba(202, 49, 49, 0.14);
+      color: #a22424;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      overflow: hidden;
+    }
+
+    .metric {
+      padding: 12px 14px;
+      border-right: 1px solid var(--color-border-default, rgba(23, 23, 23, 0.12));
+    }
+
+    .metric:last-child {
+      border-right: 0;
+    }
+
+    .metric-label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--color-text-secondary, #666666);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      display: block;
+      overflow: hidden;
+      font-size: 14px;
+      font-weight: 690;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .panel {
+      padding: 15px 16px;
+    }
+
+    .panel h2 {
+      margin-bottom: 10px;
+      font-size: 13px;
+      letter-spacing: 0.01em;
+    }
+
+    .hold-panel {
+      border-color: rgba(213, 139, 16, 0.34);
+      background: linear-gradient(
+        145deg,
+        rgba(255, 247, 226, 0.96),
+        rgba(255, 255, 255, 0.84)
+      );
+    }
+
+    .question {
+      font-size: 14px;
+      font-weight: 660;
+      line-height: 1.45;
+    }
+
+    .unknown-list {
+      display: grid;
+      gap: 7px;
+      margin: 12px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .unknown-list label {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .field-grid {
+      display: grid;
+      gap: 9px;
+      margin-top: 12px;
+    }
+
+    .field-card {
+      display: grid;
+      grid-template-columns: minmax(140px, 0.8fr) minmax(160px, 1.2fr);
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid rgba(23, 23, 23, 0.1);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.66);
+    }
+
+    .path {
+      overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .constraint {
+      margin-top: 3px;
+      color: var(--color-text-secondary, #666666);
+      font-size: 10px;
+      line-height: 1.3;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--color-border-default, rgba(23, 23, 23, 0.2));
+      border-radius: 9px;
+      background: var(--color-background-primary, #ffffff);
+      color: inherit;
+      outline: none;
+    }
+
+    input,
+    select {
+      min-height: 36px;
+      padding: 7px 9px;
+    }
+
+    textarea {
+      min-height: 84px;
+      margin-top: 12px;
+      padding: 9px 10px;
+      resize: vertical;
+      line-height: 1.4;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #2b74ff;
+      box-shadow: 0 0 0 3px rgba(43, 116, 255, 0.14);
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .primary {
+      min-height: 38px;
+      padding: 8px 14px;
+      border: 0;
+      border-radius: 10px;
+      background: #171717;
+      color: #ffffff;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .primary:disabled {
+      cursor: wait;
+      opacity: 0.55;
+    }
+
+    .error {
+      min-height: 18px;
+      color: #a22424;
+      font-size: 11px;
+    }
+
+    pre {
+      max-height: 390px;
+      margin: 0;
+      overflow: auto;
+      border-radius: 10px;
+      background: #111315;
+      color: #e9edf0;
+      padding: 12px;
+      font: 10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    details {
+      border-top: 1px solid var(--color-border-default, rgba(23, 23, 23, 0.12));
+      padding-top: 11px;
+    }
+
+    details + details {
+      margin-top: 11px;
+    }
+
+    summary {
+      margin-bottom: 10px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 680;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 620px) {
+      .surface {
+        padding: 10px;
+      }
+
+      .header {
+        align-items: flex-start;
+      }
+
+      .summary {
+        grid-template-columns: 1fr;
+      }
+
+      .metric {
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border-default, rgba(23, 23, 23, 0.12));
+      }
+
+      .metric:last-child {
+        border-bottom: 0;
+      }
+
+      .field-card {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .header,
+      .summary,
+      .panel {
+        background: rgba(28, 30, 33, 0.9);
+      }
+
+      .hold-panel {
+        background: linear-gradient(
+          145deg,
+          rgba(78, 57, 19, 0.82),
+          rgba(28, 30, 33, 0.92)
+        );
+      }
+
+      .field-card {
+        background: rgba(17, 19, 21, 0.48);
+      }
+
+      .chip[data-gate="PASS"] {
+        color: #69d49a;
+      }
+
+      .chip[data-gate="HOLD"] {
+        color: #f1bd60;
+      }
+
+      .chip[data-gate="STOP"],
+      .chip[data-gate="REPAIR"] {
+        color: #ff8f8f;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="surface">
+    <section class="header">
+      <div class="identity">
+        <div class="mark" aria-hidden="true">BR</div>
+        <div>
+          <h1>BORIS Developer Surface</h1>
+          <p class="subtitle">Semantic candidate · safe execution projection</p>
+        </div>
+      </div>
+      <div class="chips">
+        <span id="phase-chip" class="chip">phase —</span>
+        <span id="gate-chip" class="chip">gate —</span>
+      </div>
+    </section>
+
+    <section class="summary" aria-label="Execution summary">
+      <div class="metric">
+        <span class="metric-label">Session</span>
+        <span id="session-value" class="metric-value">—</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Status</span>
+        <span id="status-value" class="metric-value">Waiting for result</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Resume cycle</span>
+        <span id="resume-value" class="metric-value">0</span>
+      </div>
+    </section>
+
+    <section id="hold-panel" class="panel hold-panel hidden">
+      <h2>Operator handoff</h2>
+      <p id="hold-question" class="question"></p>
+      <ul id="unknown-list" class="unknown-list"></ul>
+      <div id="field-grid" class="field-grid"></div>
+      <label for="operator-statement" class="muted">
+        Operator clarification
+      </label>
+      <textarea
+        id="operator-statement"
+        placeholder="Provide the missing fact, decision, or authorization."
+      ></textarea>
+      <div class="actions">
+        <span id="form-error" class="error" role="alert"></span>
+        <button id="resume-button" class="primary" type="button">
+          Resume BORIS
+        </button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Execution candidate</h2>
+      <p id="candidate-note" class="muted"></p>
+      <pre id="candidate-json">{}</pre>
+    </section>
+
+    <section class="panel">
+      <details>
+        <summary>Norm results and alternatives</summary>
+        <pre id="semantic-json">{}</pre>
+      </details>
+      <details>
+        <summary>Complete safe developer trace</summary>
+        <pre id="trace-json">{}</pre>
+      </details>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const pending = new Map();
+      let nextRequestId = 1;
+      let currentResult = null;
+      let fieldControls = [];
+
+      const byId = (id) => document.getElementById(id);
+      const phaseChip = byId("phase-chip");
+      const gateChip = byId("gate-chip");
+      const sessionValue = byId("session-value");
+      const statusValue = byId("status-value");
+      const resumeValue = byId("resume-value");
+      const holdPanel = byId("hold-panel");
+      const holdQuestion = byId("hold-question");
+      const unknownList = byId("unknown-list");
+      const fieldGrid = byId("field-grid");
+      const operatorStatement = byId("operator-statement");
+      const resumeButton = byId("resume-button");
+      const formError = byId("form-error");
+      const candidateNote = byId("candidate-note");
+      const candidateJson = byId("candidate-json");
+      const semanticJson = byId("semantic-json");
+      const traceJson = byId("trace-json");
+
+      function sendRequest(method, params) {
+        const id = nextRequestId++;
+        return new Promise((resolve, reject) => {
+          pending.set(id, { resolve, reject });
+          window.parent.postMessage(
+            { jsonrpc: "2.0", id, method, params },
+            "*"
+          );
+          window.setTimeout(() => {
+            if (!pending.has(id)) return;
+            pending.delete(id);
+            reject(new Error(`${method} timed out`));
+          }, 30000);
+        });
+      }
+
+      function sendNotification(method, params = {}) {
+        window.parent.postMessage(
+          { jsonrpc: "2.0", method, params },
+          "*"
+        );
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent) return;
+        const message = event.data;
+        if (!message || message.jsonrpc !== "2.0") return;
+        if (message.id !== undefined && pending.has(message.id)) {
+          const handlers = pending.get(message.id);
+          pending.delete(message.id);
+          if (message.error) {
+            handlers.reject(
+              new Error(message.error.message || "Host request failed")
+            );
+          } else {
+            handlers.resolve(message.result);
+          }
+          return;
+        }
+        if (message.method === "ui/notifications/tool-result") {
+          renderToolResult(message.params || {});
+        }
+      }, { passive: true });
+
+      function json(value) {
+        return JSON.stringify(value ?? null, null, 2);
+      }
+
+      function normalizedToolResult(result) {
+        if (!result || typeof result !== "object") {
+          return { structuredContent: {}, _meta: {} };
+        }
+        if (result.structuredContent) return result;
+        if (result.gate || result.error) {
+          return {
+            structuredContent: result,
+            _meta: window.openai?.toolResponseMetadata || {},
+          };
+        }
+        return result;
+      }
+
+      function renderToolResult(rawResult) {
+        const result = normalizedToolResult(rawResult);
+        const payload = result.structuredContent || {};
+        const metadata = result._meta || {};
+        currentResult = payload;
+
+        phaseChip.textContent = `phase ${payload.phase || "—"}`;
+        gateChip.textContent = `gate ${payload.gate || "—"}`;
+        gateChip.dataset.gate = payload.gate || "";
+        sessionValue.textContent = payload.session_id || "—";
+        statusValue.textContent = payload.status || payload.error || "unknown";
+        resumeValue.textContent = String(payload.hold?.resume_count ?? 0);
+
+        candidateJson.textContent = json(payload.candidate_result);
+        candidateNote.textContent =
+          payload.candidate_unavailable_reason || "";
+        semanticJson.textContent = json({
+          norm_results: payload.norm_results || [],
+          unknowns: payload.unknowns || [],
+          conflicts: payload.conflicts || [],
+          alternatives: payload.alternatives || [],
+          limitations: payload.limitations || [],
+        });
+        traceJson.textContent = json(
+          metadata.developer_trace || {
+            status: "developer_trace was not returned",
+          }
+        );
+
+        renderHandoff(payload.hold);
+      }
+
+      function renderHandoff(hold) {
+        fieldControls = [];
+        unknownList.replaceChildren();
+        fieldGrid.replaceChildren();
+        operatorStatement.value = "";
+        formError.textContent = "";
+
+        if (!hold || hold.status !== "operator_input_required") {
+          holdPanel.classList.add("hidden");
+          return;
+        }
+        holdPanel.classList.remove("hidden");
+        const required = hold.required_operator_input || {};
+        holdQuestion.textContent =
+          required.question || "Operator input is required.";
+
+        for (const unknown of required.unknowns || []) {
+          const item = document.createElement("li");
+          const label = document.createElement("label");
+          const checkbox = document.createElement("input");
+          const text = document.createElement("span");
+          checkbox.type = "checkbox";
+          checkbox.checked = true;
+          checkbox.dataset.unknown = String(unknown);
+          text.textContent = String(unknown);
+          label.append(checkbox, text);
+          item.append(label);
+          unknownList.append(item);
+        }
+
+        for (const field of required.fields || []) {
+          const card = document.createElement("div");
+          const description = document.createElement("div");
+          const path = document.createElement("div");
+          const constraint = document.createElement("div");
+          const control = fieldControl(field);
+          card.className = "field-card";
+          path.className = "path";
+          constraint.className = "constraint";
+          path.textContent = String(field.path || "");
+          constraint.textContent = constraintLabel(field.constraints || []);
+          description.append(path, constraint);
+          card.append(description, control.element);
+          fieldGrid.append(card);
+          fieldControls.push(control);
+        }
+      }
+
+      function suggestedValue(constraints) {
+        const expected = constraints
+          .filter((item) => item && Object.hasOwn(item, "expected"))
+          .map((item) => item.expected);
+        if (!expected.length) return undefined;
+        const first = json(expected[0]);
+        return expected.every((value) => json(value) === first)
+          ? expected[0]
+          : undefined;
+      }
+
+      function constraintLabel(constraints) {
+        if (!constraints.length) return "Operator-provided value";
+        return constraints.map((item) => {
+          if (Object.hasOwn(item, "expected")) {
+            return `${item.operator}: expected ${json(item.expected)}`;
+          }
+          if (Object.hasOwn(item, "minimum")) {
+            return `${item.operator}: minimum ${json(item.minimum)}`;
+          }
+          if (Object.hasOwn(item, "allowed_values")) {
+            return `${item.operator}: ${json(item.allowed_values)}`;
+          }
+          return item.operator || "required";
+        }).join(" · ");
+      }
+
+      function fieldControl(field) {
+        const expected = suggestedValue(field.constraints || []);
+        if (typeof expected === "boolean") {
+          const element = document.createElement("select");
+          const empty = new Option("Not confirmed", "");
+          const yes = new Option("true", "true");
+          const no = new Option("false", "false");
+          element.append(empty, yes, no);
+          return {
+            path: field.path,
+            element,
+            read: () => (
+              element.value === "" ? undefined : element.value === "true"
+            ),
+          };
+        }
+        const element = document.createElement("input");
+        element.type = "text";
+        element.placeholder = expected === undefined
+          ? "Optional JSON value"
+          : `Expected ${json(expected)}`;
+        return {
+          path: field.path,
+          element,
+          read: () => {
+            const value = element.value.trim();
+            if (!value) return undefined;
+            try {
+              return JSON.parse(value);
+            } catch {
+              return value;
+            }
+          },
+        };
+      }
+
+      async function callBoris(argumentsValue) {
+        try {
+          return await sendRequest("tools/call", {
+            name: "boris.execute",
+            arguments: argumentsValue,
+          });
+        } catch (standardError) {
+          if (window.openai?.callTool) {
+            return window.openai.callTool(
+              "boris.execute",
+              argumentsValue
+            );
+          }
+          throw standardError;
+        }
+      }
+
+      resumeButton.addEventListener("click", async () => {
+        const hold = currentResult?.hold;
+        if (!hold?.continuation_token) {
+          formError.textContent = "No continuation token is available.";
+          return;
+        }
+        const values = {};
+        for (const control of fieldControls) {
+          const value = control.read();
+          if (value !== undefined) values[control.path] = value;
+        }
+        const resolvedUnknowns = Array.from(
+          unknownList.querySelectorAll("input[type=checkbox]:checked")
+        ).map((item) => item.dataset.unknown);
+        const statement = operatorStatement.value.trim();
+        if (!statement && !Object.keys(values).length) {
+          formError.textContent =
+            "Provide a clarification or confirm at least one field.";
+          return;
+        }
+
+        resumeButton.disabled = true;
+        resumeButton.textContent = "Resuming…";
+        formError.textContent = "";
+        try {
+          const result = await callBoris({
+            session_id: currentResult.session_id,
+            resume: {
+              continuation_token: hold.continuation_token,
+              operator_input: {
+                statement,
+                values,
+                resolved_unknowns: resolvedUnknowns,
+              },
+            },
+          });
+          renderToolResult(result);
+        } catch (error) {
+          formError.textContent =
+            error instanceof Error ? error.message : String(error);
+        } finally {
+          resumeButton.disabled = false;
+          resumeButton.textContent = "Resume BORIS";
+        }
+      });
+
+      async function initialize() {
+        try {
+          await sendRequest("ui/initialize", {
+            protocolVersion: "2026-01-26",
+            appInfo: {
+              name: "BORIS Developer Surface",
+              version: "1.0.0",
+            },
+            appCapabilities: {},
+          });
+          sendNotification("ui/notifications/initialized");
+        } catch {
+          const compatibilityResult = window.openai?.toolOutput;
+          if (compatibilityResult) {
+            renderToolResult(compatibilityResult);
+          }
+        }
+      }
+
+      initialize();
+    })();
+  </script>
+</body>
+</html>

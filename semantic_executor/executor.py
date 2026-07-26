@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from uuid import uuid4
 
 from semantic_executor.models import (
@@ -64,6 +65,7 @@ class SemanticExecutor:
                 candidate.norm_ref: candidate.formal_predicate_result
                 for candidate in view.candidates
             },
+            required_inputs=_required_inputs(view),
             selection=view.selection_trace,
             calculator_called=True,
             llm_suggested_gate=calculation.suggested_gate,
@@ -235,3 +237,75 @@ def _dedupe_issues(issues):
         seen.add(marker)
         result.append(issue)
     return result
+
+
+def _required_inputs(view):
+    requirements = {}
+    for candidate in view.candidates:
+        if candidate.formal_predicate_result != "UNKNOWN":
+            continue
+        for path, constraint in _predicate_path_requirements(candidate.when):
+            current = requirements.setdefault(
+                path,
+                {
+                    "path": path,
+                    "norm_refs": [],
+                    "constraints": [],
+                },
+            )
+            if candidate.norm_ref not in current["norm_refs"]:
+                current["norm_refs"].append(candidate.norm_ref)
+            if constraint not in current["constraints"]:
+                current["constraints"].append(constraint)
+    return tuple(
+        requirements[path]
+        for path in sorted(requirements)
+    )
+
+
+def _predicate_path_requirements(value):
+    if isinstance(value, Mapping):
+        operation = value.get("op")
+        for key in ("path", "left_path", "right_path"):
+            path = value.get(key)
+            if isinstance(path, str) and path.strip():
+                yield path.strip(), _path_constraint(value, operation, key)
+        paths = value.get("paths")
+        if isinstance(paths, Sequence) and not isinstance(
+            paths,
+            (str, bytes),
+        ):
+            for path in paths:
+                if isinstance(path, str) and path.strip():
+                    yield path.strip(), _path_constraint(
+                        value,
+                        operation,
+                        "paths",
+                    )
+        for nested in value.values():
+            yield from _predicate_path_requirements(nested)
+    elif isinstance(value, Sequence) and not isinstance(
+        value,
+        (str, bytes),
+    ):
+        for nested in value:
+            yield from _predicate_path_requirements(nested)
+
+
+def _path_constraint(expression, operation, path_key):
+    constraint = {
+        "operator": operation or "unknown",
+        "path_role": path_key,
+    }
+    if operation == "fact" and "equals" in expression:
+        constraint["expected"] = expression["equals"]
+    elif operation in {"gte", "min_items"} and "value" in expression:
+        constraint["minimum"] = expression["value"]
+    elif operation == "enum_member" and "values" in expression:
+        constraint["allowed_values"] = expression["values"]
+    elif operation == "in":
+        if "value" in expression:
+            constraint["contains"] = expression["value"]
+        elif "values" in expression:
+            constraint["allowed_values"] = expression["values"]
+    return constraint

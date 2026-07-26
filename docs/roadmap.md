@@ -44,6 +44,20 @@
 - current Core v2.23 four-valued Predicate DSL and operator compatibility;
 - internal `/runtime/frame` retained without a public `boris.frame` alias.
 
+### Closed HOLD handoff and Developer Surface
+
+- mandatory structured operator handoff for every `HOLD`;
+- non-empty conditional candidate or explicit null-candidate reason;
+- HMAC-SHA256 stateless continuation bound to exact `SemanticInput`, Core
+  identity, session, HOLD targets, expiry, and resume count;
+- resume through the same `boris.execute` without a second public tool;
+- exact semantic-input reconstruction without repeated input compilation;
+- structured operator evidence and signed formal-predicate input paths;
+- developer-only MCP Apps resource
+  `ui://boris/developer-surface-v1.html`;
+- complete safe trace delivered to the component through model-hidden `_meta`;
+- production MCP tool without a linked Developer Surface.
+
 ### Stateless context, validation, and projection observability
 
 - CoreSurface-based internal `/runtime/frame`;
@@ -80,6 +94,12 @@ every result remains:
 errors. `PASS` is still only a semantic candidate, not final authorization.
 Lexical projection remains observability and never determines semantic
 applicability.
+
+`HOLD` can now request operator input and resume the same semantic calculation
+from a signed stateless token. This closes the clarification handoff only; it
+does not implement Independent Review, Policy Kernel admission, durable cycle
+state, memory, or action authorization. Tokens are replayable until expiry and
+are globally invalidated by continuation-secret rotation.
 
 ## Next architectural stages
 
@@ -124,6 +144,8 @@ applicability.
 
 - packet authenticity and signatures;
 - frame registry and TTL;
+- persistent continuation registry, single-use enforcement, and targeted
+  revocation;
 - revocation and rotation of operator decisions;
 - persistent audit storage;
 - multi-tenant isolation and authorization.

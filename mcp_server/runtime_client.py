@@ -33,16 +33,23 @@ class RuntimeAPIClient:
 
     def execute(
         self,
-        input: str,
+        input: str | None = None,
         session_id: str | None = None,
         context: dict | None = None,
+        resume: dict | None = None,
     ):
-        return self._post_runtime(
-            "/runtime/execute",
-            input=input,
-            session_id=session_id,
-            context=context,
-        )
+        request_body = {
+            "input": input,
+            "session_id": session_id,
+            "context": dict(context or {}),
+            "resume": dict(resume) if resume is not None else None,
+        }
+        request_body = {
+            key: value
+            for key, value in request_body.items()
+            if value is not None
+        }
+        return self._post_json("/runtime/execute", request_body)
 
     def _post_runtime(self, path, input, session_id=None, context=None):
         request_body = {

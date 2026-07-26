@@ -21,5 +21,6 @@ phenomenon
 ```
 
 The current repository implements the verified surface, compatibility
-attestation, semantic calculation candidate, and stateless ChatGPT context
-projection. It does not yet implement the final three authority-bearing stages.
+attestation, semantic calculation candidate, signed stateless operator
+continuation for `HOLD`, and stateless ChatGPT context projection. It does not
+yet implement the final three authority-bearing stages.

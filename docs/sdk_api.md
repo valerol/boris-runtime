@@ -99,6 +99,42 @@ candidate = SemanticExecutor(
 )
 ```
 
+## Application execution and HOLD resume
+
+```python
+from application.execution import ExecutionService
+
+service = ExecutionService()
+result = service.execute(
+    "Evaluate this phenomenon.",
+    session_id="correlation-id",
+    context={"facts": {}, "evidence": [], "authority": {}},
+)
+
+if result["gate"] == "HOLD":
+    result = service.execute(
+        session_id=result["session_id"],
+        resume={
+            "continuation_token": result["hold"][
+                "continuation_token"
+            ],
+            "operator_input": {
+                "statement": "The operator clarification.",
+                "values": {"authorization.granted": True},
+                "resolved_unknowns": result["hold"][
+                    "required_operator_input"
+                ]["unknowns"],
+            },
+        },
+    )
+```
+
+`BORIS_CONTINUATION_SECRET` must contain at least 32 bytes before Runtime can
+issue or verify a HOLD token. A valid resume reconstructs the signed
+`SemanticInput`, verifies the current Core identity and session, records
+operator evidence, applies only signed input paths, and skips
+`SemanticInputCompiler`. It does not create persistent Runtime state.
+
 The return value is an `ExecutionCandidate`, not an executed action or
 `KernelDecision`.
 
