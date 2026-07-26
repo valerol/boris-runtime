@@ -96,16 +96,22 @@ layer must not weaken them or substitute a separate ChatGPT answer.
 
 ## Stateless HOLD continuation
 
-`HOLD` now closes over an explicit operator handoff without introducing Runtime
-memory. The `boris-execution/1.0` envelope requires:
+An operator-owned `HOLD` closes over an explicit handoff without introducing
+Runtime memory. The `boris-execution/1.0` envelope requires:
 
 - a non-empty conditional `candidate_result`, or `candidate_result: null` with
   `candidate_unavailable_reason`;
-- `hold.required_operator_input` with separate path-aware semantic unknowns
+- for operator-owned targets, `hold.required_operator_input` with separate
+  path-aware semantic unknowns
   and Core selector inputs used by formal predicates that evaluated to
   `UNKNOWN`;
-- an HMAC-SHA256 `continuation_token` bound to the exact `SemanticInput`, Core
+- for operator-owned targets, an HMAC-SHA256 `continuation_token` bound to the exact `SemanticInput`, Core
   identity, session, HOLD targets, expiry, and resume count.
+
+Runtime-owned, future, model, downstream, and unresolvable uncertainties never
+become operator targets by default. A `HOLD` containing only those classes
+retains the conditional candidate and returns
+`resolution_not_operator_owned` without a token.
 
 Resume uses the same `/runtime/execute` and `boris.execute` entry. Runtime
 verifies the signature, expiry, session, and current Core identity before any

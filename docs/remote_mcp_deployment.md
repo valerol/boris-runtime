@@ -189,9 +189,12 @@ also reports missing or mismatched explicit acceptance through a controlled
 error.
 Production output omits diagnostic trace data.
 
-A `HOLD` response contains `hold.required_operator_input` and a signed
-`continuation_token`. The token contains the exact semantic continuation state
-but no server secret. It is replayable until expiry because this stage has no
+An operator-owned `HOLD` contains `hold.required_operator_input` and a signed
+`continuation_token`. A `HOLD` caused only by Runtime-owned, future, model,
+downstream, or unresolvable uncertainty returns
+`resolution_not_operator_owned`, preserves the conditional candidate, and
+contains no token. A token contains the exact semantic continuation state but
+no server secret. It is replayable until expiry because this stage has no
 persistent token registry. Apply rate limits to `/mcp`, keep the TTL bounded,
 and rotate `BORIS_CONTINUATION_SECRET` to invalidate all outstanding tokens.
 

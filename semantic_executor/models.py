@@ -6,6 +6,10 @@ from typing import Any, Mapping
 
 from core_surface import CoreSurface
 from core_surface.models import freeze_value
+from semantic_executor.uncertainty import (
+    resolution_action,
+    resolution_blocks_semantic_pass,
+)
 
 
 PREDICATE_RESULTS = frozenset({
@@ -281,6 +285,10 @@ class SemanticView:
         default_factory=dict,
         repr=False,
     )
+    uncertainty_resolution_catalog: Mapping[str, Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
     def __post_init__(self):
         object.__setattr__(
@@ -302,6 +310,11 @@ class SemanticView:
             self,
             "execution_context",
             freeze_value(dict(self.execution_context)),
+        )
+        object.__setattr__(
+            self,
+            "uncertainty_resolution_catalog",
+            freeze_value(dict(self.uncertainty_resolution_catalog)),
         )
         object.__setattr__(
             self,
@@ -333,6 +346,10 @@ class SemanticView:
         if self.execution_context:
             result["execution_context"] = thaw_value(
                 self.execution_context
+            )
+        if self.uncertainty_resolution_catalog:
+            result["uncertainty_resolution_catalog"] = thaw_value(
+                self.uncertainty_resolution_catalog
             )
         return result
 
@@ -376,11 +393,46 @@ class ConflictCalculation:
 
 
 @dataclass(frozen=True, slots=True)
+class SemanticUncertainty:
+    uncertainty_id: str
+    description: str
+    resolution_class: str
+    target_path: str | None
+    norm_refs: tuple[str, ...]
+    core_refs: tuple[str, ...]
+    operator_question: str | None
+
+    @property
+    def resolution_action(self) -> str:
+        return resolution_action(self.resolution_class)
+
+    @property
+    def blocks_semantic_pass(self) -> bool:
+        return resolution_blocks_semantic_pass(
+            self.resolution_class
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "uncertainty_id": self.uncertainty_id,
+            "description": self.description,
+            "resolution_class": self.resolution_class,
+            "resolution_action": self.resolution_action,
+            "blocks_semantic_pass": self.blocks_semantic_pass,
+            "target_path": self.target_path,
+            "norm_refs": list(self.norm_refs),
+            "core_refs": list(self.core_refs),
+            "operator_question": self.operator_question,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SemanticCalculation:
     core_ref: CoreReference
     phase: str
     norm_results: tuple[NormCalculation, ...]
     unknowns: tuple[str, ...]
+    uncertainties: tuple[SemanticUncertainty, ...]
     conflicts: tuple[ConflictCalculation, ...]
     alternatives: tuple[Mapping[str, Any], ...]
     suggested_gate: str
@@ -404,6 +456,10 @@ class SemanticCalculation:
             "phase": self.phase,
             "norm_results": [result.to_dict() for result in self.norm_results],
             "unknowns": list(self.unknowns),
+            "uncertainties": [
+                uncertainty.to_dict()
+                for uncertainty in self.uncertainties
+            ],
             "conflicts": [conflict.to_dict() for conflict in self.conflicts],
             "alternatives": thaw_value(self.alternatives),
             "suggested_gate": self.suggested_gate,
@@ -435,6 +491,7 @@ class ExecutionTrace:
     candidate_norm_refs: tuple[str, ...]
     formal_predicate_results: Mapping[str, str]
     required_inputs: tuple[Mapping[str, Any], ...]
+    uncertainty_resolution_catalog: Mapping[str, Any]
     selection: Mapping[str, Any]
     calculator_called: bool
     llm_suggested_gate: str
@@ -455,6 +512,11 @@ class ExecutionTrace:
                 for item in self.required_inputs
             ),
         )
+        object.__setattr__(
+            self,
+            "uncertainty_resolution_catalog",
+            freeze_value(dict(self.uncertainty_resolution_catalog)),
+        )
         object.__setattr__(self, "selection", freeze_value(dict(self.selection)))
 
     def to_dict(self) -> dict[str, Any]:
@@ -467,6 +529,9 @@ class ExecutionTrace:
             "candidate_norm_refs": list(self.candidate_norm_refs),
             "formal_predicate_results": dict(self.formal_predicate_results),
             "required_inputs": thaw_value(self.required_inputs),
+            "uncertainty_resolution_catalog": thaw_value(
+                self.uncertainty_resolution_catalog
+            ),
             "selection": thaw_value(self.selection),
             "calculator_called": self.calculator_called,
             "llm_suggested_gate": self.llm_suggested_gate,
@@ -487,6 +552,7 @@ class ExecutionCandidate:
     candidate_result: Mapping[str, Any]
     norm_results: tuple[NormCalculation, ...]
     unknowns: tuple[str, ...]
+    uncertainties: tuple[SemanticUncertainty, ...]
     conflicts: tuple[ConflictCalculation, ...]
     alternatives: tuple[Mapping[str, Any], ...]
     validation_issues: tuple[ValidationIssue, ...]
@@ -513,6 +579,10 @@ class ExecutionCandidate:
             "candidate_result": thaw_value(self.candidate_result),
             "norm_results": [result.to_dict() for result in self.norm_results],
             "unknowns": list(self.unknowns),
+            "uncertainties": [
+                uncertainty.to_dict()
+                for uncertainty in self.uncertainties
+            ],
             "conflicts": [conflict.to_dict() for conflict in self.conflicts],
             "alternatives": thaw_value(self.alternatives),
             "validation_issues": [

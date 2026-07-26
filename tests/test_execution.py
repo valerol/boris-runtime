@@ -20,6 +20,7 @@ from tests.test_semantic_executor import (
     AutoCalculator,
     build_accepted_compatibility,
     build_surface,
+    uncertainty,
 )
 
 
@@ -109,6 +110,7 @@ def test_execution_service_runs_one_semantic_candidate_route(monkeypatch):
             }
         ],
         "unknowns": [],
+        "uncertainties": [],
         "conflicts": [],
         "alternatives": [],
         "limitations": [
@@ -148,7 +150,7 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
     assert result["candidate_result"] is None
     assert result["candidate_unavailable_reason"]
     assert result["hold"]["handoff_version"] == (
-        "boris-hold-handoff/1.1"
+        "boris-hold-handoff/1.2"
     )
     assert result["hold"]["status"] == "operator_input_required"
     assert result["hold"]["continuation_token"].startswith("v1.")
@@ -168,6 +170,10 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
                     "path_role": "path",
                     "expected": True,
                 }
+            ],
+            "uncertainty_ids": ["authorization.granted"],
+            "uncertainty_descriptions": [
+                "authorization.granted remains unknown."
             ],
             "question": (
                 "Provide the observed value for Core selector "
@@ -222,6 +228,19 @@ def test_hold_maps_semantic_unknown_path_without_conflating_predicate_input(
     calculator.result_unknowns = {
         "N-ACTION": ["authorization.status remains unknown."],
     }
+    calculator.uncertainties = [
+        uncertainty(
+            "authorization.status remains unknown.",
+            resolution_class="OPERATOR_INPUT",
+            target_path="authorization.status",
+            norm_refs=("N-ACTION",),
+            operator_question=(
+                "Provide the operator-confirmed value for "
+                "authorization.status."
+            ),
+            uncertainty_id="authorization.status",
+        )
+    ]
 
     result = service.execute(text, session_id="path-aware-handoff")
 
@@ -240,14 +259,49 @@ def test_hold_maps_semantic_unknown_path_without_conflating_predicate_input(
             ),
         }
     ]
-    assert [
-        item["target_path"]
-        for item in required["predicate_inputs"]
-    ] == ["violation.N-GEN-001"]
+    assert required["predicate_inputs"] == []
     assert all(
         "UNKNOWN formal predicate" not in item["description"]
         for item in required["semantic_unknowns"]
     )
+
+
+def test_non_operator_hold_keeps_conditional_candidate_without_continuation(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    monkeypatch.delenv("BORIS_CONTINUATION_SECRET", raising=False)
+    description = "The result depends on a future event."
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload("Evaluate a conditional route."),
+    )
+    calculator.suggested_gate = "HOLD"
+    calculator.unknowns = [description]
+    calculator.uncertainties = [
+        uncertainty(
+            description,
+            resolution_class="FUTURE_CONTINGENT",
+            uncertainty_id="future-event",
+        )
+    ]
+
+    result = service.execute(
+        "Evaluate a conditional route.",
+        session_id="bounded-hold",
+    )
+
+    assert result["gate"] == "HOLD"
+    assert result["candidate_result"] == {
+        "status": "CANDIDATE_ONLY"
+    }
+    assert result["hold"]["status"] == (
+        "resolution_not_operator_owned"
+    )
+    assert result["hold"]["required_operator_input"] is None
+    assert "continuation_token" not in result["hold"]
+    assert result["hold"]["resolution_summary"][
+        "FUTURE_CONTINGENT"
+    ][0]["uncertainty_id"] == "future-event"
 
 
 def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
@@ -271,9 +325,7 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
     semantic_unknowns = first["hold"][
         "required_operator_input"
     ]["semantic_unknowns"]
-    assert [item["unknown_id"] for item in semantic_unknowns] == [
-        "authorization.granted"
-    ]
+    assert semantic_unknowns == []
     second = service.execute(
         session_id="resume-route",
         resume={
@@ -281,7 +333,7 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
             "operator_input": {
                 "statement": "I authorize this semantic evaluation.",
                 "values": {"authorization.granted": True},
-                "resolved_unknowns": ["authorization.granted"],
+                "resolved_unknowns": [],
             },
         },
     )
@@ -336,7 +388,7 @@ def test_resume_projects_non_hold_candidate_when_calculator_returns_empty(
             "operator_input": {
                 "statement": "I authorize this semantic evaluation.",
                 "values": {"authorization.granted": True},
-                "resolved_unknowns": ["authorization.granted"],
+                "resolved_unknowns": [],
             },
         },
     )
@@ -667,6 +719,8 @@ def build_service(compiler_output, surface=None):
     events = []
     adapter = CompilerAdapter(compiler_output, events)
     calculator = RecordingCalculator(events)
+    if "action" in compiler_output.get("triggers", []):
+        calculator.uncertainties = _authorization_uncertainties
     service = ExecutionService(
         surface_provider=StaticSurfaceProvider(surface, events),
         acceptance_provider=StaticAcceptanceProvider(
@@ -681,6 +735,27 @@ def build_service(compiler_output, surface=None):
         calculator_factory=lambda _adapter: calculator,
     )
     return service, adapter, calculator, events
+
+
+def _authorization_uncertainties(view, _semantic_input):
+    try:
+        candidate = view.get_candidate("N-ACTION")
+    except KeyError:
+        return []
+    if candidate.formal_predicate_result != "UNKNOWN":
+        return []
+    return [
+        uncertainty(
+            "authorization.granted remains unknown.",
+            resolution_class="OPERATOR_INPUT",
+            target_path="authorization.granted",
+            norm_refs=("N-ACTION",),
+            operator_question=(
+                "Provide the observed authorization decision."
+            ),
+            uncertainty_id="authorization.granted",
+        )
+    ]
 
 
 def compiler_payload(

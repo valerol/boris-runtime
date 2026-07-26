@@ -111,9 +111,10 @@ membership, ordered ranks, array-wide facts, HTTPS collections, and local
 schema validation. Legacy `gte` and `scope_match` remain supported for older
 compatible sources.
 
-A missing path remains `UNKNOWN`. Material unknowns constrain the final
-candidate to `HOLD`; a formal `ERROR` is a predicate or type defect and
-constrains the gate to `REPAIR`.
+A missing path remains `UNKNOWN`. A formal `ERROR` is a predicate or type
+defect and constrains the gate to `REPAIR`. An unresolved item constrains the
+candidate according to its typed owner and resolution route rather than by
+the mere presence of an `unknowns` string.
 
 Public Core v2 separates predicate ownership:
 
@@ -141,6 +142,7 @@ containing:
 - the exact phase;
 - exactly one result for every selected norm;
 - semantic applicability, reasoning, and material unknowns;
+- a typed uncertainty record for every disclosed unknown;
 - conflicts and their `HOLD` or `STOP` disposition;
 - materially distinct considered alternatives;
 - a suggested `PASS`, `HOLD`, `STOP`, or `REPAIR`;
@@ -157,9 +159,13 @@ The Runtime validator rejects:
 - any candidate result that claims a state transition, execution, or tool call.
 
 An LLM cannot upgrade a formal `FALSE`, `UNKNOWN`, or `ERROR` predicate to
-semantic `TRUE`. A `PASS` is constrained to `HOLD` while material unknowns,
-unresolved conflicts, unsupported source types, or evaluation-only candidate
-norms remain. Formal `ERROR` cannot be weakened below `REPAIR`.
+semantic `TRUE`. An operator-owned or unresolved Runtime-owned uncertainty
+constrains `PASS` to `HOLD`. A future contingency, model uncertainty,
+downstream precondition, or unresolvable limitation is retained as a
+condition, confidence bound, deferred prerequisite, or disclosed limitation;
+its presence alone does not force `HOLD`. Unresolved conflicts, unsupported
+source types, and evaluation-only candidate norms still constrain the gate.
+Formal `ERROR` cannot be weakened below `REPAIR`.
 
 The final gate follows the package's declared precedence:
 
@@ -167,8 +173,8 @@ The final gate follows the package's declared precedence:
 REPAIR > STOP > HOLD > PASS
 ```
 
-Consequently, a material unknown can constrain `PASS` to `HOLD`, but it cannot
-weaken an existing `STOP` or `REPAIR`.
+Consequently, a blocking uncertainty can constrain `PASS` to `HOLD`, but it
+cannot weaken an existing `STOP` or `REPAIR`.
 
 Provider failures, empty structured output, and malformed calculations become
 controlled `SemanticCalculationError` rejections.
@@ -193,7 +199,9 @@ the exact `SemanticInput` and later reconstructs it for resume; this does not
 change the isolated executor contract, write memory, or admit a state
 transition.
 
-`boris-hold-handoff/1.1` preserves two separate resolution surfaces:
+`boris-hold-handoff/1.2` exposes operator resolution only when the typed
+calculation contains an `OPERATOR_INPUT`. It preserves two separate operator
+surfaces:
 
 - `semantic_unknowns` contain the unresolved semantic statements, an
   `unknown_id`, and a `target_path` only when exactly one valid path is stated;
@@ -205,6 +213,24 @@ constraints describe the Core expression but do not suggest its matching value
 as the operator answer. Resume requires explicit closure of every signed
 semantic unknown and every signed predicate input before another semantic
 calculation is allowed.
+
+The Semantic View derives an uncertainty-resolution catalog from the current
+phase capsule:
+
+- `canonical_object_projection.output_objects` become
+  `RUNTIME_DERIVABLE`;
+- `required_object_schemas` supply object owners and required fields;
+- assessment inputs, `GateEvidence`, `CycleObjectStore`, and other
+  `required_evidence_contract` entries become current-cycle or downstream
+  contracts according to their declared source class.
+
+The calculator must cite exact catalog references for Runtime and downstream
+classes. Runtime rejects attempts to cite a `CURRENT_RUNTIME` entry as
+`OPERATOR_INPUT`. `FUTURE_CONTINGENT`, `MODEL_UNCERTAINTY`,
+`DOWNSTREAM_PRECONDITION`, and `UNRESOLVABLE_LIMITATION` remain in the
+candidate as explicit bounds. A `HOLD` containing no operator-owned target
+returns `status=resolution_not_operator_owned`, keeps any conditional
+candidate, and issues no continuation token.
 
 ## Statement-Type Debt
 

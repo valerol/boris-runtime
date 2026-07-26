@@ -13,9 +13,11 @@ from application.continuation import (
     ContinuationCodec,
     ContinuationStateMismatch,
     build_hold_handoff,
+    build_non_operator_hold,
     continuation_count,
     continuation_source_input,
     continuation_text,
+    hold_requires_operator_input,
     require_continuation_core,
     resume_semantic_input,
     resume_token,
@@ -439,6 +441,10 @@ class ExecutionService:
                 for result in candidate.norm_results
             ],
             "unknowns": list(candidate.unknowns),
+            "uncertainties": [
+                uncertainty.to_dict()
+                for uncertainty in candidate.uncertainties
+            ],
             "conflicts": [
                 conflict.to_dict()
                 for conflict in candidate.conflicts
@@ -451,14 +457,20 @@ class ExecutionService:
                 candidate_unavailable_reason
             )
         if candidate.gate == "HOLD":
-            codec = self.continuation_codec_factory()
-            envelope["hold"] = build_hold_handoff(
-                codec,
-                semantic_input,
-                candidate,
-                resolved_session_id,
-                resume_count,
-            )
+            if hold_requires_operator_input(candidate):
+                codec = self.continuation_codec_factory()
+                envelope["hold"] = build_hold_handoff(
+                    codec,
+                    semantic_input,
+                    candidate,
+                    resolved_session_id,
+                    resume_count,
+                )
+            else:
+                envelope["hold"] = build_non_operator_hold(
+                    candidate,
+                    resume_count,
+                )
         if developer_mode_enabled():
             stage_started = perf_counter()
             frame = self.context_provider.frame(
@@ -634,6 +646,10 @@ def _build_execution_trace(
             ),
             "required_inputs": candidate.trace.to_dict()[
                 "required_inputs"
+            ],
+            "uncertainties": [
+                uncertainty.to_dict()
+                for uncertainty in candidate.uncertainties
             ],
             "norm_results": [
                 result.to_dict()

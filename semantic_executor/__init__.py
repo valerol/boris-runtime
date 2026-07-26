@@ -20,6 +20,7 @@ from semantic_executor.models import (
     RuntimeAttestationReference,
     SemanticCalculation,
     SemanticInput,
+    SemanticUncertainty,
     SemanticView,
     ValidationIssue,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "SemanticExecutor",
     "SemanticExecutorError",
     "SemanticInput",
+    "SemanticUncertainty",
     "SemanticView",
     "SemanticViewBuilder",
     "SemanticViewError",

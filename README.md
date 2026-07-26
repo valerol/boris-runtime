@@ -135,11 +135,15 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
 The response uses `execution_version: "boris-execution/1.0"` and
 `status: "semantic_candidate"`. It includes the constrained gate, candidate
 result, norm results, unknowns, conflicts, alternatives, and explicit
-limitations. `HOLD`, `STOP`, and `REPAIR` are normal HTTP 200 Runtime results.
-Every `HOLD` includes a `boris-hold-handoff/1.1` handoff. It separates
-path-aware `semantic_unknowns` from Core-declared `predicate_inputs` instead
-of implying that a human-readable unknown and a formal selector are the same
-field. Resume the same semantic route without resending the original input:
+typed uncertainties, and limitations. `HOLD`, `STOP`, and `REPAIR` are normal
+HTTP 200 Runtime results.
+Every unresolved item also has a typed ownership and resolution route.
+`boris-hold-handoff/1.2` issues a signed continuation only for explicit
+operator-owned targets. It separates path-aware `semantic_unknowns` from
+Core-declared `predicate_inputs` instead of implying that a human-readable
+unknown and a formal selector are the same field. A non-operator `HOLD` keeps
+the conditional candidate and returns `resolution_not_operator_owned` without
+a token. Resume an operator-owned route without resending the original input:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/runtime/execute \

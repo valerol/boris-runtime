@@ -12,10 +12,11 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from semantic_executor import CoreReference, SemanticInput
+from semantic_executor.uncertainty import OPERATOR_RESOLUTION_CLASS
 
 
-CONTINUATION_VERSION = "boris-continuation/1.1"
-HOLD_HANDOFF_VERSION = "boris-hold-handoff/1.1"
+CONTINUATION_VERSION = "boris-continuation/1.2"
+HOLD_HANDOFF_VERSION = "boris-hold-handoff/1.2"
 CONTINUATION_SECRET_ENV = "BORIS_CONTINUATION_SECRET"
 CONTINUATION_TTL_ENV = "BORIS_CONTINUATION_TTL_SECONDS"
 DEFAULT_CONTINUATION_TTL_SECONDS = 3600
@@ -212,9 +213,13 @@ def build_hold_handoff(
     semantic_unknowns = _semantic_unknown_resolutions(
         candidate,
         required_inputs,
-        semantic_input.unknowns,
     )
     predicate_inputs = _predicate_operator_inputs(required_inputs)
+    if not semantic_unknowns and not predicate_inputs:
+        raise ContinuationUnavailable(
+            "Operator continuation cannot be issued without an "
+            "operator-owned resolution target."
+        )
     required_operator_input = {
         "question": _hold_question(semantic_unknowns, predicate_inputs),
         "semantic_unknowns": semantic_unknowns,
@@ -253,6 +258,53 @@ def build_hold_handoff(
         "required_operator_input": required_operator_input,
         "continuation_token": token,
         "expires_at": continuation_expiry_iso(claims),
+        "resume_count": resume_count,
+    }
+
+
+def hold_requires_operator_input(candidate):
+    if any(
+        uncertainty.resolution_class == OPERATOR_RESOLUTION_CLASS
+        for uncertainty in candidate.uncertainties
+    ):
+        return True
+    return any(
+        item.get("resolution_class") == OPERATOR_RESOLUTION_CLASS
+        for item in candidate.trace.to_dict()["required_inputs"]
+    )
+
+
+def build_non_operator_hold(candidate, resume_count):
+    grouped = {}
+    for uncertainty in candidate.uncertainties:
+        if uncertainty.resolution_class == OPERATOR_RESOLUTION_CLASS:
+            continue
+        grouped.setdefault(uncertainty.resolution_class, []).append(
+            uncertainty.to_dict()
+        )
+    for item in candidate.trace.to_dict()["required_inputs"]:
+        resolution_class = item.get("resolution_class")
+        if resolution_class == OPERATOR_RESOLUTION_CLASS:
+            continue
+        grouped.setdefault(resolution_class, []).append({
+            "target_path": item.get("path"),
+            "norm_refs": item.get("norm_refs", []),
+            "constraints": item.get("constraints", []),
+            "uncertainty_ids": item.get("uncertainty_ids", []),
+        })
+    return {
+        "handoff_version": HOLD_HANDOFF_VERSION,
+        "status": "resolution_not_operator_owned",
+        "reason": (
+            "Runtime gate is HOLD, but no unresolved target is owned by the "
+            "operator. The conditional semantic candidate remains available."
+        ),
+        "required_operator_input": None,
+        "resolution_summary": {
+            key: values
+            for key, values in sorted(grouped.items())
+            if key and values
+        },
         "resume_count": resume_count,
     }
 
@@ -389,6 +441,12 @@ def resume_semantic_input(state, resume):
         for item in semantic_unknowns
         if item["unknown_id"] in operator_input["resolved_unknowns"]
     }
+    resolved_descriptions.update(
+        description
+        for item in predicate_inputs
+        if item["target_path"] in operator_input["values"]
+        for description in item["uncertainty_descriptions"]
+    )
     remaining_unknowns = [
         item
         for item in _continuation_string_array(
@@ -427,82 +485,47 @@ def trace_handoff(hold):
     }
 
 
-def _semantic_unknown_resolutions(candidate, required_inputs, input_unknowns):
-    values = [
-        (unknown, ())
-        for unknown in input_unknowns
-    ]
-    values.extend(
-        (unknown, ())
-        for unknown in candidate.unknowns
-    )
-    values.extend(
-        (unknown, (result.norm_ref,))
-        for result in candidate.norm_results
-        for unknown in result.unknowns
-    )
-    values.extend(
-        (conflict.reason, conflict.norm_refs)
-        for conflict in candidate.conflicts
-        if conflict.disposition == "HOLD"
-    )
-    if not values and not required_inputs:
-        values.extend(
-            (issue.message, issue.norm_refs)
-            for issue in candidate.validation_issues
-        )
-    if not values and not required_inputs:
-        values.append((
-            "The Semantic Executor returned HOLD without a more specific "
-            "material unknown.",
-            (),
-        ))
-
-    grouped = {}
-    order = []
-    for raw_value, norm_refs in values:
-        description = str(raw_value or "").strip()
-        if not description:
+def _semantic_unknown_resolutions(candidate, required_inputs):
+    result = []
+    predicate_paths = {
+        item.get("path")
+        for item in required_inputs
+        if item.get("resolution_class") == OPERATOR_RESOLUTION_CLASS
+    }
+    for uncertainty in candidate.uncertainties:
+        if uncertainty.resolution_class != OPERATOR_RESOLUTION_CLASS:
             continue
-        target_path = _semantic_unknown_path(description)
-        marker = target_path or description
-        if marker not in grouped:
-            grouped[marker] = {
-                "unknown_id": (
-                    target_path
-                    if target_path is not None
-                    else f"unknown-{len(order) + 1:03d}"
-                ),
-                "description": description,
-                "target_path": target_path,
-                "resolution_kind": (
-                    "operator_value"
-                    if target_path is not None
-                    else "operator_statement"
-                ),
-                "expected_type": (
-                    _expected_path_type(target_path, required_inputs)
-                    if target_path is not None
-                    else "text"
-                ),
-                "norm_refs": [],
-                "question": (
-                    f"Provide the operator-confirmed value for {target_path}."
-                    if target_path is not None
-                    else f"Resolve: {description}"
-                ),
-            }
-            order.append(marker)
-        current = grouped[marker]
-        for norm_ref in norm_refs:
-            if norm_ref not in current["norm_refs"]:
-                current["norm_refs"].append(norm_ref)
-    return [grouped[marker] for marker in order]
+        target_path = uncertainty.target_path
+        if target_path in predicate_paths:
+            continue
+        result.append({
+            "unknown_id": uncertainty.uncertainty_id,
+            "description": uncertainty.description,
+            "target_path": target_path,
+            "resolution_kind": (
+                "operator_value"
+                if target_path is not None
+                else "operator_statement"
+            ),
+            "expected_type": (
+                _expected_path_type(target_path, required_inputs)
+                if target_path is not None
+                else "text"
+            ),
+            "norm_refs": list(uncertainty.norm_refs),
+            "question": uncertainty.operator_question,
+        })
+    return result
 
 
 def _predicate_operator_inputs(required_inputs):
     result = []
     for item in required_inputs:
+        if (
+            item.get("resolution_class")
+            != OPERATOR_RESOLUTION_CLASS
+        ):
+            continue
         path = _operator_path(item.get("path"))
         constraints = item.get("constraints", [])
         if not isinstance(constraints, list):
@@ -516,6 +539,12 @@ def _predicate_operator_inputs(required_inputs):
             "expected_type": _constraint_type(constraints),
             "norm_refs": list(item.get("norm_refs", [])),
             "constraints": constraints,
+            "uncertainty_ids": list(
+                item.get("uncertainty_ids", [])
+            ),
+            "uncertainty_descriptions": list(
+                item.get("uncertainty_descriptions", [])
+            ),
             "question": (
                 f"Provide the observed value for Core selector {path}. "
                 "The value that makes a predicate true is not assumed."
@@ -631,17 +660,6 @@ def _require_complete_operator_resolution(
             "Operator input does not close every signed HOLD target: "
             f"{sorted(set(missing))}"
         )
-
-
-def _semantic_unknown_path(description):
-    paths = list(dict.fromkeys(re.findall(
-        r"(?<![A-Za-z0-9_.-])"
-        r"[A-Za-z][A-Za-z0-9_-]*"
-        r"(?:\.[A-Za-z][A-Za-z0-9_-]*)+"
-        r"(?![A-Za-z0-9_.-])",
-        description,
-    )))
-    return _operator_path(paths[0]) if len(paths) == 1 else None
 
 
 def _expected_path_type(path, required_inputs):
@@ -833,6 +851,8 @@ def _continuation_predicate_input_array(value, label):
         "expected_type",
         "norm_refs",
         "constraints",
+        "uncertainty_ids",
+        "uncertainty_descriptions",
         "question",
     }
     result = []
@@ -873,6 +893,14 @@ def _continuation_predicate_input_array(value, label):
             "norm_refs": _continuation_string_array(
                 item["norm_refs"],
                 f"{label}[{index}].norm_refs",
+            ),
+            "uncertainty_ids": _continuation_string_array(
+                item["uncertainty_ids"],
+                f"{label}[{index}].uncertainty_ids",
+            ),
+            "uncertainty_descriptions": _continuation_string_array(
+                item["uncertainty_descriptions"],
+                f"{label}[{index}].uncertainty_descriptions",
             ),
             "question": continuation_text(item, "question"),
         })

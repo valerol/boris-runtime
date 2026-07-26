@@ -13,6 +13,12 @@ from semantic_executor.models import (
 from semantic_executor.errors import SemanticCompatibilityError
 from semantic_executor.validation import SemanticCalculationValidator
 from semantic_executor.view import SemanticViewBuilder
+from semantic_executor.uncertainty import (
+    NON_BLOCKING_RESOLUTION_CLASSES,
+    OPERATOR_RESOLUTION_CLASS,
+    RUNTIME_RESOLUTION_CLASS,
+    resolution_catalog_index,
+)
 
 
 class SemanticExecutor:
@@ -42,7 +48,11 @@ class SemanticExecutor:
             ) from exc
         view = self.view_builder.build(self.surface, semantic_input)
         raw_calculation = self.calculator.calculate(view, semantic_input)
-        calculation = self.validator.validate(raw_calculation, view)
+        calculation = self.validator.validate(
+            raw_calculation,
+            view,
+            semantic_input,
+        )
         issues = self._guard_issues(view, calculation)
         final_gate = self._constrain_gate(view, calculation, issues)
         candidate_result = calculation.candidate_result
@@ -82,7 +92,10 @@ class SemanticExecutor:
                 candidate.norm_ref: candidate.formal_predicate_result
                 for candidate in view.candidates
             },
-            required_inputs=_required_inputs(view),
+            required_inputs=_required_inputs(view, calculation),
+            uncertainty_resolution_catalog=(
+                view.uncertainty_resolution_catalog
+            ),
             selection=view.selection_trace,
             calculator_called=True,
             llm_suggested_gate=calculation.suggested_gate,
@@ -97,6 +110,7 @@ class SemanticExecutor:
             candidate_result=candidate_result,
             norm_results=calculation.norm_results,
             unknowns=calculation.unknowns,
+            uncertainties=calculation.uncertainties,
             conflicts=calculation.conflicts,
             alternatives=calculation.alternatives,
             validation_issues=issues,
@@ -106,6 +120,7 @@ class SemanticExecutor:
     @staticmethod
     def _guard_issues(view, calculation):
         issues = []
+        uncertainty_index = _uncertainty_index(calculation)
         result_index = {
             result.norm_ref: result
             for result in calculation.norm_results
@@ -131,6 +146,10 @@ class SemanticExecutor:
                 candidate.predicate_mode != "semantic_interpreted"
                 and candidate.formal_predicate_result == "UNKNOWN"
                 and candidate.formal_applicability_result != "FALSE"
+                and _norm_uncertainty_blocks(
+                    candidate.norm_ref,
+                    uncertainty_index,
+                )
             ):
                 issues.append(ValidationIssue(
                     code="FORMAL_PREDICATE_UNKNOWN",
@@ -166,7 +185,13 @@ class SemanticExecutor:
                     ),
                     norm_refs=(candidate.norm_ref,),
                 ))
-            if result.applicability == "UNKNOWN":
+            if (
+                result.applicability == "UNKNOWN"
+                and _norm_uncertainty_blocks(
+                    candidate.norm_ref,
+                    uncertainty_index,
+                )
+            ):
                 issues.append(ValidationIssue(
                     code="SEMANTIC_APPLICABILITY_UNKNOWN",
                     message=(
@@ -186,6 +211,10 @@ class SemanticExecutor:
             if (
                 result.applicability != "FALSE"
                 and result.predicate_result == "UNKNOWN"
+                and _norm_uncertainty_blocks(
+                    candidate.norm_ref,
+                    uncertainty_index,
+                )
             ):
                 issues.append(ValidationIssue(
                     code="SEMANTIC_PREDICATE_UNKNOWN",
@@ -207,16 +236,23 @@ class SemanticExecutor:
                     norm_refs=(candidate.norm_ref,),
                 ))
             if result.unknowns:
-                issues.append(ValidationIssue(
-                    code="NORM_MATERIAL_UNKNOWNS",
-                    message=f"{candidate.norm_ref} retains material unknowns.",
-                    norm_refs=(candidate.norm_ref,),
+                issues.extend(_uncertainty_issues(
+                    uncertainty
+                    for unknown in result.unknowns
+                    for uncertainty in uncertainty_index["description"].get(
+                        unknown,
+                        (),
+                    )
                 ))
 
         if calculation.unknowns:
-            issues.append(ValidationIssue(
-                code="CALCULATION_MATERIAL_UNKNOWNS",
-                message="The semantic calculation retains material unknowns.",
+            issues.extend(_uncertainty_issues(
+                uncertainty
+                for unknown in calculation.unknowns
+                for uncertainty in uncertainty_index["description"].get(
+                    unknown,
+                    (),
+                )
             ))
         if any(conflict.disposition == "HOLD" for conflict in calculation.conflicts):
             norm_refs = tuple(dict.fromkeys(
@@ -246,8 +282,8 @@ class SemanticExecutor:
             "APPLICABILITY_UPGRADE_REJECTED",
             "SEMANTIC_APPLICABILITY_UNKNOWN",
             "SEMANTIC_PREDICATE_UNKNOWN",
-            "NORM_MATERIAL_UNKNOWNS",
-            "CALCULATION_MATERIAL_UNKNOWNS",
+            "OPERATOR_INPUT_REQUIRED",
+            "RUNTIME_RESOLUTION_REQUIRED",
             "UNRESOLVED_RULE_CONFLICT",
         }
         decisions = [calculation.suggested_gate]
@@ -329,13 +365,27 @@ def _project_candidate_result(calculation, final_gate):
         "gate": final_gate,
         "norm_results": calculation_payload["norm_results"],
         "unknowns": calculation_payload["unknowns"],
+        "uncertainties": calculation_payload["uncertainties"],
         "conflicts": calculation_payload["conflicts"],
         "alternatives": calculation_payload["alternatives"],
     }
 
 
-def _required_inputs(view):
+def _required_inputs(view, calculation):
     requirements = {}
+    uncertainty_paths = {}
+    for uncertainty in calculation.uncertainties:
+        if uncertainty.target_path is None:
+            continue
+        uncertainty_paths.setdefault(
+            uncertainty.target_path,
+            [],
+        ).append(uncertainty)
+    catalog_entries = tuple(
+        resolution_catalog_index(
+            view.uncertainty_resolution_catalog
+        ).values()
+    )
     for candidate in view.candidates:
         if candidate.predicate_mode == "semantic_interpreted":
             continue
@@ -361,16 +411,132 @@ def _required_inputs(view):
                         "path": path,
                         "norm_refs": [],
                         "constraints": [],
+                        "uncertainty_ids": [],
+                        "uncertainty_descriptions": [],
+                        "resolution_class": _path_resolution_class(
+                            path,
+                            uncertainty_paths,
+                            catalog_entries,
+                        ),
                     },
                 )
                 if candidate.norm_ref not in current["norm_refs"]:
                     current["norm_refs"].append(candidate.norm_ref)
                 if constraint not in current["constraints"]:
                     current["constraints"].append(constraint)
+                for uncertainty in uncertainty_paths.get(path, ()):
+                    if (
+                        uncertainty.uncertainty_id
+                        not in current["uncertainty_ids"]
+                    ):
+                        current["uncertainty_ids"].append(
+                            uncertainty.uncertainty_id
+                        )
+                    if (
+                        uncertainty.description
+                        not in current["uncertainty_descriptions"]
+                    ):
+                        current["uncertainty_descriptions"].append(
+                            uncertainty.description
+                        )
     return tuple(
         requirements[path]
         for path in sorted(requirements)
     )
+
+
+def _uncertainty_index(calculation):
+    by_description = {}
+    by_norm = {}
+    for uncertainty in calculation.uncertainties:
+        by_description.setdefault(
+            uncertainty.description,
+            [],
+        ).append(uncertainty)
+        for norm_ref in uncertainty.norm_refs:
+            by_norm.setdefault(norm_ref, []).append(uncertainty)
+    return {
+        "description": by_description,
+        "norm": by_norm,
+    }
+
+
+def _norm_uncertainty_blocks(norm_ref, uncertainty_index):
+    values = uncertainty_index["norm"].get(norm_ref, ())
+    if not values:
+        return True
+    return any(
+        uncertainty.resolution_class
+        not in NON_BLOCKING_RESOLUTION_CLASSES
+        for uncertainty in values
+    )
+
+
+def _uncertainty_issues(uncertainties):
+    result = []
+    seen = set()
+    issue_contract = {
+        OPERATOR_RESOLUTION_CLASS: (
+            "OPERATOR_INPUT_REQUIRED",
+            "A material uncertainty requires a real operator-owned input.",
+        ),
+        RUNTIME_RESOLUTION_CLASS: (
+            "RUNTIME_RESOLUTION_REQUIRED",
+            "A material uncertainty must be resolved inside Runtime.",
+        ),
+        "FUTURE_CONTINGENT": (
+            "FUTURE_CONTINGENCY_BOUNDED",
+            "A future contingency is retained as a scenario boundary.",
+        ),
+        "MODEL_UNCERTAINTY": (
+            "MODEL_UNCERTAINTY_BOUNDED",
+            "A model uncertainty is retained as a confidence boundary.",
+        ),
+        "DOWNSTREAM_PRECONDITION": (
+            "DOWNSTREAM_PRECONDITION_DEFERRED",
+            "A later-stage precondition is recorded without blocking the "
+            "semantic candidate.",
+        ),
+        "UNRESOLVABLE_LIMITATION": (
+            "UNRESOLVABLE_LIMITATION_DISCLOSED",
+            "An unresolvable limitation is disclosed in the candidate.",
+        ),
+    }
+    for uncertainty in uncertainties:
+        marker = uncertainty.uncertainty_id
+        if marker in seen:
+            continue
+        seen.add(marker)
+        code, message = issue_contract[uncertainty.resolution_class]
+        result.append(ValidationIssue(
+            code=code,
+            message=message,
+            norm_refs=uncertainty.norm_refs,
+        ))
+    return result
+
+
+def _path_resolution_class(
+    path,
+    uncertainty_paths,
+    catalog_entries,
+):
+    classified = {
+        uncertainty.resolution_class
+        for uncertainty in uncertainty_paths.get(path, ())
+    }
+    if len(classified) == 1:
+        return classified.pop()
+    if path.startswith("violation."):
+        return RUNTIME_RESOLUTION_CLASS
+    catalog_classes = {
+        entry["resolution_class"]
+        for entry in catalog_entries
+        if entry.get("target_path") == path
+    }
+    if len(catalog_classes) == 1:
+        return catalog_classes.pop()
+    return "UNRESOLVABLE_LIMITATION"
 
 
 def _predicate_path_requirements(value):

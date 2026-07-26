@@ -10,12 +10,13 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS exposes one public tool: boris.execute. Use it for the Runtime's "
-    "semantic evaluation route. Present its ExecutionCandidate without replacing "
-    "it with an independent answer or weakening HOLD, STOP, or REPAIR. "
-    "For HOLD, ask for required_operator_input and resume only through the signed "
-    "continuation. Developer trace is component-only. The result is not independently "
-    "reviewed, policy-admitted, state-mutating, or executed."
+    "BORIS exposes one public tool: boris.execute. Present its ExecutionCandidate without "
+    "replacing it or weakening HOLD, STOP, or REPAIR. For HOLD, ask only when "
+    "required_operator_input is present and resume only through its signed "
+    "continuation; otherwise present the conditional candidate and limits "
+    "without inventing an operator question. Developer trace is component-only. "
+    "The result is not independently reviewed, policy-admitted, state-mutating, "
+    "or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -183,10 +184,21 @@ def _candidate_instruction(payload, candidate_json):
     if payload.get("gate") == "HOLD":
         hold = payload.get("hold")
         required = (
-            hold.get("required_operator_input", {})
+            hold.get("required_operator_input")
             if isinstance(hold, dict)
-            else {}
+            else None
         )
+        if not isinstance(required, dict):
+            return (
+                "BORIS returned HOLD without an operator-owned resolution "
+                "target. Do not ask the operator to supply Runtime objects, "
+                "future events, model outcomes, or downstream admission "
+                "artifacts. Present the conditional ExecutionCandidate and its "
+                "declared uncertainty bounds without weakening the gate or "
+                "claiming execution.\n\n"
+                "ExecutionCandidate:\n"
+                f"{candidate_json}"
+            )
         question = required.get(
             "question",
             "Operator input is required before this route can continue.",

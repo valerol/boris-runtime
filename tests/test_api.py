@@ -196,6 +196,50 @@ def test_runtime_execute_hold_is_a_normal_runtime_result(monkeypatch):
     )
 
 
+def test_runtime_execute_accepts_non_operator_hold_without_token(
+    monkeypatch,
+):
+    class NonOperatorHoldService(FakeExecutionService):
+        def execute(self, *args, **kwargs):
+            packet = super().execute(*args, **kwargs)
+            packet["uncertainties"] = [{
+                "uncertainty_id": "future-event",
+                "description": "A future event remains contingent.",
+                "resolution_class": "FUTURE_CONTINGENT",
+            }]
+            packet["hold"] = {
+                "handoff_version": "boris-hold-handoff/1.2",
+                "status": "resolution_not_operator_owned",
+                "reason": "No unresolved target is operator-owned.",
+                "required_operator_input": None,
+                "resolution_summary": {
+                    "FUTURE_CONTINGENT": [{
+                        "uncertainty_id": "future-event",
+                    }],
+                },
+                "resume_count": 0,
+            }
+            return packet
+
+    monkeypatch.setattr(
+        app_module,
+        "execution_service",
+        NonOperatorHoldService(),
+    )
+
+    response = client.post(
+        "/runtime/execute",
+        json={"input": "Evaluate a conditional route."},
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["hold"]["status"] == "resolution_not_operator_owned"
+    assert body["hold"]["required_operator_input"] is None
+    assert "continuation_token" not in body["hold"]
+    assert "expires_at" not in body["hold"]
+
+
 def test_runtime_execute_preserves_explicit_null_hold_candidate(
     monkeypatch,
 ):

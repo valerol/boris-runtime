@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from dataclasses import replace
@@ -32,6 +33,8 @@ class AutoCalculator:
         suggested_gate="PASS",
         unknowns=(),
         result_unknowns=None,
+        uncertainties=None,
+        uncertainty_resolution=None,
         conflicts=(),
         applicability=None,
         mutate=None,
@@ -39,6 +42,8 @@ class AutoCalculator:
         self.suggested_gate = suggested_gate
         self.unknowns = list(unknowns)
         self.result_unknowns = result_unknowns or {}
+        self.uncertainties = uncertainties
+        self.uncertainty_resolution = uncertainty_resolution or {}
         self.conflicts = list(conflicts)
         self.applicability = applicability or {}
         self.mutate = mutate
@@ -48,6 +53,40 @@ class AutoCalculator:
     def calculate(self, view, semantic_input):
         self.calls += 1
         self.last_view = view
+        calculation_unknowns = list(dict.fromkeys((
+            *semantic_input.unknowns,
+            *self.unknowns,
+        )))
+        uncertainties = self.uncertainties
+        if callable(uncertainties):
+            uncertainties = uncertainties(view, semantic_input)
+        if uncertainties is None:
+            grouped = {}
+            for description in calculation_unknowns:
+                grouped.setdefault(description, set())
+            for norm_ref, values in self.result_unknowns.items():
+                for description in values:
+                    grouped.setdefault(description, set()).add(norm_ref)
+            uncertainties = [
+                uncertainty(description, **{
+                    "norm_refs": tuple(sorted(norm_refs)),
+                    **self.uncertainty_resolution.get(
+                        description,
+                        {},
+                    ),
+                })
+                for description, norm_refs in grouped.items()
+            ]
+        for item in uncertainties:
+            description = item["description"]
+            if (
+                description not in calculation_unknowns
+                and not any(
+                    description in values
+                    for values in self.result_unknowns.values()
+                )
+            ):
+                calculation_unknowns.append(description)
         payload = {
             "core_ref": view.core_ref.to_dict(),
             "phase": view.phase,
@@ -59,7 +98,7 @@ class AutoCalculator:
                     "predicate_result": candidate.formal_predicate_result,
                     "applicability": self.applicability.get(
                         candidate.norm_ref,
-                        candidate.formal_predicate_result,
+                        candidate.formal_applicability_result,
                     ),
                     "reason": f"Calculated {candidate.norm_ref}.",
                     "unknowns": list(
@@ -68,7 +107,8 @@ class AutoCalculator:
                 }
                 for candidate in view.candidates
             ],
-            "unknowns": self.unknowns,
+            "unknowns": calculation_unknowns,
+            "uncertainties": uncertainties,
             "conflicts": self.conflicts,
             "alternatives": [],
             "suggested_gate": self.suggested_gate,
@@ -77,6 +117,33 @@ class AutoCalculator:
         if self.mutate:
             self.mutate(payload, view)
         return payload
+
+
+def uncertainty(
+    description,
+    *,
+    resolution_class="UNRESOLVABLE_LIMITATION",
+    target_path=None,
+    norm_refs=(),
+    core_refs=(),
+    operator_question=None,
+    uncertainty_id=None,
+):
+    return {
+        "uncertainty_id": (
+            uncertainty_id
+            or "uncertainty-"
+            + hashlib.sha256(
+                description.encode("utf-8")
+            ).hexdigest()[:16]
+        ),
+        "description": description,
+        "resolution_class": resolution_class,
+        "target_path": target_path,
+        "norm_refs": list(norm_refs),
+        "core_refs": list(core_refs),
+        "operator_question": operator_question,
+    }
 
 
 class RecordingLLM:
@@ -185,6 +252,165 @@ def test_supported_calculation_produces_non_executing_pass_candidate():
     assert calculator.calls == 1
 
 
+def test_future_contingency_bounds_candidate_without_forcing_hold():
+    description = "The future outcome depends on events not yet observed."
+    calculator = AutoCalculator(
+        suggested_gate="PASS",
+        unknowns=(description,),
+        uncertainties=[
+            uncertainty(
+                description,
+                resolution_class="FUTURE_CONTINGENT",
+                uncertainty_id="future-outcome",
+            )
+        ],
+    )
+
+    result = build_executor(
+        build_surface(),
+        calculator,
+    ).execute(SemanticInput(
+        phenomenon="Evaluate a conditional future route.",
+        phase="C03",
+    ))
+
+    assert result.gate == "PASS"
+    assert result.uncertainties[0].resolution_action == (
+        "BOUND_AS_SCENARIO"
+    )
+    assert result.uncertainties[0].blocks_semantic_pass is False
+    assert {
+        issue.code
+        for issue in result.validation_issues
+    } == {"FUTURE_CONTINGENCY_BOUNDED"}
+
+
+def test_resolution_catalog_is_derived_from_phase_capsule_contract():
+    surface = replace(
+        build_surface(),
+        phase_contexts={
+            "C03": {
+                "phase_capsule": {
+                    "required_object_schemas": [{
+                        "object_type": "Assessment_Object",
+                        "owner": "O100",
+                        "required_fields": ["assessment_id", "provenance"],
+                    }],
+                    "gate_contract": {
+                        "canonical_object_projection": {
+                            "assessment_objects": [
+                                "Source_Object",
+                                "Assessment Object",
+                            ],
+                            "output_objects": ["Assessment Object"],
+                            "primary_object": "Assessment_Object",
+                        },
+                        "required_evidence_contract": {
+                            "object_bindings": [{
+                                "context_path": "assessment",
+                                "object_type": "Assessment_Object",
+                                "owner": "O100",
+                                "source_class": "CURRENT_RUNTIME",
+                            }],
+                            "registry_path": "runtime_registry",
+                            "registry_type": "CycleObjectStore",
+                            "gate_evidence_type": "GateEvidence",
+                            "gate_evidence_owner": "O100",
+                        },
+                    },
+                },
+            },
+        },
+    )
+
+    view = SemanticViewBuilder().build(
+        surface,
+        SemanticInput(
+            phenomenon="Build the current semantic view.",
+            phase="C03",
+        ),
+    )
+    entries = view.to_prompt_dict()[
+        "uncertainty_resolution_catalog"
+    ]["entries"]
+
+    output = next(
+        item
+        for item in entries
+        if item["kind"] == "CURRENT_PHASE_OUTPUT"
+    )
+    assert output["object_type"] == "Assessment Object"
+    assert output["owner"] == "O100"
+    assert output["required_fields"] == [
+        "assessment_id",
+        "provenance",
+    ]
+    assert output["resolution_class"] == "RUNTIME_DERIVABLE"
+    assert {
+        item["resolution_class"]
+        for item in entries
+        if item["kind"] in {
+            "CURRENT_CYCLE_ASSESSMENT",
+            "RUNTIME_REGISTRY",
+            "GATE_EVIDENCE",
+        }
+    } == {"DOWNSTREAM_PRECONDITION"}
+
+
+def test_current_runtime_core_requirement_cannot_be_operator_owned():
+    surface = replace(
+        build_surface(),
+        phase_contexts={
+            "C03": {
+                "phase_capsule": {
+                    "required_object_schemas": [{
+                        "object_type": "Assessment",
+                        "owner": "O100",
+                        "required_fields": ["assessment_id"],
+                    }],
+                    "gate_contract": {
+                        "canonical_object_projection": {
+                            "assessment_objects": ["Assessment"],
+                            "output_objects": ["Assessment"],
+                            "primary_object": "Assessment",
+                        },
+                        "required_evidence_contract": {
+                            "object_bindings": [],
+                        },
+                    },
+                },
+            },
+        },
+    )
+
+    def claim_runtime_output_is_operator_input(payload, view):
+        core_ref = view.uncertainty_resolution_catalog[
+            "entries"
+        ][0]["resolution_ref"]
+        payload["unknowns"] = ["Assessment is missing."]
+        payload["uncertainties"] = [
+            uncertainty(
+                "Assessment is missing.",
+                resolution_class="OPERATOR_INPUT",
+                core_refs=(core_ref,),
+                operator_question="Provide the Assessment object.",
+                uncertainty_id="assessment",
+            )
+        ]
+
+    with pytest.raises(
+        SemanticCalculationError,
+        match="CURRENT_RUNTIME",
+    ):
+        build_executor(
+            surface,
+            AutoCalculator(mutate=claim_runtime_output_is_operator_input),
+        ).execute(SemanticInput(
+            phenomenon="Calculate an internal assessment.",
+            phase="C03",
+        ))
+
+
 @pytest.mark.parametrize("suggested_gate", ["PASS", "STOP", "REPAIR"])
 def test_non_hold_empty_result_gets_validated_runtime_projection(
     suggested_gate,
@@ -223,6 +449,7 @@ def test_non_hold_empty_result_gets_validated_runtime_projection(
             }
         ],
         "unknowns": [],
+        "uncertainties": [],
         "conflicts": [],
         "alternatives": [],
     }
@@ -360,7 +587,7 @@ def test_material_unknown_cannot_weaken_stop_or_repair(suggested_gate):
 
     assert result.gate == suggested_gate
     assert any(
-        issue.code == "CALCULATION_MATERIAL_UNKNOWNS"
+        issue.code == "UNRESOLVABLE_LIMITATION_DISCLOSED"
         for issue in result.validation_issues
     )
 
