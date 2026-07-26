@@ -11,8 +11,11 @@ Current implemented boundary:
 - isolated, non-executing Semantic Executor;
 - Semantic Input compilation and the `boris-execution/1.0` candidate envelope;
 - sole public MCP entry `boris.execute`;
-- signed path-aware HOLD handoff and complete-target resume through the same
-  tool;
+- ownership-aware uncertainty resolution derived from Core phase capsules;
+- signed path-aware HOLD handoff only for operator-owned targets and
+  complete-target resume through the same tool;
+- non-operator HOLD disclosure that preserves the conditional candidate
+  without issuing a continuation token;
 - deterministic non-empty candidate projection for any non-`HOLD` route,
   including resume;
 - developer-only visual MCP surface v2 with model-hidden safe trace;

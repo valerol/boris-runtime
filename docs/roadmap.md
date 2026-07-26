@@ -49,7 +49,12 @@
 
 ### Closed HOLD handoff and Developer Surface
 
-- mandatory structured operator handoff for every `HOLD`;
+- typed uncertainty ownership and resolution classes;
+- schema-driven internal-object ownership projection from Core phase
+  capsules;
+- structured operator handoff only when a `HOLD` contains an explicit
+  operator-owned target;
+- non-operator `HOLD` disclosure without a continuation token;
 - non-empty conditional candidate or explicit null-candidate reason;
 - HMAC-SHA256 stateless continuation bound to exact `SemanticInput`, Core
   identity, session, HOLD targets, expiry, and resume count;
@@ -105,8 +110,12 @@ errors. `PASS` is still only a semantic candidate, not final authorization.
 Lexical projection remains observability and never determines semantic
 applicability.
 
-`HOLD` can now request operator input and resume the same semantic calculation
-from a signed stateless token. This closes the clarification handoff only; it
+`HOLD` can request operator input and resume the same semantic calculation
+from a signed stateless token only when an unresolved target is explicitly
+classified as `OPERATOR_INPUT`. Runtime-owned derivations, future
+contingencies, model uncertainty, downstream preconditions, and unresolvable
+limitations remain visible without being reassigned to the operator. This
+closes the clarification handoff only; it
 does not implement Independent Review, Policy Kernel admission, durable cycle
 state, memory, or action authorization. Tokens are replayable until expiry and
 are globally invalidated by continuation-secret rotation.

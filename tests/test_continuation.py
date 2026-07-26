@@ -22,7 +22,7 @@ def test_continuation_codec_round_trips_signed_state():
     })
 
     assert codec.verify(token) == claims
-    assert claims["version"] == "boris-continuation/1.1"
+    assert claims["version"] == "boris-continuation/1.2"
     assert claims["issued_at"] == 1000
     assert claims["expires_at"] == 1600
     assert continuation_expiry_iso(claims) == (

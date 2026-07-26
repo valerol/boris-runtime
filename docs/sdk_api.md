@@ -113,30 +113,32 @@ result = service.execute(
 
 if result["gate"] == "HOLD":
     required = result["hold"]["required_operator_input"]
-    # Collect these values from the operator; never infer them here.
-    operator_values = {
-        "authorization.granted": True,
-    }
-    result = service.execute(
-        session_id=result["session_id"],
-        resume={
-            "continuation_token": result["hold"][
-                "continuation_token"
-            ],
-            "operator_input": {
-                "statement": "The operator clarification.",
-                "values": operator_values,
-                "resolved_unknowns": [
-                    item["unknown_id"]
-                    for item in required["semantic_unknowns"]
+    if required is not None:
+        # Collect only the declared operator-owned values.
+        operator_values = {
+            "authorization.granted": True,
+        }
+        result = service.execute(
+            session_id=result["session_id"],
+            resume={
+                "continuation_token": result["hold"][
+                    "continuation_token"
                 ],
+                "operator_input": {
+                    "statement": "The operator clarification.",
+                    "values": operator_values,
+                    "resolved_unknowns": [
+                        item["unknown_id"]
+                        for item in required["semantic_unknowns"]
+                    ],
+                },
             },
-        },
-    )
+        )
 ```
 
 `BORIS_CONTINUATION_SECRET` must contain at least 32 bytes before Runtime can
-issue or verify a HOLD token. A valid resume reconstructs the signed
+issue or verify an operator-owned HOLD token. A non-operator `HOLD` requires no
+token. A valid resume reconstructs the signed
 `SemanticInput`, verifies the current Core identity and session, records
 operator evidence, applies only signed input paths, and skips
 `SemanticInputCompiler`. `semantic_unknowns` and `predicate_inputs` are

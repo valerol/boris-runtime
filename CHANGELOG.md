@@ -4,6 +4,25 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added a typed ownership-aware uncertainty contract to Semantic Executor.
+  Every unresolved item is classified as `OPERATOR_INPUT`,
+  `RUNTIME_DERIVABLE`, `FUTURE_CONTINGENT`, `MODEL_UNCERTAINTY`,
+  `DOWNSTREAM_PRECONDITION`, or `UNRESOLVABLE_LIMITATION`; the public
+  `unknowns` list remains as a compatibility projection.
+- Added a schema-driven resolution catalog derived generically from each
+  Core capsule's `canonical_object_projection`, `required_object_schemas`,
+  and `required_evidence_contract`. Current-phase output contracts are
+  Runtime-owned, while gate evidence, registries, and later-stage
+  prerequisites remain downstream-owned.
+- Replaced the unsafe unknown-to-operator default with
+  `boris-hold-handoff/1.2`. Only explicit `OPERATOR_INPUT` targets can issue a
+  signed continuation. Future, model, downstream, Runtime-owned, and
+  unresolvable limitations preserve the conditional candidate and return
+  `resolution_not_operator_owned` without a token.
+- Reject attempts to relabel `CURRENT_RUNTIME` requirements or internal
+  `violation.*` selectors as operator inputs. Unclassified formal-predicate
+  paths fail closed as limitations rather than being silently assigned to the
+  operator.
 - Added a versioned `public-core-v2` contract adapter for Core v2.31. It
   verifies the exact manifest/checksum inventory and projects canonical JSON
   norms, phase-complete applicability, operational semantics, gate contracts,

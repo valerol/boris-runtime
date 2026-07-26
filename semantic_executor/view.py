@@ -24,6 +24,9 @@ from semantic_executor.predicates import (
     SUPPORTED_OPERATORS,
     PredicateEvaluator,
 )
+from semantic_executor.uncertainty import (
+    build_uncertainty_resolution_catalog,
+)
 
 
 PHASE_APPLICABILITY_PATH = "assurance/NORM_PHASE_APPLICABILITY.tsv"
@@ -158,6 +161,9 @@ class SemanticViewBuilder:
             )
 
         candidates.sort(key=lambda item: (-item.priority, item.norm_ref))
+        execution_context = surface.phase_context(
+            semantic_input.phase
+        )
         return SemanticView(
             core_ref=CoreReference.from_surface(surface),
             phase=semantic_input.phase,
@@ -166,8 +172,9 @@ class SemanticViewBuilder:
             predicate_dsl=predicate_dsl,
             deontic_semantics=deontic,
             gate_decision_semantics=gates,
-            execution_context=surface.phase_context(
-                semantic_input.phase
+            execution_context=execution_context,
+            uncertainty_resolution_catalog=(
+                build_uncertainty_resolution_catalog(execution_context)
             ),
             selection_trace={
                 "active_scopes": sorted(active_scopes),

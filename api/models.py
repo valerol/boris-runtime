@@ -97,6 +97,8 @@ class RuntimePredicateInput(BaseModel):
     expected_type: str
     norm_refs: list[str] = Field(default_factory=list)
     constraints: list[dict[str, Any]] = Field(default_factory=list)
+    uncertainty_ids: list[str] = Field(default_factory=list)
+    uncertainty_descriptions: list[str] = Field(default_factory=list)
     question: str
 
 
@@ -112,13 +114,49 @@ class RuntimeRequiredOperatorInput(BaseModel):
 
 
 class RuntimeHoldHandoff(BaseModel):
-    handoff_version: Literal["boris-hold-handoff/1.1"]
-    status: Literal["operator_input_required"]
+    handoff_version: Literal[
+        "boris-hold-handoff/1.1",
+        "boris-hold-handoff/1.2",
+    ]
+    status: Literal[
+        "operator_input_required",
+        "resolution_not_operator_owned",
+    ]
     reason: str
-    required_operator_input: RuntimeRequiredOperatorInput
-    continuation_token: str
-    expires_at: str
+    required_operator_input: RuntimeRequiredOperatorInput | None
+    continuation_token: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    expires_at: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    resolution_summary: dict[str, list[dict[str, Any]]] = Field(
+        default_factory=dict,
+    )
     resume_count: int = 0
+
+    @model_validator(mode="after")
+    def validate_handoff_route(self):
+        if self.status == "operator_input_required":
+            if (
+                self.required_operator_input is None
+                or not self.continuation_token
+                or not self.expires_at
+            ):
+                raise ValueError(
+                    "An operator handoff requires input, token, and expiry."
+                )
+        elif (
+            self.required_operator_input is not None
+            or self.continuation_token is not None
+            or self.expires_at is not None
+        ):
+            raise ValueError(
+                "A non-operator HOLD cannot contain operator continuation."
+            )
+        return self
 
 
 class RuntimeExecutionResponse(BaseModel):
@@ -134,6 +172,7 @@ class RuntimeExecutionResponse(BaseModel):
     )
     norm_results: list[dict[str, Any]] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
+    uncertainties: list[dict[str, Any]] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     alternatives: list[dict[str, Any]] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)

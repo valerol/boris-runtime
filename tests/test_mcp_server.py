@@ -117,6 +117,35 @@ def test_boris_execute_forwards_resume_to_runtime():
     ]
 
 
+def test_non_operator_hold_is_presented_without_inventing_a_question():
+    packet = _execution_packet()
+    packet["hold"] = {
+        "handoff_version": "boris-hold-handoff/1.2",
+        "status": "resolution_not_operator_owned",
+        "reason": "The remaining uncertainty is future-contingent.",
+        "required_operator_input": None,
+        "resolution_summary": {
+            "FUTURE_CONTINGENT": [{
+                "uncertainty_id": "future-event",
+            }],
+        },
+        "resume_count": 0,
+    }
+
+    response = run_boris_execute(
+        input="Evaluate a conditional route.",
+        client=FakeRuntimeClient(response=packet),
+    )
+    text = response["content"][0]["text"]
+
+    assert text.startswith(
+        "BORIS returned HOLD without an operator-owned resolution target."
+    )
+    assert "Do not ask the operator" in text
+    assert "resume.continuation_token" not in text
+    assert response["structuredContent"] == packet
+
+
 def test_mcp_adapter_does_not_import_runtime_internals():
     forbidden = (
         "application.context_provider",
