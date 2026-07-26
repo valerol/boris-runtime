@@ -112,6 +112,11 @@ result = service.execute(
 )
 
 if result["gate"] == "HOLD":
+    required = result["hold"]["required_operator_input"]
+    # Collect these values from the operator; never infer them here.
+    operator_values = {
+        "authorization.granted": True,
+    }
     result = service.execute(
         session_id=result["session_id"],
         resume={
@@ -120,10 +125,11 @@ if result["gate"] == "HOLD":
             ],
             "operator_input": {
                 "statement": "The operator clarification.",
-                "values": {"authorization.granted": True},
-                "resolved_unknowns": result["hold"][
-                    "required_operator_input"
-                ]["unknowns"],
+                "values": operator_values,
+                "resolved_unknowns": [
+                    item["unknown_id"]
+                    for item in required["semantic_unknowns"]
+                ],
             },
         },
     )
@@ -133,7 +139,9 @@ if result["gate"] == "HOLD":
 issue or verify a HOLD token. A valid resume reconstructs the signed
 `SemanticInput`, verifies the current Core identity and session, records
 operator evidence, applies only signed input paths, and skips
-`SemanticInputCompiler`. It does not create persistent Runtime state.
+`SemanticInputCompiler`. `semantic_unknowns` and `predicate_inputs` are
+separate; every signed target must be closed before recalculation. It does not
+create persistent Runtime state.
 
 The return value is an `ExecutionCandidate`, not an executed action or
 `KernelDecision`.

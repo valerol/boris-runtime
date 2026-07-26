@@ -80,21 +80,39 @@ class RuntimeExecutionRequest(BaseModel):
         return self
 
 
-class RuntimeRequiredInput(BaseModel):
-    path: str
+class RuntimeSemanticUnknown(BaseModel):
+    unknown_id: str
+    description: str
+    target_path: str | None = None
+    resolution_kind: str
+    expected_type: str
+    norm_refs: list[str] = Field(default_factory=list)
+    question: str
+
+
+class RuntimePredicateInput(BaseModel):
+    input_id: str
+    target_path: str
+    resolution_kind: str
+    expected_type: str
     norm_refs: list[str] = Field(default_factory=list)
     constraints: list[dict[str, Any]] = Field(default_factory=list)
+    question: str
 
 
 class RuntimeRequiredOperatorInput(BaseModel):
     question: str
-    unknowns: list[str] = Field(default_factory=list)
-    fields: list[RuntimeRequiredInput] = Field(default_factory=list)
+    semantic_unknowns: list[RuntimeSemanticUnknown] = Field(
+        default_factory=list,
+    )
+    predicate_inputs: list[RuntimePredicateInput] = Field(
+        default_factory=list,
+    )
     response_contract: dict[str, str] = Field(default_factory=dict)
 
 
 class RuntimeHoldHandoff(BaseModel):
-    handoff_version: Literal["boris-hold-handoff/1.0"]
+    handoff_version: Literal["boris-hold-handoff/1.1"]
     status: Literal["operator_input_required"]
     reason: str
     required_operator_input: RuntimeRequiredOperatorInput

@@ -162,6 +162,19 @@ the exact `SemanticInput` and later reconstructs it for resume; this does not
 change the isolated executor contract, write memory, or admit a state
 transition.
 
+`boris-hold-handoff/1.1` preserves two separate resolution surfaces:
+
+- `semantic_unknowns` contain the unresolved semantic statements, an
+  `unknown_id`, and a `target_path` only when exactly one valid path is stated;
+- `predicate_inputs` contain the Core-declared machine paths from formal
+  predicates whose result is `UNKNOWN`.
+
+Validation-issue summaries are not presented as operator unknowns. Predicate
+constraints describe the Core expression but do not suggest its matching value
+as the operator answer. Resume requires explicit closure of every signed
+semantic unknown and every signed predicate input before another semantic
+calculation is allowed.
+
 ## Statement-Type Debt
 
 Phase 4F does not map the nine human-readable statement types onto the three

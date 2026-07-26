@@ -395,7 +395,7 @@
         <div class="mark" aria-hidden="true">BR</div>
         <div>
           <h1>BORIS Developer Surface</h1>
-          <p class="subtitle">Semantic candidate · safe execution projection</p>
+          <p class="subtitle">Semantic candidate · path-aware HOLD projection</p>
         </div>
       </div>
       <div class="chips">
@@ -422,7 +422,9 @@
     <section id="hold-panel" class="panel hold-panel hidden">
       <h2>Operator handoff</h2>
       <p id="hold-question" class="question"></p>
+      <h3>Semantic unknowns</h3>
       <ul id="unknown-list" class="unknown-list"></ul>
+      <h3>Formal predicate inputs</h3>
       <div id="field-grid" class="field-grid"></div>
       <label for="operator-statement" class="muted">
         Operator clarification
@@ -592,21 +594,49 @@
         holdQuestion.textContent =
           required.question || "Operator input is required.";
 
-        for (const unknown of required.unknowns || []) {
+        for (const unknown of required.semantic_unknowns || []) {
           const item = document.createElement("li");
           const label = document.createElement("label");
           const checkbox = document.createElement("input");
           const text = document.createElement("span");
           checkbox.type = "checkbox";
-          checkbox.checked = true;
-          checkbox.dataset.unknown = String(unknown);
-          text.textContent = String(unknown);
+          checkbox.checked = false;
+          checkbox.dataset.unknown = String(unknown.unknown_id || "");
+          text.textContent = unknown.target_path
+            ? `${unknown.description} → ${unknown.target_path}`
+            : String(unknown.description || unknown.unknown_id || "");
           label.append(checkbox, text);
           item.append(label);
           unknownList.append(item);
         }
 
-        for (const field of required.fields || []) {
+        const controls = [];
+        for (const unknown of required.semantic_unknowns || []) {
+          if (unknown.target_path) {
+            controls.push({
+              path: unknown.target_path,
+              expected_type: unknown.expected_type,
+              constraints: [],
+              question: unknown.question,
+              unknown_ids: [unknown.unknown_id],
+            });
+          }
+        }
+        controls.push(...(required.predicate_inputs || []));
+        const uniqueControls = new Map();
+        for (const field of controls) {
+          const controlPath = field.target_path || field.path;
+          if (!uniqueControls.has(controlPath)) {
+            uniqueControls.set(controlPath, field);
+          } else {
+            const existing = uniqueControls.get(controlPath);
+            existing.unknown_ids = Array.from(new Set([
+              ...(existing.unknown_ids || []),
+              ...(field.unknown_ids || []),
+            ]));
+          }
+        }
+        for (const field of uniqueControls.values()) {
           const card = document.createElement("div");
           const description = document.createElement("div");
           const path = document.createElement("div");
@@ -615,24 +645,14 @@
           card.className = "field-card";
           path.className = "path";
           constraint.className = "constraint";
-          path.textContent = String(field.path || "");
-          constraint.textContent = constraintLabel(field.constraints || []);
+          path.textContent = String(field.target_path || field.path || "");
+          constraint.textContent = field.question
+            || constraintLabel(field.constraints || []);
           description.append(path, constraint);
           card.append(description, control.element);
           fieldGrid.append(card);
           fieldControls.push(control);
         }
-      }
-
-      function suggestedValue(constraints) {
-        const expected = constraints
-          .filter((item) => item && Object.hasOwn(item, "expected"))
-          .map((item) => item.expected);
-        if (!expected.length) return undefined;
-        const first = json(expected[0]);
-        return expected.every((value) => json(value) === first)
-          ? expected[0]
-          : undefined;
       }
 
       function constraintLabel(constraints) {
@@ -652,15 +672,16 @@
       }
 
       function fieldControl(field) {
-        const expected = suggestedValue(field.constraints || []);
-        if (typeof expected === "boolean") {
+        const expectedType = field.expected_type || "json";
+        if (expectedType === "boolean") {
           const element = document.createElement("select");
-          const empty = new Option("Not confirmed", "");
+          const empty = new Option("Select observed value", "");
           const yes = new Option("true", "true");
           const no = new Option("false", "false");
           element.append(empty, yes, no);
           return {
-            path: field.path,
+            path: field.target_path || field.path,
+            unknownIds: field.unknown_ids || [],
             element,
             read: () => (
               element.value === "" ? undefined : element.value === "true"
@@ -669,11 +690,10 @@
         }
         const element = document.createElement("input");
         element.type = "text";
-        element.placeholder = expected === undefined
-          ? "Optional JSON value"
-          : `Expected ${json(expected)}`;
+        element.placeholder = `Enter observed ${expectedType} value`;
         return {
-          path: field.path,
+          path: field.target_path || field.path,
+          unknownIds: field.unknown_ids || [],
           element,
           read: () => {
             const value = element.value.trim();
@@ -711,13 +731,18 @@
           return;
         }
         const values = {};
+        const resolvedUnknowns = new Set(Array.from(
+          unknownList.querySelectorAll("input[type=checkbox]:checked")
+        ).map((item) => item.dataset.unknown));
         for (const control of fieldControls) {
           const value = control.read();
-          if (value !== undefined) values[control.path] = value;
+          if (value !== undefined) {
+            values[control.path] = value;
+            for (const unknownId of control.unknownIds || []) {
+              resolvedUnknowns.add(unknownId);
+            }
+          }
         }
-        const resolvedUnknowns = Array.from(
-          unknownList.querySelectorAll("input[type=checkbox]:checked")
-        ).map((item) => item.dataset.unknown);
         const statement = operatorStatement.value.trim();
         if (!statement && !Object.keys(values).length) {
           formError.textContent =
@@ -736,7 +761,7 @@
               operator_input: {
                 statement,
                 values,
-                resolved_unknowns: resolvedUnknowns,
+                resolved_unknowns: Array.from(resolvedUnknowns),
               },
             },
           });
@@ -756,7 +781,7 @@
             protocolVersion: "2026-01-26",
             appInfo: {
               name: "BORIS Developer Surface",
-              version: "1.0.0",
+              version: "2.0.0",
             },
             appCapabilities: {},
           });

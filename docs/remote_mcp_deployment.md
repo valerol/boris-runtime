@@ -227,9 +227,10 @@ After updating tool metadata, refresh connector metadata in ChatGPT.
 Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
 `boris-execution-trace/1.0`. The execution request has no mode selector.
 The MCP server reads the same non-secret mode setting and links
-`boris.execute` to `ui://boris/developer-surface-v1.html`. The component
+`boris.execute` to `ui://boris/developer-surface-v2.html`. The component
 receives the complete safe trace through tool-result `_meta`, hidden from the
-model, and displays it alongside the candidate and HOLD resume form. The trace
+model, and displays it alongside the candidate and path-aware HOLD resume form.
+The trace
 combines lexical projection, `SemanticInput`, RuntimeAttestation, norm and
 predicate results, constrained gate, validation issues, continuation status,
 stage ledger, and timings. It contains no continuation token, hidden prompts,

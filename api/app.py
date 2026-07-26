@@ -18,6 +18,7 @@ from application.context_provider import ContextProvider, CoreSurfaceUnavailable
 from application.continuation import (
     ContinuationStateMismatch,
     ContinuationUnavailable,
+    IncompleteOperatorResolution,
     InvalidContinuationToken,
 )
 from application.execution import (
@@ -126,6 +127,13 @@ def execute_runtime(request: RuntimeExecutionRequest):
         return execution_service.execute(
             request.input,
             **execution_arguments,
+        )
+    except IncompleteOperatorResolution as exc:
+        return _error_response(
+            400,
+            "incomplete_operator_resolution",
+            exc,
+            session_id=session_id,
         )
     except InvalidContinuationToken as exc:
         return _error_response(

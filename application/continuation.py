@@ -14,8 +14,8 @@ from uuid import uuid4
 from semantic_executor import CoreReference, SemanticInput
 
 
-CONTINUATION_VERSION = "boris-continuation/1.0"
-HOLD_HANDOFF_VERSION = "boris-hold-handoff/1.0"
+CONTINUATION_VERSION = "boris-continuation/1.1"
+HOLD_HANDOFF_VERSION = "boris-hold-handoff/1.1"
 CONTINUATION_SECRET_ENV = "BORIS_CONTINUATION_SECRET"
 CONTINUATION_TTL_ENV = "BORIS_CONTINUATION_TTL_SECONDS"
 DEFAULT_CONTINUATION_TTL_SECONDS = 3600
@@ -51,6 +51,10 @@ class InvalidContinuationToken(ContinuationError):
 
 class ContinuationStateMismatch(ContinuationError):
     """Raised when a valid token does not match the current Runtime state."""
+
+
+class IncompleteOperatorResolution(ContinuationError):
+    """Raised when operator input leaves a signed HOLD target unresolved."""
 
 
 class ContinuationCodec:
@@ -136,6 +140,13 @@ class ContinuationCodec:
             raise InvalidContinuationToken(
                 "continuation_token is not valid base64url data."
             ) from exc
+        if (
+            _base64url_encode(supplied_signature) != encoded_signature
+            or _base64url_encode(payload_bytes) != encoded_payload
+        ):
+            raise InvalidContinuationToken(
+                "continuation_token is not canonical base64url data."
+            )
         expected_signature = hmac.new(
             self._secret,
             encoded_payload.encode("ascii"),
@@ -197,19 +208,28 @@ def build_hold_handoff(
     session_id,
     resume_count,
 ):
-    unknowns = _hold_unknowns(candidate)
     required_inputs = candidate.trace.to_dict()["required_inputs"]
+    semantic_unknowns = _semantic_unknown_resolutions(
+        candidate,
+        required_inputs,
+        semantic_input.unknowns,
+    )
+    predicate_inputs = _predicate_operator_inputs(required_inputs)
     required_operator_input = {
-        "question": _hold_question(unknowns, required_inputs),
-        "unknowns": unknowns,
-        "fields": required_inputs,
+        "question": _hold_question(semantic_unknowns, predicate_inputs),
+        "semantic_unknowns": semantic_unknowns,
+        "predicate_inputs": predicate_inputs,
         "response_contract": {
-            "statement": "Operator clarification in plain text.",
+            "statement": (
+                "Required for every resolved semantic unknown without a "
+                "target_path; optional otherwise."
+            ),
             "values": (
-                "Optional path-to-value object. Paths must be listed in fields."
+                "Path-to-value object. Paths must be declared by a semantic "
+                "unknown target_path or predicate_inputs."
             ),
             "resolved_unknowns": (
-                "Optional array containing exact entries from unknowns."
+                "Array containing exact unknown_id values from semantic_unknowns."
             ),
         },
     }
@@ -219,8 +239,8 @@ def build_hold_handoff(
         "semantic_input": semantic_input.to_prompt_dict(),
         "core_ref": candidate.core_ref.to_dict(),
         "hold": {
-            "unknowns": unknowns,
-            "required_inputs": required_inputs,
+            "semantic_unknowns": semantic_unknowns,
+            "predicate_inputs": predicate_inputs,
         },
     })
     return {
@@ -309,24 +329,22 @@ def resume_semantic_input(state, resume):
         raise InvalidContinuationToken(
             "continuation_token HOLD state is invalid."
         )
-    target_unknowns = _continuation_string_array(
-        hold.get("unknowns", []),
-        "hold.unknowns",
+    semantic_unknowns = _continuation_resolution_array(
+        hold.get("semantic_unknowns", []),
+        "hold.semantic_unknowns",
     )
-    required_inputs = hold.get("required_inputs", [])
-    if not isinstance(required_inputs, list):
-        raise InvalidContinuationToken(
-            "continuation_token required_inputs must be an array."
-        )
+    predicate_inputs = _continuation_predicate_input_array(
+        hold.get("predicate_inputs", []),
+        "hold.predicate_inputs",
+    )
     allowed_paths = {
-        item.get("path")
-        for item in required_inputs
-        if isinstance(item, Mapping)
-        and isinstance(item.get("path"), str)
+        item["target_path"]
+        for item in (*semantic_unknowns, *predicate_inputs)
+        if item.get("target_path") is not None
     }
     operator_input = _normalize_operator_input(
         resume.get("operator_input"),
-        target_unknowns,
+        semantic_unknowns,
     )
     unknown_paths = set(operator_input["values"]) - allowed_paths
     if unknown_paths:
@@ -335,12 +353,18 @@ def resume_semantic_input(state, resume):
             f"{sorted(unknown_paths)}"
         )
     unknown_resolutions = (
-        set(operator_input["resolved_unknowns"]) - set(target_unknowns)
+        set(operator_input["resolved_unknowns"])
+        - {item["unknown_id"] for item in semantic_unknowns}
     )
     if unknown_resolutions:
         raise InvalidContinuationToken(
             "Operator input resolves unknowns outside the signed HOLD request."
         )
+    _require_complete_operator_resolution(
+        semantic_unknowns,
+        predicate_inputs,
+        operator_input,
+    )
 
     facts = _continuation_object(snapshot.get("facts"), "facts")
     authority = _continuation_object(
@@ -360,13 +384,18 @@ def resume_semantic_input(state, resume):
         "values": operator_input["values"],
         "resolved_unknowns": operator_input["resolved_unknowns"],
     })
+    resolved_descriptions = {
+        item["description"]
+        for item in semantic_unknowns
+        if item["unknown_id"] in operator_input["resolved_unknowns"]
+    }
     remaining_unknowns = [
         item
         for item in _continuation_string_array(
             snapshot.get("unknowns"),
             "unknowns",
         )
-        if item not in operator_input["resolved_unknowns"]
+        if item not in resolved_descriptions
     ]
     try:
         return SemanticInput(
@@ -398,73 +427,125 @@ def trace_handoff(hold):
     }
 
 
-def _hold_unknowns(candidate):
-    values = list(candidate.unknowns)
+def _semantic_unknown_resolutions(candidate, required_inputs, input_unknowns):
+    values = [
+        (unknown, ())
+        for unknown in input_unknowns
+    ]
     values.extend(
-        unknown
+        (unknown, ())
+        for unknown in candidate.unknowns
+    )
+    values.extend(
+        (unknown, (result.norm_ref,))
         for result in candidate.norm_results
         for unknown in result.unknowns
     )
     values.extend(
-        issue.message
-        for issue in candidate.validation_issues
-    )
-    values.extend(
-        conflict.reason
+        (conflict.reason, conflict.norm_refs)
         for conflict in candidate.conflicts
         if conflict.disposition == "HOLD"
     )
-    result = []
-    seen = set()
-    for value in values:
-        text = str(value or "").strip()
-        if text and text not in seen:
-            seen.add(text)
-            result.append(text)
-    if not result:
-        result.append(
-            "The Semantic Executor returned HOLD without a more specific "
-            "material unknown."
+    if not values and not required_inputs:
+        values.extend(
+            (issue.message, issue.norm_refs)
+            for issue in candidate.validation_issues
         )
+    if not values and not required_inputs:
+        values.append((
+            "The Semantic Executor returned HOLD without a more specific "
+            "material unknown.",
+            (),
+        ))
+
+    grouped = {}
+    order = []
+    for raw_value, norm_refs in values:
+        description = str(raw_value or "").strip()
+        if not description:
+            continue
+        target_path = _semantic_unknown_path(description)
+        marker = target_path or description
+        if marker not in grouped:
+            grouped[marker] = {
+                "unknown_id": (
+                    target_path
+                    if target_path is not None
+                    else f"unknown-{len(order) + 1:03d}"
+                ),
+                "description": description,
+                "target_path": target_path,
+                "resolution_kind": (
+                    "operator_value"
+                    if target_path is not None
+                    else "operator_statement"
+                ),
+                "expected_type": (
+                    _expected_path_type(target_path, required_inputs)
+                    if target_path is not None
+                    else "text"
+                ),
+                "norm_refs": [],
+                "question": (
+                    f"Provide the operator-confirmed value for {target_path}."
+                    if target_path is not None
+                    else f"Resolve: {description}"
+                ),
+            }
+            order.append(marker)
+        current = grouped[marker]
+        for norm_ref in norm_refs:
+            if norm_ref not in current["norm_refs"]:
+                current["norm_refs"].append(norm_ref)
+    return [grouped[marker] for marker in order]
+
+
+def _predicate_operator_inputs(required_inputs):
+    result = []
+    for item in required_inputs:
+        path = _operator_path(item.get("path"))
+        constraints = item.get("constraints", [])
+        if not isinstance(constraints, list):
+            raise ContinuationUnavailable(
+                "Semantic Executor required_inputs constraints are invalid."
+            )
+        result.append({
+            "input_id": path,
+            "target_path": path,
+            "resolution_kind": "operator_observation",
+            "expected_type": _constraint_type(constraints),
+            "norm_refs": list(item.get("norm_refs", [])),
+            "constraints": constraints,
+            "question": (
+                f"Provide the observed value for Core selector {path}. "
+                "The value that makes a predicate true is not assumed."
+            ),
+        })
     return result
 
 
-def _hold_question(unknowns, required_inputs):
+def _hold_question(semantic_unknowns, predicate_inputs):
     parts = []
-    if unknowns:
+    if semantic_unknowns:
         parts.append(
-            "resolve " + "; ".join(unknowns[:5])
+            "resolve "
+            + "; ".join(
+                item["description"]
+                for item in semantic_unknowns[:5]
+            )
         )
-    if required_inputs:
-        field_labels = []
-        for item in required_inputs[:5]:
-            path = item["path"]
-            expected = _suggested_requirement_value(item)
-            if expected is None:
-                field_labels.append(path)
-            else:
-                field_labels.append(
-                    f"{path} = {json.dumps(expected, ensure_ascii=False)}"
-                )
+    if predicate_inputs:
         parts.append(
-            "confirm or provide " + ", ".join(field_labels)
+            "provide observed Core selector values for "
+            + ", ".join(
+                item["target_path"]
+                for item in predicate_inputs[:5]
+            )
         )
     return "Operator input required: " + "; ".join(parts) + "."
 
 
-def _suggested_requirement_value(requirement):
-    constraints = requirement.get("constraints", [])
-    expected = [
-        item["expected"]
-        for item in constraints
-        if isinstance(item, Mapping) and "expected" in item
-    ]
-    if expected and all(value == expected[0] for value in expected):
-        return expected[0]
-    return None
-
-
-def _normalize_operator_input(value, target_unknowns):
+def _normalize_operator_input(value, semantic_unknowns):
     if isinstance(value, str):
         statement = value.strip()
         if not statement:
@@ -474,7 +555,11 @@ def _normalize_operator_input(value, target_unknowns):
         return {
             "statement": statement,
             "values": {},
-            "resolved_unknowns": list(target_unknowns),
+            "resolved_unknowns": [
+                item["unknown_id"]
+                for item in semantic_unknowns
+                if item["target_path"] is None
+            ],
         }
     if not isinstance(value, Mapping):
         raise InvalidContinuationToken(
@@ -502,7 +587,7 @@ def _normalize_operator_input(value, target_unknowns):
     }
     raw_resolved = value.get("resolved_unknowns")
     if raw_resolved is None:
-        resolved_unknowns = list(target_unknowns)
+        resolved_unknowns = []
     else:
         resolved_unknowns = _continuation_string_array(
             raw_resolved,
@@ -517,6 +602,95 @@ def _normalize_operator_input(value, target_unknowns):
         "values": values,
         "resolved_unknowns": resolved_unknowns,
     }
+
+
+def _require_complete_operator_resolution(
+    semantic_unknowns,
+    predicate_inputs,
+    operator_input,
+):
+    resolved_unknowns = set(operator_input["resolved_unknowns"])
+    supplied_paths = set(operator_input["values"])
+    missing = []
+    for item in semantic_unknowns:
+        unknown_id = item["unknown_id"]
+        if unknown_id not in resolved_unknowns:
+            missing.append(f"semantic_unknown:{unknown_id}")
+            continue
+        target_path = item["target_path"]
+        if target_path is not None and target_path not in supplied_paths:
+            missing.append(f"value:{target_path}")
+        if target_path is None and not operator_input["statement"]:
+            missing.append(f"statement:{unknown_id}")
+    for item in predicate_inputs:
+        target_path = item["target_path"]
+        if target_path not in supplied_paths:
+            missing.append(f"predicate_input:{target_path}")
+    if missing:
+        raise IncompleteOperatorResolution(
+            "Operator input does not close every signed HOLD target: "
+            f"{sorted(set(missing))}"
+        )
+
+
+def _semantic_unknown_path(description):
+    paths = list(dict.fromkeys(re.findall(
+        r"(?<![A-Za-z0-9_.-])"
+        r"[A-Za-z][A-Za-z0-9_-]*"
+        r"(?:\.[A-Za-z][A-Za-z0-9_-]*)+"
+        r"(?![A-Za-z0-9_.-])",
+        description,
+    )))
+    return _operator_path(paths[0]) if len(paths) == 1 else None
+
+
+def _expected_path_type(path, required_inputs):
+    matching = [
+        item.get("constraints", [])
+        for item in required_inputs
+        if item.get("path") == path
+    ]
+    if not matching:
+        return "json"
+    return _constraint_type(matching[0])
+
+
+def _constraint_type(constraints):
+    values = []
+    for constraint in constraints:
+        if not isinstance(constraint, Mapping):
+            continue
+        if "expected" in constraint:
+            values.append(constraint["expected"])
+        elif "allowed_values" in constraint:
+            allowed = constraint["allowed_values"]
+            if isinstance(allowed, list):
+                values.extend(allowed)
+        elif "minimum" in constraint:
+            values.append(constraint["minimum"])
+    value_types = {
+        _json_type_name(value)
+        for value in values
+    }
+    return value_types.pop() if len(value_types) == 1 else "json"
+
+
+def _json_type_name(value):
+    if isinstance(value, bool):
+        return "boolean"
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, Mapping):
+        return "object"
+    return "json"
 
 
 def _operator_path(value):
@@ -602,6 +776,107 @@ def _continuation_object_array(value, label):
         _continuation_object(item, f"{label} item")
         for item in value
     ]
+
+
+def _continuation_resolution_array(value, label):
+    items = _continuation_object_array(value, label)
+    required = {
+        "unknown_id",
+        "description",
+        "target_path",
+        "resolution_kind",
+        "expected_type",
+        "norm_refs",
+        "question",
+    }
+    result = []
+    seen = set()
+    for index, item in enumerate(items):
+        if set(item) != required:
+            raise InvalidContinuationToken(
+                f"continuation_token {label}[{index}] fields are invalid."
+            )
+        unknown_id = continuation_text(item, "unknown_id")
+        if unknown_id in seen:
+            raise InvalidContinuationToken(
+                f"continuation_token {label} contains duplicate unknown_id."
+            )
+        seen.add(unknown_id)
+        target_path = item["target_path"]
+        if target_path is not None:
+            target_path = _operator_path(target_path)
+        result.append({
+            **item,
+            "unknown_id": unknown_id,
+            "description": continuation_text(item, "description"),
+            "target_path": target_path,
+            "resolution_kind": continuation_text(
+                item,
+                "resolution_kind",
+            ),
+            "expected_type": continuation_text(item, "expected_type"),
+            "norm_refs": _continuation_string_array(
+                item["norm_refs"],
+                f"{label}[{index}].norm_refs",
+            ),
+            "question": continuation_text(item, "question"),
+        })
+    return result
+
+
+def _continuation_predicate_input_array(value, label):
+    items = _continuation_object_array(value, label)
+    required = {
+        "input_id",
+        "target_path",
+        "resolution_kind",
+        "expected_type",
+        "norm_refs",
+        "constraints",
+        "question",
+    }
+    result = []
+    seen = set()
+    for index, item in enumerate(items):
+        if set(item) != required:
+            raise InvalidContinuationToken(
+                f"continuation_token {label}[{index}] fields are invalid."
+            )
+        target_path = _operator_path(item["target_path"])
+        input_id = continuation_text(item, "input_id")
+        if input_id != target_path:
+            raise InvalidContinuationToken(
+                f"continuation_token {label}[{index}] input_id is invalid."
+            )
+        if input_id in seen:
+            raise InvalidContinuationToken(
+                f"continuation_token {label} contains duplicate input_id."
+            )
+        seen.add(input_id)
+        constraints = item["constraints"]
+        if not isinstance(constraints, list) or not all(
+            isinstance(constraint, Mapping)
+            for constraint in constraints
+        ):
+            raise InvalidContinuationToken(
+                f"continuation_token {label}[{index}].constraints is invalid."
+            )
+        result.append({
+            **item,
+            "input_id": input_id,
+            "target_path": target_path,
+            "resolution_kind": continuation_text(
+                item,
+                "resolution_kind",
+            ),
+            "expected_type": continuation_text(item, "expected_type"),
+            "norm_refs": _continuation_string_array(
+                item["norm_refs"],
+                f"{label}[{index}].norm_refs",
+            ),
+            "question": continuation_text(item, "question"),
+        })
+    return result
 
 
 def _continuation_string_array(value, label):
