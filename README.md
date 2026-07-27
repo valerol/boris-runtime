@@ -15,8 +15,8 @@ external actions, domain physiology, or long-term memory.
 Core release package
   -> core_surface
   -> runtime_compatibility
-  -> signed CHATGPT_HOST_ONLY compilation + calculation work orders (public MCP)
-     or OPENAI_API SemanticInputCompiler + calculator (private HTTP only)
+  -> SemanticInputCompiler
+  -> canonical ServerLLMProvider
   -> semantic_executor validation and gate constraints
   -> ExecutionCandidate
   -> HOLD handoff / signed stateless continuation
@@ -94,14 +94,16 @@ When several Core releases are available, configure the highest version as the
 current package. Older releases are used only for an explicit compatibility
 test.
 
-LLM settings are used by the Semantic Input compiler, Semantic Executor
-calculator, and optional semantic answer validation. Non-secret provider
-selection and model settings belong in tracked `.env`:
+LLM settings are used by the canonical `ServerLLMProvider`, which owns the
+Semantic Input compiler and Semantic Executor calculator, and by optional
+semantic answer validation. Non-secret provider selection and model settings
+belong in tracked `.env`:
 
 ```bash
 BOIS_LLM=openai
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=medium
+BORIS_SERVER_LLM_TIMEOUT_SECONDS=120
 BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
 ```
 
@@ -109,22 +111,20 @@ GPT-5.6 Terra supplies a 1,050,000-token context window and supports the
 structured Chat Completions contract used by the Runtime. Core v2.31 requires
 at least `524288`. Runtime fails closed when the capacity declaration is
 absent or insufficient; it does not silently narrow the phase-complete norm
-set. Keep the model, reasoning effort, and capacity declaration aligned when
-overriding these settings.
+set. Keep the model, reasoning effort, timeout, and capacity declaration aligned
+when overriding these settings.
 
-The public MCP route is always `CHATGPT_HOST_ONLY` and uses no Runtime LLM
-call. ChatGPT first completes
-a signed `COMPILATION` work order. Runtime validates the submitted
-`SemanticInput`, selects the exact phase-complete Semantic View, and returns a
-signed `CALCULATION` work order. ChatGPT completes that work order and Runtime
-enforces the current phase's canonical output object before the ordinary
-strict validation and deterministic gate constraints. One invalid calculation
-returns one signed correction work order under `HOLD` with exact diagnostics;
-a second invalid submission preserves `HOLD` without another automatic
-attempt. Canonical `REPAIR` is not invoked because it requires a new revision
-and new cycle through `C00`.
-The `OPENAI_API` route remains available only to autonomous clients of the
-private HTTP API.
+The public MCP route always invokes the canonical `SERVER_LLM` provider inside
+Runtime. One `boris.execute` call compiles the strict `SemanticInput`, selects
+the exact phase-complete Semantic View, runs the semantic calculator, validates
+the calculation, constrains the gate, and returns one `ExecutionCandidate`.
+ChatGPT is the external client and presentation layer; Runtime does not ask it
+to perform or resume an internal semantic work order.
+
+The explicit `ChatGPTHostProvider` keeps the signed `CHATGPT_HOST_ONLY`
+`prepare`/`submit` protocol available only through the private HTTP API as an
+experimental compatibility spike. It is not canonical, is not exposed in the
+public MCP schema, and is not used by Developer Surface.
 
 ## Private Runtime API
 
@@ -153,8 +153,9 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
   }'
 ```
 
-The response uses `execution_version: "boris-execution/1.0"` and
-`status: "semantic_candidate"`. It includes the constrained gate, candidate
+The response uses `execution_version: "boris-execution/1.0"`,
+`status: "semantic_candidate"`, and `semantic_provider: "SERVER_LLM"`. It
+includes the constrained gate, candidate
 result, norm results, unknowns, conflicts, alternatives, and explicit
 typed uncertainties, and limitations. `HOLD`, `STOP`, and `REPAIR` are normal
 HTTP 200 Runtime results.
@@ -206,7 +207,7 @@ Invalid Core source binding, invalid compiled input, and provider failures
 return controlled fail-closed errors. An archive source with missing or
 mismatched server acceptance also fails closed.
 
-### Private HTTP host-work-order protocol
+### Experimental private HTTP host-work-order protocol
 
 The private endpoint supports the host-only protocol with one explicit prepare
 and two explicit submit calls. Prepare a compilation work order:
@@ -273,7 +274,8 @@ Every work order is single-use. A system HOLD can be resumed with
 `operation: "prepare"` plus the ordinary signed `resume` object; resume skips
 compilation and starts directly with a `CALCULATION` work order.
 
-This is contract isolation, not a clean model context: ChatGPT still sees the
+This is contract isolation, not a clean model context or a production route:
+ChatGPT still sees the
 current conversation and host instructions. Pending work orders live in a
 bounded in-memory registry, expire after the configured TTL, do not survive a
 Runtime restart, and require one API worker or sticky routing. They are not
@@ -315,31 +317,22 @@ python -m mcp_server.server
 The MCP server exposes one public read-only tool: `boris.execute`. It
 communicates with the private API over HTTP and does not import Runtime
 internals, load Core packages, call LLMs, or store memory. The public schema
-does not expose `operation`: initial input and signed HOLD resume are always
-forwarded as `prepare`, while signed work-order submissions are inferred from
-their exact ID, token, and stage payload and forwarded as `submit`. The legacy
-`execute` operation is available only through the private HTTP API.
+contains only `input`, `session_id`, `context`, and signed `resume`. Every call
+is forwarded as the private API's canonical `execute` operation. Public
+`work_order_id`, `work_order_token`, `semantic_input`, `semantic_result`, and
+provider selectors do not exist. A stale extra `operation` argument cannot
+select another provider.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
-`ui://boris/developer-surface-v2-3.html`. The MCP Apps component displays the
+`ui://boris/developer-surface-v2-4.html`. The MCP Apps component displays the
 phase, constrained gate, candidate, path-aware HOLD form, and complete safe
 trace. The trace is delivered only through tool-result `_meta`; it is absent from
 model-visible `content` and `structuredContent`. The component validates an
-operator resume by calling the same `boris.execute` tool. When Runtime returns
-the signed host-only `CALCULATION` work order, the component sends the complete
-validated work order in a versioned `boris-host-continuation/1.0` envelope
-directly inside standards-first `ui/message`. `ui/update-model-context` remains
-an additional channel and never causes the message payload to be shortened;
-`sendFollowUpMessage` is only a compatibility fallback. The envelope fixes the
-exact ID and token, requires one generated `semantic_result`, and forbids
-`input`, `context`, `resume`, and `semantic_input`, so a continuation cannot
-silently become a new `COMPILATION`. Request acknowledgement does not attest
-that ChatGPT started a turn, so the component keeps an explicit same-work-order
-retry control until a matching resumed Runtime result arrives. A Runtime error
-is fail-closed for the host: it must report only the technical failure and may
-not answer from an earlier candidate or open a new route. Production mode
-publishes no Developer Surface resource. No public `boris.frame` alias is
-registered.
+operator resume by calling the same `boris.execute` tool and receives the
+recalculated `ExecutionCandidate` directly. It does not call `ui/message`,
+`ui/update-model-context`, or a ChatGPT compatibility follow-up API. A Runtime
+error remains fail-closed. Production mode publishes no Developer Surface
+resource. No public `boris.frame` alias is registered.
 
 ## Core Surface and Semantic Executor
 

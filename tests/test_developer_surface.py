@@ -1,8 +1,4 @@
 from pathlib import Path
-import shutil
-import subprocess
-
-import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -12,23 +8,15 @@ SURFACE_PATH = (
     / "ui"
     / "developer_surface_v2.html"
 )
-HARNESS_PATH = (
-    PROJECT_ROOT
-    / "tests"
-    / "developer_surface_bridge_harness.js"
-)
-NODE = shutil.which("node")
+def test_operator_resume_uses_direct_server_semantic_route():
+    source = SURFACE_PATH.read_text(encoding="utf-8")
 
-
-@pytest.mark.skipif(NODE is None, reason="Node.js is not available.")
-def test_operator_resume_delivers_self_contained_signed_host_submission():
-    result = subprocess.run(
-        [NODE, str(HARNESS_PATH), str(SURFACE_PATH)],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        check=False,
-        text=True,
-        timeout=20,
-    )
-
-    assert result.returncode == 0, result.stderr
+    assert 'data-surface-version="2.4"' in source
+    assert 'sendRequest("tools/call"' in source
+    assert 'name: "boris.execute"' in source
+    assert "continuation_token: hold.continuation_token" in source
+    assert "operator_input: operatorInput" in source
+    assert "ui/message" not in source
+    assert "ui/update-model-context" not in source
+    assert "sendFollowUpMessage" not in source
+    assert "CHATGPT_HOST_ONLY" not in source

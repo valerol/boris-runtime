@@ -149,10 +149,14 @@ persistent Runtime state. Value and conditional modes never force a gate;
 termination returns a terminal operator-resolved `HOLD` without invoking the
 calculator.
 
-The return value is an `ExecutionCandidate`, not an executed action or
-`KernelDecision`.
+The default service constructs canonical `ServerLLMProvider`. The return
+envelope identifies `semantic_provider: SERVER_LLM` and contains an
+`ExecutionCandidate`, not an executed action or `KernelDecision`. The provider
+uses one low-level adapter instance for compilation and calculation; a signed
+resume skips compilation and recalculates through the same provider contract.
+`BORIS_SERVER_LLM_TIMEOUT_SECONDS` bounds each low-level provider request.
 
-## Experimental ChatGPT host calculator
+## Experimental `ChatGPTHostProvider`
 
 ```python
 work_order = service.prepare_host(
@@ -179,9 +183,10 @@ The host work-order secret and TTL are configured through
 attestation, input, view, prompt, schema, session, phase, and scope. It can be
 submitted once. The PoC registry is in-memory and single-process.
 
-`prepare_host()` still uses the configured LLM for `SemanticInputCompiler`;
-`submit_host()` performs no LLM call and reuses the normal semantic validator
-and deterministic gate guards.
+`prepare_host()` prepares the compiler contract without calling the configured
+LLM; `submit_host()` performs no LLM call and reuses the normal semantic
+validator and deterministic gate guards. This compatibility route is private
+and experimental; public MCP does not expose these methods.
 
 ## LLM port
 

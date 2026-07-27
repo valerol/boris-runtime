@@ -20,19 +20,21 @@ Current implemented boundary:
   scope-change, and termination modes, without writing semantic memory;
 - deterministic non-empty candidate projection for any non-`HOLD` route,
   including resume;
-- signed `CHATGPT_HOST_ONLY` compilation and calculation work orders through
-  the same `boris.execute`, with no public provider selector, zero API calls on
-  that route, and the autonomous API provider retained only behind private
-  HTTP;
+- canonical `SemanticProvider` port and `ServerLLMProvider`, with strict
+  compilation and semantic calculation completed inside Runtime by one public
+  `boris.execute` call;
+- public MCP schema limited to `input`, correlation/context, and signed HOLD
+  resume; no provider selector or host work-order submission fields;
+- non-canonical `ChatGPTHostProvider` with signed `CHATGPT_HOST_ONLY`
+  compilation and calculation work orders retained only behind private HTTP
+  for compatibility research;
 - phase-bound `candidate_result` validation from the canonical primary object,
   followed by one signed diagnostic correction under `HOLD`, with `HOLD`
   preserved if the corrected submission remains invalid; canonical `REPAIR`
   remains deferred until new-revision/new-cycle transitions exist;
-- developer-only visual MCP surface v2.3 with model-hidden safe trace,
-  self-contained signed host continuation, exact next-tool arguments,
-  standards-first host wake-up, fail-closed Runtime errors,
-  unconfirmed-delivery status, and manual retry for signed operator
-  continuation;
+- developer-only visual MCP surface v2.4 with model-hidden safe trace and
+  direct server-side signed operator continuation; no host wake-up or
+  ChatGPT-internal orchestration;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;
 - stateless answer validation;
@@ -40,16 +42,14 @@ Current implemented boundary:
 
 Immediate validation target:
 
-- production exercise of
-  `HOLD → OperatorDecision → signed CALCULATION → host follow-up → same-phase
-  gate recheck` for a real system predicate and of terminal compliance-HOLD
-  resolution. Local bridge integration is covered; acceptance still requires
-  observing the separate ChatGPT model turn and exact signed submission.
+- production E2E of one public `boris.execute` call returning
+  `semantic_provider: SERVER_LLM` and `C00 / HOLD`, followed by
+  `HOLD → OperatorDecision → same-phase server recalculation` with
+  `resume_count: 1`, without `COMPILATION`, `CALCULATION`, or `ui/message`.
 
 Following stages:
 
 - Independent Reviewer;
-- durable multi-worker work-order registry;
 - Policy Kernel;
 - admitted State Events and Cycle Guard;
 - domain physiology and memory;

@@ -8,6 +8,8 @@ from llm.llm_adapter import MockLLMAdapter, OpenAIAdapter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILES = (".env", ".env.local")
+SERVER_LLM_TIMEOUT_ENV = "BORIS_SERVER_LLM_TIMEOUT_SECONDS"
+DEFAULT_SERVER_LLM_TIMEOUT_SECONDS = 120.0
 
 
 class LazyLLMAdapter:
@@ -79,7 +81,10 @@ def build_llm_adapter():
     if mode == "openai":
         if not os.getenv("OPENAI_API_KEY"):
             raise LLMConfigurationError("BOIS_LLM=openai requires OPENAI_API_KEY")
-        return OpenAIAdapter(debug_prompt_enabled=prompt_debug_enabled())
+        return OpenAIAdapter(
+            debug_prompt_enabled=prompt_debug_enabled(),
+            timeout=server_llm_timeout_seconds(),
+        )
 
     if mode in {"", "mock"}:
         return MockLLMAdapter(debug_prompt_enabled=prompt_debug_enabled())
@@ -108,3 +113,20 @@ def build_validator_llm_adapter():
 
 def build_lazy_validator_llm_adapter():
     return LazyLLMAdapter(build_validator_llm_adapter)
+
+
+def server_llm_timeout_seconds():
+    raw = os.getenv(SERVER_LLM_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return DEFAULT_SERVER_LLM_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError as exc:
+        raise LLMConfigurationError(
+            f"{SERVER_LLM_TIMEOUT_ENV} must be a positive number."
+        ) from exc
+    if timeout <= 0:
+        raise LLMConfigurationError(
+            f"{SERVER_LLM_TIMEOUT_ENV} must be a positive number."
+        )
+    return timeout

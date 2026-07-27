@@ -416,10 +416,10 @@ class RuntimeExecutionResponse(BaseModel):
     execution_version: Literal["boris-execution/1.0"]
     session_id: str
     status: Literal["semantic_candidate"]
-    semantic_provider: Literal["CHATGPT_HOST_ONLY"] | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
+    semantic_provider: Literal[
+        "SERVER_LLM",
+        "CHATGPT_HOST_ONLY",
+    ] = "SERVER_LLM"
     host_work_order_id: str | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -448,11 +448,24 @@ class RuntimeExecutionResponse(BaseModel):
 
     @model_validator(mode="after")
     def validate_execution_envelope(self):
-        if (self.semantic_provider is None) != (
-            self.host_work_order_id is None
+        if (
+            self.semantic_provider == "CHATGPT_HOST_ONLY"
+            and self.host_work_order_id is None
+            and not (
+                self.gate == "HOLD"
+                and self.hold is not None
+                and self.hold.status == "operator_terminated"
+            )
         ):
             raise ValueError(
-                "Host provider and work-order ID must be present together."
+                "ChatGPT host provider requires a work-order ID."
+            )
+        if (
+            self.semantic_provider == "SERVER_LLM"
+            and self.host_work_order_id is not None
+        ):
+            raise ValueError(
+                "Canonical server provider cannot contain a host work-order ID."
             )
         if self.candidate_result == {}:
             raise ValueError("candidate_result must not be an empty object.")

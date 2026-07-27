@@ -45,9 +45,9 @@ def test_boris_execute_calls_runtime_api_client_and_returns_candidate():
     assert client.calls == [
         {
             "input": "Explain BOIS Runtime",
-            "session_id": "test",
-            "context": {"source": "mcp-test"},
-            "operation": "prepare",
+                "session_id": "test",
+                "context": {"source": "mcp-test"},
+                "operation": "execute",
         }
     ]
 
@@ -96,7 +96,7 @@ def test_developer_execute_moves_trace_to_component_only_metadata():
     assert response["_meta"]["developer_trace"] == packet[
         "developer_trace"
     ]
-    assert response["_meta"]["developer_surface_version"] == "2.3"
+    assert response["_meta"]["developer_surface_version"] == "2.4"
 
 
 def test_boris_execute_forwards_resume_to_runtime():
@@ -122,13 +122,13 @@ def test_boris_execute_forwards_resume_to_runtime():
             "input": None,
             "session_id": "test",
             "context": {},
-            "operation": "prepare",
+                "operation": "execute",
             "resume": resume,
         }
     ]
 
 
-def test_boris_execute_returns_host_work_order_without_prompt_duplication():
+def test_public_mcp_rejects_unexpected_host_work_order():
     packet = _host_work_order_packet()
     client = FakeRuntimeClient(response=packet)
 
@@ -138,84 +138,31 @@ def test_boris_execute_returns_host_work_order_without_prompt_duplication():
         client=client,
     )
 
-    public_contract = response["structuredContent"][
-        "submission_contract"
-    ]
-    assert "operation" not in public_contract
-    assert "operation" not in public_contract["required_arguments"]
-    assert packet["submission_contract"]["operation"] == "submit"
-    text = response["content"][0]["text"]
-    assert text.startswith(
-        "BORIS returned a signed CHATGPT_HOST_ONLY COMPILATION "
-        "SemanticWorkOrder."
+    assert response["isError"] is True
+    assert response["structuredContent"]["error"] == (
+        "unexpected_semantic_work_order"
     )
-    assert "operation=submit" not in text
-    assert "semantic_input" in text
-    assert packet["semantic_prompt"] not in text
+    assert "requires the canonical SERVER_LLM provider" in (
+        response["structuredContent"]["detail"]
+    )
     assert client.calls == [{
         "input": "Explain BOIS Runtime",
         "session_id": "host-mcp",
         "context": {},
-        "operation": "prepare",
+        "operation": "execute",
     }]
 
 
-def test_boris_execute_forwards_one_host_submission():
-    client = FakeRuntimeClient(response=_execution_packet())
-    semantic_result = {"candidate_result": {"summary": "Host result"}}
-
-    run_boris_execute(
-        session_id="host-mcp",
-        work_order_id="work-order-1",
-        work_order_token="hw1.payload.signature",
-        semantic_input=semantic_result,
-        client=client,
-    )
-
-    assert client.calls == [{
-        "input": None,
-        "session_id": "host-mcp",
-        "context": {},
-        "operation": "submit",
-        "work_order_id": "work-order-1",
-        "work_order_token": "hw1.payload.signature",
-        "semantic_input": semantic_result,
-    }]
-
-
-def test_boris_execute_forwards_calculation_submission():
-    client = FakeRuntimeClient(response=_execution_packet())
-    semantic_result = {"candidate_result": {"summary": "Host result"}}
-
-    run_boris_execute(
-        session_id="host-mcp",
-        work_order_id="work-order-2",
-        work_order_token="hw1.payload.signature",
-        semantic_result=semantic_result,
-        client=client,
-    )
-
-    assert client.calls == [{
-        "input": None,
-        "session_id": "host-mcp",
-        "context": {},
-        "operation": "submit",
-        "work_order_id": "work-order-2",
-        "work_order_token": "hw1.payload.signature",
-        "semantic_result": semantic_result,
-    }]
-
-
-def test_public_mcp_request_has_no_legacy_operation_selector():
+def test_public_mcp_request_exposes_only_canonical_execute_arguments():
     schema = BorisExecuteRequest.model_json_schema()
 
-    assert "operation" not in schema["properties"]
-    assert BorisExecuteRequest(input="hello").runtime_operation == "prepare"
-    assert BorisExecuteRequest(
-        work_order_id="work-order-1",
-        work_order_token="hw1.payload.signature",
-        semantic_input={"phase": "C03"},
-    ).runtime_operation == "submit"
+    assert set(schema["properties"]) == {
+        "input",
+        "session_id",
+        "context",
+        "resume",
+    }
+    assert BorisExecuteRequest(input="hello").input == "hello"
 
 
 def test_operator_terminated_hold_is_presented_as_terminal():
@@ -272,6 +219,7 @@ def _execution_packet():
         "execution_version": "boris-execution/1.0",
         "session_id": "test",
         "status": "semantic_candidate",
+        "semantic_provider": "SERVER_LLM",
         "phase": "C03",
         "gate": "HOLD",
         "candidate_result": {"summary": "Candidate only."},

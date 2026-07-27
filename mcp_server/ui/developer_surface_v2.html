@@ -414,7 +414,7 @@
     }
   </style>
 </head>
-<body data-surface-version="2.3">
+<body data-surface-version="2.4">
   <main class="surface">
     <section class="header">
       <div class="identity">
@@ -480,21 +480,6 @@
       </div>
     </section>
 
-    <section
-      id="host-wake-panel"
-      class="panel wake-panel hidden"
-      aria-live="polite"
-    >
-      <h2>ChatGPT host continuation</h2>
-      <p id="host-wake-status" class="wake-status"></p>
-      <div class="actions">
-        <span id="host-wake-detail" class="muted"></span>
-        <button id="host-wake-button" class="secondary" type="button">
-          Retry host wake-up
-        </button>
-      </div>
-    </section>
-
     <section class="panel">
       <h2>Execution candidate</h2>
       <p id="candidate-note" class="muted"></p>
@@ -519,8 +504,6 @@
       let nextRequestId = 1;
       let currentResult = null;
       let fieldControls = [];
-      let pendingHostContinuation = null;
-      let hostWakeAttempts = 0;
 
       const byId = (id) => document.getElementById(id);
       const phaseChip = byId("phase-chip");
@@ -538,10 +521,6 @@
       const operatorScope = byId("operator-scope");
       const resumeButton = byId("resume-button");
       const formError = byId("form-error");
-      const hostWakePanel = byId("host-wake-panel");
-      const hostWakeStatus = byId("host-wake-status");
-      const hostWakeDetail = byId("host-wake-detail");
-      const hostWakeButton = byId("host-wake-button");
       const candidateNote = byId("candidate-note");
       const candidateJson = byId("candidate-json");
       const semanticJson = byId("semantic-json");
@@ -624,19 +603,6 @@
           payload.resume_count ?? payload.hold?.resume_count ?? 0
         );
 
-        if (
-          pendingHostContinuation
-          && !payload.error
-          && payload.status !== "semantic_work_order"
-          && payload.session_id
-            === pendingHostContinuation.sessionId
-          && Number(
-            payload.resume_count ?? payload.hold?.resume_count ?? -1
-          ) === pendingHostContinuation.resumeCount
-        ) {
-          clearHostWake();
-        }
-
         if (payload.error) {
           candidateNote.textContent =
             payload.detail || "Runtime execution failed.";
@@ -663,40 +629,6 @@
           return;
         }
 
-        if (payload.status === "semantic_work_order") {
-          gateChip.textContent = "work order";
-          gateChip.dataset.gate = "";
-          candidateNote.textContent =
-            `Awaiting CHATGPT_HOST_ONLY ${payload.work_order_type || ""} submission.`;
-          candidateJson.textContent = json({
-            work_order_version: payload.work_order_version,
-            work_order_id: payload.work_order_id,
-            work_order_type: payload.work_order_type,
-            semantic_provider: payload.semantic_provider,
-            resume_count: payload.resume_count,
-            phase: payload.phase,
-            minimum_context_window_tokens:
-              payload.minimum_context_window_tokens,
-            core_ref: payload.core_ref,
-            issued_at: payload.issued_at,
-            expires_at: payload.expires_at,
-            bindings: payload.bindings,
-            limitations: payload.limitations,
-          });
-          semanticJson.textContent = json({
-            response_schema: payload.response_schema,
-            semantic_prompt_characters:
-              String(payload.semantic_prompt || "").length,
-            submission_operation:
-              payload.submission_contract?.operation,
-          });
-          traceJson.textContent = json({
-            status: "candidate trace begins after validated submit",
-          });
-          renderHandoff(null);
-          return;
-        }
-
         candidateJson.textContent = json(payload.candidate_result);
         candidateNote.textContent =
           payload.candidate_unavailable_reason || "";
@@ -714,22 +646,6 @@
         );
 
         renderHandoff(payload.hold);
-      }
-
-      function clearHostWake() {
-        pendingHostContinuation = null;
-        hostWakeAttempts = 0;
-        hostWakeStatus.textContent = "";
-        hostWakeDetail.textContent = "";
-        hostWakeButton.disabled = false;
-        hostWakePanel.classList.add("hidden");
-      }
-
-      function showHostWake(status, detail = "", busy = false) {
-        hostWakePanel.classList.remove("hidden");
-        hostWakeStatus.textContent = status;
-        hostWakeDetail.textContent = detail;
-        hostWakeButton.disabled = busy;
       }
 
       function renderHandoff(hold) {
@@ -956,169 +872,6 @@
         }
       }
 
-      async function continueHostCalculation(
-        workOrderResult,
-        operatorContext
-      ) {
-        const normalized = normalizedToolResult(workOrderResult);
-        const workOrder = normalized.structuredContent || {};
-        const submission = workOrder.submission_contract || {};
-        if (
-          workOrder.status !== "semantic_work_order"
-          || workOrder.work_order_type !== "CALCULATION"
-          || workOrder.semantic_provider !== "CHATGPT_HOST_ONLY"
-          || !workOrder.work_order_id
-          || !submission.work_order_token
-        ) {
-          throw new Error(
-            "A complete signed CHATGPT_HOST_ONLY CALCULATION work order " +
-            "is required."
-          );
-        }
-        const contextPayload = {
-          continuation_version: "boris-host-continuation/1.0",
-          kind: "BORIS_SIGNED_HOST_CONTINUATION",
-          instruction:
-            "This is a continuation of an existing BORIS cycle, not a new " +
-            "user phenomenon. Calculate and submit only the signed " +
-            "CALCULATION work order below. Do not start COMPILATION. If " +
-            "boris.execute returns isError or payload.error, stop and report " +
-            "only that Runtime failure without answering the underlying " +
-            "request or reusing an earlier candidate.",
-          operator_decision_context: {
-            session_id: operatorContext.session_id,
-            hold_id: operatorContext.hold_id,
-            state_hash: operatorContext.state_hash,
-            operator_input: operatorContext.operator_input,
-          },
-          next_tool_call: {
-            tool: "boris.execute",
-            exact_arguments: {
-              work_order_id: workOrder.work_order_id,
-              work_order_token: submission.work_order_token,
-            },
-            generated_argument: {
-              name: "semantic_result",
-              source: "calculation_work_order.semantic_prompt",
-              schema: "calculation_work_order.response_schema",
-            },
-            forbidden_arguments: [
-              "input",
-              "context",
-              "resume",
-              "semantic_input",
-            ],
-          },
-          calculation_work_order: workOrder,
-        };
-        const continuationJson = JSON.stringify(contextPayload);
-        let contextUpdated = false;
-        try {
-          await sendRequest("ui/update-model-context", {
-            content: [{
-              type: "text",
-              text: continuationJson,
-            }],
-          });
-          contextUpdated = true;
-        } catch {
-          contextUpdated = false;
-        }
-
-        const prompt = [
-          "BORIS HOST CONTINUATION — this is not a new user request.",
-          "Execute the attached signed CALCULATION work order. Produce exactly " +
-            "one semantic_result matching its response_schema, then call " +
-            "boris.execute exactly once with only the exact work_order_id, " +
-            "exact work_order_token, and generated semantic_result.",
-          "Do not send input, context, resume, or semantic_input. Do not start " +
-            "COMPILATION and do not alter the phase, applicability scope, " +
-            "operator decision, Semantic View, or Core reference.",
-          "After the tool call, use only its returned Runtime result. On " +
-            "isError or payload.error, stop: report only that technical " +
-            "failure and do not answer the underlying request, reuse an " +
-            "earlier HOLD/candidate, or begin another route.",
-          "BEGIN BORIS SIGNED HOST CONTINUATION JSON",
-          continuationJson,
-          "END BORIS SIGNED HOST CONTINUATION JSON",
-        ].join("\n\n");
-
-        try {
-          await sendRequest("ui/message", {
-            role: "user",
-            content: [{ type: "text", text: prompt }],
-          }, 10000);
-          return {
-            contextUpdated,
-            transport: "ui/message",
-            workOrderId: workOrder.work_order_id,
-          };
-        } catch (standardError) {
-          if (window.openai?.sendFollowUpMessage) {
-            await window.openai.sendFollowUpMessage({
-              prompt,
-              scrollToBottom: true,
-            });
-            return {
-              contextUpdated,
-              transport: "sendFollowUpMessage",
-              workOrderId: workOrder.work_order_id,
-              standardError: (
-                standardError instanceof Error
-                  ? standardError.message
-                  : String(standardError)
-              ),
-            };
-          }
-          throw standardError;
-        }
-      }
-
-      async function requestHostWake() {
-        if (!pendingHostContinuation) {
-          showHostWake(
-            "No signed CALCULATION work order is available for retry.",
-            "Run a non-terminal operator resume first."
-          );
-          return;
-        }
-        hostWakeAttempts += 1;
-        showHostWake(
-          "Requesting a ChatGPT host turn…",
-          `Wake-up attempt ${hostWakeAttempts}.`,
-          true
-        );
-        try {
-          const result = await continueHostCalculation(
-            pendingHostContinuation.workOrderResult,
-            pendingHostContinuation.operatorContext
-          );
-          showHostWake(
-            "Host wake-up requested; model execution is not yet confirmed.",
-            `Attempt ${hostWakeAttempts} was accepted through ${result.transport}. ` +
-              `The complete signed work order ${result.workOrderId} was included ` +
-              "in the message. If no correct ChatGPT turn appears, retry this " +
-              "same work order."
-          );
-        } catch (error) {
-          showHostWake(
-            "Host wake-up request failed.",
-            error instanceof Error ? error.message : String(error)
-          );
-        }
-      }
-
-      hostWakeButton.addEventListener("click", async () => {
-        hostWakeButton.disabled = true;
-        try {
-          await requestHostWake();
-        } finally {
-          if (pendingHostContinuation) {
-            hostWakeButton.disabled = false;
-          }
-        }
-      });
-
       resolutionMode.addEventListener("change", updateResolutionMode);
 
       resumeButton.addEventListener("click", async () => {
@@ -1180,9 +933,6 @@
               : [],
             ...(scopeMode ? { scope } : {}),
           };
-          const previousSessionId = currentResult.session_id;
-          const previousHoldId = hold.hold_record?.hold_id;
-          const previousStateHash = hold.hold_record?.state_hash;
           const result = await callBoris({
             session_id: currentResult.session_id,
             resume: {
@@ -1191,31 +941,6 @@
             },
           });
           renderToolResult(result);
-          const normalized = normalizedToolResult(result);
-          const payload = normalized.structuredContent || {};
-          if (
-            !payload.error
-            && payload.status === "semantic_work_order"
-            && payload.work_order_type === "CALCULATION"
-          ) {
-            pendingHostContinuation = {
-              workOrderId: payload.work_order_id,
-              sessionId: payload.session_id || previousSessionId,
-              resumeCount: Number(payload.resume_count ?? 0),
-              workOrderResult: result,
-              operatorContext: {
-                session_id: previousSessionId,
-                hold_id: previousHoldId,
-                state_hash: previousStateHash,
-                operator_input: operatorInput,
-              },
-            };
-            hostWakeAttempts = 0;
-            candidateNote.textContent =
-              "Operator decision accepted. The signed CALCULATION work order " +
-              "is waiting for a ChatGPT host turn.";
-            await requestHostWake();
-          }
         } catch (error) {
           formError.textContent =
             error instanceof Error ? error.message : String(error);
@@ -1231,7 +956,7 @@
             protocolVersion: "2026-01-26",
             appInfo: {
               name: "BORIS Developer Surface",
-              version: "2.3.0",
+              version: "2.4.0",
             },
             appCapabilities: {},
           });

@@ -182,12 +182,13 @@ controlled `SemanticCalculationError` rejections.
 ## Calculator providers
 
 `SemanticExecutor` remains calculator-port driven. The ordinary application
-route supplies `LLMSemanticCalculator`, which invokes the configured
-`OPENAI_API` adapter. The public `CHATGPT_HOST_ONLY` route supplies
-`SubmittedSemanticCalculator` only after a signed work order has been prepared
-and consumed.
+route is owned by canonical `ServerLLMProvider`, which supplies
+`LLMSemanticCalculator` through the configured low-level LLM adapter. One
+public `boris.execute` call performs compilation and calculation inside
+Runtime. The result identifies `semantic_provider: SERVER_LLM`.
 
-The public MCP input first returns a signed `COMPILATION` work order containing
+The experimental private HTTP host route first returns a signed `COMPILATION`
+work order containing
 the ordinary compiler prompt and a strict JSON Schema. Runtime validates the
 submitted `semantic_input`, mechanically builds the same `SemanticView` and
 `build_semantic_calculation_prompt()` used by `LLMSemanticCalculator`, and
@@ -202,12 +203,13 @@ entry and installs that schema at
 `response_schema.properties.candidate_result`. The future gate context remains
 a separate Runtime-owned contract.
 
-Public MCP submission never calls an LLM. Runtime consumes each work order
+Host work-order submission never calls an LLM. Runtime consumes each work order
 once, rebuilds its scope against the current Core, verifies all hashes, and
 gives the calculation submission to the ordinary
 `SemanticCalculationValidator`. All existing ownership checks, formal-result
 checks, candidate-result guards, and deterministic gate constraints therefore
-remain provider-independent. Direct private HTTP clients use explicit
+remain provider-independent. This route is available only to trusted private
+HTTP clients using explicit
 `operation=prepare` and `operation=submit` values for the same protocol.
 
 A phase-output or semantic-result contract violation on the first submission
@@ -221,8 +223,8 @@ This correction is a return under the existing phase `HOLD`, not canonical
 `REPAIR`. Core reserves `REPAIR` for creating a new revision, invalidating
 affected descendants, retesting dependencies, and beginning a new cycle.
 
-This proof of concept moves both semantic compilation and phase-complete
-calculation into the current ChatGPT host, so the host-only route never
+This private proof of concept moves both semantic compilation and phase-complete
+calculation into the current ChatGPT host, so the experimental host-only route never
 constructs the Runtime API adapter. It is not a clean-context model sandbox and
 does not yet provide durable or multi-worker work-order state. The calculation
 work order discloses the Core minimum context requirement, while the resulting

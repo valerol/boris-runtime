@@ -384,6 +384,7 @@ def test_runtime_execute_delegates_to_execution_service(monkeypatch):
     body = response.json()
     assert body["execution_version"] == "boris-execution/1.0"
     assert body["status"] == "semantic_candidate"
+    assert body["semantic_provider"] == "SERVER_LLM"
     assert body["gate"] == "PASS"
     assert service.calls == [
         (

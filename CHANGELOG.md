@@ -4,6 +4,25 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added the canonical server-side semantic provider boundary. `SemanticProvider`
+  now has a synchronous `ServerLLMProvider` implementation that owns strict
+  `SemanticInput` compilation and phase-complete Semantic Executor calculation
+  with one low-level LLM adapter per route. Public results identify
+  `semantic_provider: SERVER_LLM`.
+- Switched the sole public MCP `boris.execute` route from host work orders to
+  canonical private API `operation=execute`. Its schema now contains only
+  initial input/context and signed HOLD resume; work-order IDs, tokens,
+  `semantic_input`, `semantic_result`, and provider selection are no longer
+  public. An unexpected host work order fails closed.
+- Added `BORIS_SERVER_LLM_TIMEOUT_SECONDS` with a 120-second default for each
+  low-level provider call. Configuration, compilation, calculation, and
+  validation failures remain controlled Runtime errors.
+- Replaced Developer Surface 2.3 host wake-up with Developer Surface 2.4 direct
+  server-side resume. The component no longer calls `ui/message`,
+  `ui/update-model-context`, or a ChatGPT follow-up compatibility API.
+  Explicit non-canonical `ChatGPTHostProvider` keeps `CHATGPT_HOST_ONLY` signed
+  work orders available only through private HTTP as an experimental
+  compatibility spike.
 - Added Developer Surface 2.3 with a self-contained signed host continuation.
   Every `ui/message` and compatibility-alias prompt now embeds the complete
   `CALCULATION` work order even when `ui/update-model-context` succeeds. The

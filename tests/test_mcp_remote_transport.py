@@ -58,8 +58,8 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
     assert "not independently reviewed" in execute_tool.description
     assert "mode" not in execute_tool.inputSchema["properties"]
     assert "operation" not in execute_tool.inputSchema["properties"]
-    assert "work_order_id" in execute_tool.inputSchema["properties"]
-    assert "semantic_result" in execute_tool.inputSchema["properties"]
+    assert "work_order_id" not in execute_tool.inputSchema["properties"]
+    assert "semantic_result" not in execute_tool.inputSchema["properties"]
     assert "resume" in execute_tool.inputSchema["properties"]
     assert execute_tool.annotations.readOnlyHint is True
     assert execute_tool.annotations.openWorldHint is False
@@ -101,43 +101,17 @@ def test_developer_mode_links_one_ui_resource_to_execute_tool():
     assert contents[0].mime_type == DEVELOPER_SURFACE_MIME_TYPE
     assert "BORIS Developer Surface" in contents[0].content
     assert "tools/call" in contents[0].content
-    assert "ui/update-model-context" in contents[0].content
-    assert "ui/message" in contents[0].content
-    assert "sendFollowUpMessage" in contents[0].content
-    assert "Retry host wake-up" in contents[0].content
-    assert (
-        contents[0].content.index('sendRequest("ui/message"')
-        < contents[0].content.index(
-            "window.openai?.sendFollowUpMessage"
-        )
-    )
-    assert (
-        "Host wake-up requested; model execution is not yet confirmed."
-        in contents[0].content
-    )
-    assert "BEGIN BORIS SIGNED HOST CONTINUATION JSON" in (
-        contents[0].content
-    )
-    assert '"boris-host-continuation/1.0"' in contents[0].content
-    assert "const continuationJson = JSON.stringify(contextPayload);" in (
-        contents[0].content
-    )
-    assert (
-        contents[0].content.count("continuationJson") >= 3
-    )
-    assert '"input",' in contents[0].content
-    assert '"resume",' in contents[0].content
-    assert '"semantic_input",' in contents[0].content
-    assert "isError or payload.error, stop:" in contents[0].content
+    assert "ui/update-model-context" not in contents[0].content
+    assert "ui/message" not in contents[0].content
+    assert "sendFollowUpMessage" not in contents[0].content
+    assert "Retry host wake-up" not in contents[0].content
+    assert "CHATGPT_HOST_ONLY" not in contents[0].content
     assert (
         "payload.resume_count ?? payload.hold?.resume_count ?? 0"
         in contents[0].content
     )
     assert "Select operator resolution mode" in contents[0].content
     assert 'source_resolution_class === "OPERATOR_INPUT"' in (
-        contents[0].content
-    )
-    assert "Do not start COMPILATION." in (
         contents[0].content
     )
     assert 'payload.detail || "Runtime execution failed."' in (
@@ -209,7 +183,7 @@ async def test_streamable_http_client_receives_native_structured_content(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_cached_legacy_execute_argument_is_forced_to_host_prepare(
+async def test_cached_legacy_operation_argument_cannot_change_canonical_route(
     monkeypatch,
 ):
     import mcp_server.server as server_module
@@ -246,6 +220,7 @@ async def test_cached_legacy_execute_argument_is_forced_to_host_prepare(
 
     assert result.isError is False
     assert result.structuredContent["status"] == "semantic_candidate"
+    assert result.structuredContent["semantic_provider"] == "SERVER_LLM"
 
 
 @pytest.mark.asyncio
@@ -309,7 +284,7 @@ class FakeRuntimeAPIClient:
         context=None,
         operation=None,
     ):
-        assert operation == "prepare"
+        assert operation == "execute"
         packet = execution_packet()
         packet["session_id"] = session_id or packet["session_id"]
         return packet
@@ -341,6 +316,7 @@ def execution_packet():
         "execution_version": "boris-execution/1.0",
         "session_id": "mcp-native-execution",
         "status": "semantic_candidate",
+        "semantic_provider": "SERVER_LLM",
         "phase": "C03",
         "gate": "HOLD",
         "candidate_result": {"summary": "Candidate only."},

@@ -544,6 +544,7 @@ def test_current_core_application_execution_route_returns_semantic_candidate(
 
     assert result["execution_version"] == "boris-execution/1.0"
     assert result["status"] == "semantic_candidate"
+    assert result["semantic_provider"] == "SERVER_LLM"
     assert result["phase"] == "C03"
     assert result["gate"] == "HOLD"
     assert result["norm_results"]

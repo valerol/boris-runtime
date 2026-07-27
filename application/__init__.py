@@ -1,6 +1,9 @@
 __all__ = [
     "ContextProvider",
     "CoreSurfaceProvider",
+    "ChatGPTHostProvider",
+    "SemanticProvider",
+    "ServerLLMProvider",
     "ValidationEngine",
 ]
 
@@ -17,4 +20,20 @@ def __getattr__(name):
         from application.validation import ValidationEngine
 
         return ValidationEngine
+    if name in {
+        "ChatGPTHostProvider",
+        "SemanticProvider",
+        "ServerLLMProvider",
+    }:
+        from application.semantic_provider import (
+            ChatGPTHostProvider,
+            SemanticProvider,
+            ServerLLMProvider,
+        )
+
+        return {
+            "ChatGPTHostProvider": ChatGPTHostProvider,
+            "SemanticProvider": SemanticProvider,
+            "ServerLLMProvider": ServerLLMProvider,
+        }[name]
     raise AttributeError(name)

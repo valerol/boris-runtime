@@ -95,6 +95,7 @@ def test_execution_service_runs_one_semantic_candidate_route(monkeypatch):
         "execution_version": "boris-execution/1.0",
         "session_id": "execution-test",
         "status": "semantic_candidate",
+        "semantic_provider": "SERVER_LLM",
         "phase": "C03",
         "gate": "PASS",
         "candidate_result": {"status": "CANDIDATE_ONLY"},

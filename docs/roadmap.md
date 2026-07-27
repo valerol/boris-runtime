@@ -47,6 +47,19 @@
   Predicate DSL compatibility;
 - internal `/runtime/frame` retained without a public `boris.frame` alias.
 
+### Server-side Semantic Provider
+
+- application-level `SemanticProvider` contract;
+- canonical synchronous `ServerLLMProvider`;
+- one public `boris.execute` call owns strict Semantic Input compilation,
+  phase-complete semantic calculation, validation, and candidate formation;
+- public result identifies `semantic_provider: SERVER_LLM`;
+- provider calls are bounded by `BORIS_SERVER_LLM_TIMEOUT_SECONDS` and provider,
+  compilation, validation, and calculation failures remain fail-closed;
+- public MCP schema contains no provider selector or host work-order fields;
+- signed HOLD resume reuses the token-bound `SemanticInput` and invokes the same
+  server provider without a second compilation.
+
 ### Closed HOLD handoff and Developer Surface
 
 - typed uncertainty ownership and resolution classes;
@@ -78,19 +91,17 @@
 - no automatic suggestion of the predicate-matching value as an operator
   decision;
 - developer-only MCP Apps resource
-  `ui://boris/developer-surface-v2-3.html`, including validated operator
-  resume, self-contained `boris-host-continuation/1.0` delivery of the signed
-  `CALCULATION` work order, exact next-tool arguments, standards-first host
-  follow-up, fail-closed Runtime errors, unconfirmed-delivery status, and
-  same-work-order manual retry;
+  `ui://boris/developer-surface-v2-4.html`, including validated direct
+  server-side operator resume and fail-closed Runtime errors;
+- no `ui/message`, `ui/update-model-context`, ChatGPT follow-up, or model wake-up
+  in the continuation path;
 - complete safe trace delivered to the component through model-hidden `_meta`;
 - production MCP tool without a linked Developer Surface.
 
-### ChatGPT host-only executor
+### Experimental `ChatGPTHostProvider` compatibility spike
 
-- unconditional `CHATGPT_HOST_ONLY` provider through the sole public
-  `boris.execute` tool;
-- no public `operation` discriminator or path to the private API calculator;
+- private HTTP `prepare`/`submit` route only; it is not exposed by public
+  `boris.execute` and is not a production SemanticProvider;
 - signed `COMPILATION` and `CALCULATION` work orders, each consumed by
   one exact signed submission;
 - HMAC binding to the session, Core reference, RuntimeAttestation,
@@ -103,7 +114,6 @@
 - signed HOLD resume skips compilation and starts at `CALCULATION`;
 - deterministic gate constraints and ordinary HOLD handoff after submission;
 - bounded TTL and size controls;
-- existing `OPENAI_API` route retained only for private HTTP clients;
 - in-memory single-process registry only for the PoC.
 
 ### Semantic submission compliance
@@ -173,6 +183,14 @@ are globally invalidated by continuation-secret rotation.
 
 ## Next architectural stages
 
+### Independent Reviewer
+
+- define `IndependentReview` contract;
+- require a genuinely independent evaluation path;
+- bind review to the exact `SemanticCalculation`, Core reference, and
+  attestation;
+- produce no state mutation.
+
 ### Typed Semantic Input
 
 - compile established source material into explicit `facts`, `evidence`, and
@@ -181,14 +199,6 @@ are globally invalidated by continuation-secret rotation.
 - distinguish supplied facts from proposals and model-generated design choices;
 - trace source material through semantic claims and applied norm results;
 - fail closed when a typed promotion cannot be justified.
-
-### Independent Reviewer
-
-- define `IndependentReview` contract;
-- require a genuinely independent evaluation path;
-- bind review to the exact `SemanticCalculation`, Core reference, and
-  attestation;
-- produce no state mutation.
 
 ### Policy Kernel
 

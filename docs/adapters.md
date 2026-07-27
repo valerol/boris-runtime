@@ -28,18 +28,15 @@ The MCP tool list is exactly `{"boris.execute"}`. The former public
 available for lexical projection diagnostics, and `/runtime/validate` remains a
 private stateless answer-validation service.
 
-The public tool has no `operation` discriminator. Initial input or a signed
-HOLD resume is always forwarded to the private API as `prepare`. A request
-containing one exact work-order ID, token, and stage-specific `semantic_input`
-or `semantic_result` is always forwarded as `submit`. The MCP adapter cannot
-select the private legacy `execute` operation or the configured API
-calculator.
+The public tool has no `operation` or provider discriminator. It accepts only
+initial input/context or a signed HOLD resume and always forwards the private
+API's canonical `execute` operation. `ServerLLMProvider` performs compilation
+and calculation inside Runtime. Public work-order IDs, tokens, semantic
+submissions, and host-provider selection are not part of the MCP schema.
 
-A Runtime-issued correction remains a `CALCULATION` work order with
-`gate=HOLD`, the phase output contract, and structured issues. The adapter
-forwards its one corrected submission exactly like the initial calculation.
-It does not create retries; an ensuing `HOLD` ends the automatic route. This
-transport correction is not canonical `REPAIR`.
+The experimental `CHATGPT_HOST_ONLY` `prepare`/`submit` protocol remains
+available only through the private HTTP API. It is not an MCP compatibility
+path and cannot be selected by a stale public argument.
 
 In developer mode the tool descriptor links one versioned MCP Apps resource.
 The adapter moves Runtime `developer_trace` from the HTTP payload into
@@ -47,9 +44,9 @@ tool-result `_meta`, while keeping the candidate and handoff in
 `structuredContent`. Production mode registers neither the link nor the
 resource.
 
-The MCP adapter does not calculate or validate the work order itself. It keeps
-the large semantic prompt in `structuredContent` and returns only a concise
-model instruction in text, avoiding a second full prompt copy.
+The MCP adapter does not calculate or validate semantic content itself. It
+returns the Runtime-owned candidate and concise gate-preserving presentation
+instructions.
 
 There is no compatibility `adapters.llm` module. Callers use
 `llm.llm_adapter` directly.

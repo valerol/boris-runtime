@@ -81,6 +81,7 @@ class OpenAIAdapter(LLMAdapter):
         api_key=None,
         debug_prompt_enabled=False,
         reasoning_effort=None,
+        timeout=None,
     ):
         resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not resolved_api_key:
@@ -90,7 +91,10 @@ class OpenAIAdapter(LLMAdapter):
 
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=resolved_api_key)
+        client_arguments = {"api_key": resolved_api_key}
+        if timeout is not None:
+            client_arguments["timeout"] = timeout
+        self.client = OpenAI(**client_arguments)
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         configured_effort = reasoning_effort
         if configured_effort is None and self.model.startswith("gpt-5"):

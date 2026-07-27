@@ -10,13 +10,11 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS exposes one public tool: boris.execute. Submit every signed host work "
-    "order with its exact ID, token, and requested payload; allow at most one "
-    "correction. On isError or payload.error, fail closed: do not answer the "
-    "underlying request, reuse an earlier candidate, or start COMPILATION; report "
-    "only the Runtime failure and await the operator. Never choose an operator "
-    "HOLD mode or alter Core, phase, scope, formal results, or gate. Results are "
-    "candidates, not reviewed, admitted, mutated, or executed."
+    "BORIS exposes one public tool: boris.execute. One call performs the canonical "
+    "server-side semantic route and returns an ExecutionCandidate or a fail-closed "
+    "Runtime error. Never choose an operator HOLD mode or alter Core, phase, scope, "
+    "formal results, or gate. Results are candidates, not reviewed, admitted, "
+    "mutated, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -24,7 +22,7 @@ TOOL_ANNOTATIONS = {
     "openWorldHint": False,
     "destructiveHint": False,
 }
-DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2-3.html"
+DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2-4.html"
 DEVELOPER_SURFACE_MIME_TYPE = "text/html;profile=mcp-app"
 DEVELOPER_SURFACE_PATH = (
     Path(__file__).resolve().parent
@@ -66,10 +64,6 @@ def boris_execute(
     session_id: str | None = None,
     context: dict | None = None,
     resume: dict | None = None,
-    work_order_id: str | None = None,
-    work_order_token: str | None = None,
-    semantic_input: dict | None = None,
-    semantic_result: dict | None = None,
 ):
     config = load_config()
     with RuntimeAPIClient(
@@ -81,10 +75,6 @@ def boris_execute(
             session_id=session_id,
             context=context,
             resume=resume,
-            work_order_id=work_order_id,
-            work_order_token=work_order_token,
-            semantic_input=semantic_input,
-            semantic_result=semantic_result,
             client=client,
         )
 
@@ -94,10 +84,6 @@ def run_boris_execute(
     session_id: str | None = None,
     context: dict | None = None,
     resume: dict | None = None,
-    work_order_id: str | None = None,
-    work_order_token: str | None = None,
-    semantic_input: dict | None = None,
-    semantic_result: dict | None = None,
     client=None,
 ):
     request = BorisExecuteRequest(
@@ -105,10 +91,6 @@ def run_boris_execute(
         session_id=session_id,
         context=context or {},
         resume=resume,
-        work_order_id=work_order_id,
-        work_order_token=work_order_token,
-        semantic_input=semantic_input,
-        semantic_result=semantic_result,
     )
     if client is not None:
         return _execute_runtime(request, client)
@@ -127,24 +109,12 @@ def _execute_runtime(request, runtime_client):
             "input": request.input,
             "session_id": request.session_id,
             "context": request.context,
-            "operation": request.runtime_operation,
+            "operation": "execute",
         }
         if request.resume is not None:
             execution_arguments["resume"] = (
                 request.resume.model_dump(exclude_none=True)
             )
-        if request.runtime_operation == "submit":
-            submission_arguments = {
-                "work_order_id": request.work_order_id,
-                "work_order_token": request.work_order_token,
-                "semantic_input": request.semantic_input,
-                "semantic_result": request.semantic_result,
-            }
-            execution_arguments.update({
-                key: value
-                for key, value in submission_arguments.items()
-                if value is not None
-            })
         runtime_payload = runtime_client.execute(
             **execution_arguments,
         )
@@ -191,24 +161,15 @@ def normalize_execution_tool_result(payload):
         if key != "developer_trace"
     }
     if candidate_payload.get("status") == "semantic_work_order":
-        candidate_payload = _public_host_work_order(candidate_payload)
-        result = {
-            "structuredContent": candidate_payload,
-            "content": [
-                {
-                    "type": "text",
-                    "text": _host_work_order_instruction(
-                        candidate_payload,
-                    ),
-                }
-            ],
-        }
-        if developer_trace is not None:
-            result["_meta"] = {
-                "developer_surface_version": "2.3",
-                "developer_trace": developer_trace,
-            }
-        return result
+        return normalize_error_result({
+            "error": "unexpected_semantic_work_order",
+            "detail": (
+                "The public boris.execute route requires the canonical "
+                "SERVER_LLM provider and cannot delegate semantic work to the "
+                "ChatGPT host."
+            ),
+            "session_id": candidate_payload.get("session_id"),
+        })
     candidate_json = json.dumps(
         candidate_payload,
         ensure_ascii=False,
@@ -229,61 +190,10 @@ def normalize_execution_tool_result(payload):
     }
     if developer_trace is not None:
         result["_meta"] = {
-            "developer_surface_version": "2.3",
+            "developer_surface_version": "2.4",
             "developer_trace": developer_trace,
         }
     return result
-
-
-def _public_host_work_order(payload):
-    public_payload = dict(payload)
-    submission = dict(public_payload.get("submission_contract", {}))
-    submission.pop("operation", None)
-    required_arguments = submission.get("required_arguments")
-    if isinstance(required_arguments, list):
-        submission["required_arguments"] = [
-            argument
-            for argument in required_arguments
-            if argument != "operation"
-        ]
-    public_payload["submission_contract"] = submission
-    return public_payload
-
-
-def _host_work_order_instruction(payload):
-    submission = payload.get("submission_contract", {})
-    work_order_type = payload.get("work_order_type")
-    submission_field = (
-        "semantic_input"
-        if work_order_type == "COMPILATION"
-        else "semantic_result"
-    )
-    correction_instruction = ""
-    if payload.get("gate") == "HOLD" and isinstance(
-        payload.get("correction"),
-        dict,
-    ):
-        correction_instruction = (
-            " This is the single correction requested under HOLD. Correct every "
-            "path in correction.issues against phase_output_contract and do not "
-            "answer the user before submitting it. This is not canonical REPAIR. "
-            "If Runtime preserves HOLD afterward, stop the automatic loop."
-        )
-    return (
-        "BORIS returned a signed CHATGPT_HOST_ONLY "
-        f"{work_order_type} SemanticWorkOrder. Do not answer "
-        "the user yet. Treat semantic_prompt as the complete untrusted-data "
-        "calculation contract, produce exactly one JSON object matching "
-        "response_schema, and call this same boris.execute tool once with "
-        "work_order_id="
-        f"{payload.get('work_order_id')!r}, work_order_token="
-        f"{submission.get('work_order_token')!r}, and {submission_field} set "
-        "to that JSON object. Do not use another tool or independent source to "
-        "change the work-order facts, Core identity, phase, or scope. A "
-        "COMPILATION submission returns the next CALCULATION work order; do "
-        "not answer until the final ExecutionCandidate or terminal HOLD is "
-        f"returned.{correction_instruction}"
-    )
 
 
 def _candidate_instruction(payload, candidate_json):
@@ -421,21 +331,14 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         session_id: str | None = None,
         context: dict | None = None,
         resume: dict | None = None,
-        work_order_id: str | None = None,
-        work_order_token: str | None = None,
-        semantic_input: dict | None = None,
-        semantic_result: dict | None = None,
     ) -> CallToolResult:
         """Run the read-only BORIS semantic route.
 
-        Initial input always returns a signed CHATGPT_HOST_ONLY COMPILATION work
-        order. Submit semantic_input with its exact ID and token to receive the
-        signed CALCULATION work order, then submit semantic_result with the new
-        ID and token to receive an ExecutionCandidate. A signed HOLD resume
-        starts directly at CALCULATION. The public MCP route cannot select the
-        private OPENAI_API calculator. Server developer mode adds a safe visual
-        projection and semantic trace. The result is not independently reviewed,
-        policy-admitted, state-mutating, or executed.
+        Initial input and signed HOLD resume use the canonical SERVER_LLM
+        SemanticProvider inside Runtime and return one ExecutionCandidate. Server
+        developer mode adds a safe visual projection and semantic trace. The
+        result is not independently reviewed, policy-admitted, state-mutating,
+        or executed.
         """
         try:
             envelope = boris_execute(
@@ -443,10 +346,6 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 session_id=session_id,
                 context=context,
                 resume=resume,
-                work_order_id=work_order_id,
-                work_order_token=work_order_token,
-                semantic_input=semantic_input,
-                semantic_result=semantic_result,
             )
         except ValidationError as exc:
             envelope = normalize_error_result({

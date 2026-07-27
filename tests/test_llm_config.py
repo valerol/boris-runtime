@@ -1,6 +1,9 @@
 import os
 
+import pytest
+
 from llm import config
+from llm.errors import LLMConfigurationError
 
 
 ENV_NAMES = (
@@ -8,6 +11,7 @@ ENV_NAMES = (
     "BOIS_LLM",
     "OPENAI_MODEL",
     "OPENAI_REASONING_EFFORT",
+    "BORIS_SERVER_LLM_TIMEOUT_SECONDS",
 )
 
 
@@ -79,3 +83,18 @@ def test_explicit_env_path_loads_only_that_file(monkeypatch, tmp_path):
 
     assert os.environ["BOIS_LLM"] == "mock"
     assert "OPENAI_API_KEY" not in os.environ
+
+
+def test_server_llm_timeout_has_bounded_positive_configuration(monkeypatch):
+    monkeypatch.delenv("BORIS_SERVER_LLM_TIMEOUT_SECONDS", raising=False)
+    assert config.server_llm_timeout_seconds() == 120.0
+
+    monkeypatch.setenv("BORIS_SERVER_LLM_TIMEOUT_SECONDS", "45.5")
+    assert config.server_llm_timeout_seconds() == 45.5
+
+    monkeypatch.setenv("BORIS_SERVER_LLM_TIMEOUT_SECONDS", "0")
+    with pytest.raises(
+        LLMConfigurationError,
+        match="must be a positive number",
+    ):
+        config.server_llm_timeout_seconds()

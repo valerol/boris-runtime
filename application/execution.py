@@ -51,6 +51,11 @@ from application.phase_output import (
     PhaseOutputValidationError,
 )
 from application.runtime_mode import developer_mode_enabled
+from application.semantic_provider import (
+    ChatGPTHostProvider,
+    SERVER_LLM_PROVIDER,
+    ServerLLMProvider,
+)
 from llm.config import build_lazy_llm_adapter
 from runtime_compatibility import (
     OperatorAcceptance,
@@ -59,7 +64,6 @@ from runtime_compatibility import (
 from runtime_compatibility.errors import RuntimeAttestationError
 from semantic_executor import (
     CoreReference,
-    LLMSemanticCalculator,
     SemanticCalculationError,
     SemanticExecutor,
     SemanticInput,
@@ -348,6 +352,7 @@ class ExecutionService:
         llm_adapter_factory=None,
         compiler_factory=None,
         calculator_factory=None,
+        semantic_provider_factory=None,
         context_provider=None,
         continuation_codec_factory=None,
         host_work_order_codec_factory=None,
@@ -369,7 +374,17 @@ class ExecutionService:
         )
         self.calculator_factory = (
             calculator_factory
-            or (lambda adapter: LLMSemanticCalculator(adapter))
+            or None
+        )
+        self.semantic_provider_factory = (
+            semantic_provider_factory
+            or (
+                lambda: ServerLLMProvider(
+                    llm_adapter_factory=self.llm_adapter_factory,
+                    compiler_factory=self.compiler_factory,
+                    calculator_factory=self.calculator_factory,
+                )
+            )
         )
         self.context_provider = (
             context_provider or ContextProvider(self.surface_provider)
@@ -385,8 +400,26 @@ class ExecutionService:
             host_work_order_registry
             or InMemoryHostWorkOrderRegistry()
         )
+        self.host_semantic_provider = ChatGPTHostProvider(
+            prepare_callback=self._prepare_host,
+            submit_callback=self._submit_host,
+        )
 
     def prepare_host(
+        self,
+        user_input: str | None = None,
+        session_id: str | None = None,
+        context: Mapping | None = None,
+        resume: Mapping | None = None,
+    ) -> dict:
+        return self.host_semantic_provider.prepare(
+            user_input,
+            session_id=session_id,
+            context=context,
+            resume=resume,
+        )
+
+    def _prepare_host(
         self,
         user_input: str | None = None,
         session_id: str | None = None,
@@ -468,6 +501,7 @@ class ExecutionService:
                 session_id=resolved_session_id,
                 resume_count=resume_count,
                 continuation_resume=continuation_resume,
+                semantic_provider=HOST_SEMANTIC_PROVIDER,
             )
         semantic_input = continuation_resume.semantic_input
         _validate_operator_scope_change(
@@ -500,6 +534,23 @@ class ExecutionService:
         )
 
     def submit_host(
+        self,
+        *,
+        work_order_id: str,
+        work_order_token: str,
+        semantic_input: Mapping | None = None,
+        semantic_result: Mapping | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        return self.host_semantic_provider.submit(
+            work_order_id=work_order_id,
+            work_order_token=work_order_token,
+            semantic_input=semantic_input,
+            semantic_result=semantic_result,
+            session_id=session_id,
+        )
+
+    def _submit_host(
         self,
         *,
         work_order_id: str,
@@ -820,12 +871,9 @@ class ExecutionService:
         compatibility.require_semantic_evaluation(surface)
         timings["runtime_compatibility"] = _elapsed_ms(stage_started)
 
-        adapter = self.llm_adapter_factory()
         if continuation_state is None:
-            compiler = self.compiler_factory(adapter)
-            stage_started = perf_counter()
-            semantic_input = compiler.compile(surface, text, context=context)
-            timings["semantic_input_compile"] = _elapsed_ms(stage_started)
+            semantic_input = None
+            operator_decision = None
         else:
             require_continuation_core(continuation_state, surface)
             stage_started = perf_counter()
@@ -838,6 +886,7 @@ class ExecutionService:
                     session_id=resolved_session_id,
                     resume_count=resume_count,
                     continuation_resume=continuation_resume,
+                    semantic_provider=SERVER_LLM_PROVIDER,
                 )
             semantic_input = continuation_resume.semantic_input
             _validate_operator_scope_change(
@@ -845,24 +894,21 @@ class ExecutionService:
                 semantic_input,
                 continuation_resume.operator_decision,
             )
+            operator_decision = continuation_resume.operator_decision
             timings["continuation_resume"] = _elapsed_ms(stage_started)
 
-        calculator = self.calculator_factory(adapter)
-        executor = SemanticExecutor(
-            surface,
-            calculator,
-            compatibility,
+        provider = self.semantic_provider_factory()
+        provider_result = provider.execute(
+            surface=surface,
+            compatibility=compatibility,
+            source_text=text,
+            context=context if continuation_state is None else None,
+            semantic_input=semantic_input,
+            operator_decision=operator_decision,
         )
-        stage_started = perf_counter()
-        candidate = executor.execute(
-            semantic_input,
-            operator_decision=(
-                continuation_resume.operator_decision
-                if continuation_resume is not None
-                else None
-            ),
-        )
-        timings["semantic_executor"] = _elapsed_ms(stage_started)
+        timings.update(provider_result.stage_timings_ms)
+        semantic_input = provider_result.semantic_input
+        candidate = provider_result.candidate
         return self._candidate_envelope(
             candidate=candidate,
             semantic_input=semantic_input,
@@ -872,7 +918,7 @@ class ExecutionService:
             timings=timings,
             resume_count=resume_count,
             resumed=continuation_state is not None,
-            semantic_provider="OPENAI_API",
+            semantic_provider=provider.provider_id,
             continuation_cycle_id=(
                 continuation_resume.cycle_id
                 if continuation_resume is not None
@@ -927,6 +973,7 @@ class ExecutionService:
             "execution_version": EXECUTION_VERSION,
             "session_id": session_id,
             "status": "semantic_candidate",
+            "semantic_provider": semantic_provider,
             "phase": candidate.phase,
             "gate": candidate.gate,
             "candidate_result": candidate_result,
@@ -947,7 +994,6 @@ class ExecutionService:
             "limitations": list(PUBLIC_LIMITATIONS),
         }
         if semantic_provider == HOST_SEMANTIC_PROVIDER:
-            envelope["semantic_provider"] = semantic_provider
             envelope["host_work_order_id"] = host_work_order_id
             envelope["limitations"] = list(dict.fromkeys((
                 *envelope["limitations"],
@@ -1009,6 +1055,7 @@ def _operator_termination_envelope(
     session_id,
     resume_count,
     continuation_resume,
+    semantic_provider,
 ):
     decision = dict(continuation_resume.operator_decision)
     hold_record = dict(continuation_resume.hold_record)
@@ -1023,6 +1070,7 @@ def _operator_termination_envelope(
         "execution_version": EXECUTION_VERSION,
         "session_id": session_id,
         "status": "semantic_candidate",
+        "semantic_provider": semantic_provider,
         "phase": hold_record["return_state"],
         "gate": "HOLD",
         "candidate_result": {
@@ -1291,7 +1339,7 @@ def _build_execution_trace(
     compatibility,
     timings,
     continuation=None,
-    semantic_provider="OPENAI_API",
+    semantic_provider=SERVER_LLM_PROVIDER,
     host_work_order_id=None,
 ):
     trace = {

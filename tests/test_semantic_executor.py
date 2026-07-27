@@ -797,6 +797,7 @@ def test_openai_adapter_keeps_protocol_and_structured_contracts_separate(
     monkeypatch,
 ):
     requests = []
+    client_arguments = []
     monkeypatch.setenv("OPENAI_REASONING_EFFORT", "medium")
 
     class FakeCompletions:
@@ -817,9 +818,17 @@ def test_openai_adapter_keeps_protocol_and_structured_contracts_separate(
     monkeypatch.setitem(
         sys.modules,
         "openai",
-        SimpleNamespace(OpenAI=lambda **kwargs: fake_client),
+        SimpleNamespace(
+            OpenAI=lambda **kwargs: (
+                client_arguments.append(kwargs) or fake_client
+            )
+        ),
     )
-    adapter = OpenAIAdapter(model="gpt-4o", api_key="test-key")
+    adapter = OpenAIAdapter(
+        model="gpt-4o",
+        api_key="test-key",
+        timeout=120,
+    )
 
     adapter.call("protocol")
     adapter.call_structured("semantic", "Semantic contract.")
@@ -832,6 +841,10 @@ def test_openai_adapter_keeps_protocol_and_structured_contracts_separate(
     )
     assert requests[1]["response_format"] == {"type": "json_object"}
     assert requests[1]["messages"][0]["content"] == "Semantic contract."
+    assert client_arguments == [{
+        "api_key": "test-key",
+        "timeout": 120,
+    }]
 
 
 def test_openai_adapter_uses_reasoning_without_legacy_temperature(

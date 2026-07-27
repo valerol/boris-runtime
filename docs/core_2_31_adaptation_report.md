@@ -121,7 +121,8 @@ scenario is embedded in Runtime.
 1. Publish and deploy the compatible Runtime revision.
 2. Keep the tracked semantic configuration:
    `OPENAI_MODEL=gpt-5.6-terra`,
-   `OPENAI_REASONING_EFFORT=medium`, and
+   `OPENAI_REASONING_EFFORT=medium`,
+   `BORIS_SERVER_LLM_TIMEOUT_SECONDS=120`, and
    `BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000`.
 3. Keep the MCP and reverse-proxy request timeouts long enough for the
    phase-complete semantic call; the tracked MCP timeout is now 300 seconds.

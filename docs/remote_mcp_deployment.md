@@ -25,6 +25,7 @@ BORIS_CORE_PACKAGE=/opt/boris-core
 BOIS_LLM=openai
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=medium
+BORIS_SERVER_LLM_TIMEOUT_SECONDS=120
 BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
 ```
 
@@ -113,16 +114,13 @@ then confirm that the live Core reference reports the intended
 Available public MCP tools:
 
 - `boris.execute`: calls private `/runtime/execute`; Runtime verifies
-  compatibility and returns a signed `CHATGPT_HOST_ONLY` compilation work
-  order. ChatGPT submits the strict `SemanticInput`, receives the calculation
-  work order with the exact phase output contract, submits the semantic
-  result, and receives the non-mutating `ExecutionCandidate`. One invalid
-  result receives one signed diagnostic correction under `HOLD`; a second
-  invalid submission preserves `HOLD` without another automatic call. An
-  operator-owned HOLD
-  returns a signed handoff; resume calls the same tool and bypasses repeated
-  input compilation. The public schema has no `operation` field and cannot
-  select the API calculator.
+  compatibility and invokes canonical `ServerLLMProvider`. Runtime compiles the
+  strict `SemanticInput`, performs phase-complete calculation and validation,
+  and returns the non-mutating `ExecutionCandidate` in the same tool call. An
+  operator-owned HOLD returns a signed handoff; resume calls the same tool,
+  reuses the signed input, and recalculates server-side without repeated
+  compilation. The public schema has no `operation`, provider selector, or host
+  work-order submission fields.
 
 There is no public `boris.frame` alias. Frame diagnostics and answer validation
 remain available through the private Runtime API and are not registered as
@@ -194,11 +192,14 @@ Do not expose `/runtime/execute`, `/runtime/frame`, or `/runtime/validate`
 directly to the public internet. The public boundary is `/mcp`; all Runtime API
 routes remain on the private interface.
 
-The `CHATGPT_HOST_ONLY` PoC stores pending one-shot work orders in the Runtime
-process. Run the Runtime API with one worker, or configure sticky routing to the
-same worker for prepare and both submits. A multi-worker or restart-safe deployment
-requires the deferred persistent atomic registry. This transaction registry is
-not BORIS memory and does not admit a state transition.
+The private experimental `ChatGPTHostProvider` stores pending
+`CHATGPT_HOST_ONLY` one-shot work orders in the Runtime process. It is not used
+by public MCP or Developer Surface. If it is exercised by a trusted private
+client, run the Runtime API
+with one worker or configure sticky routing to the same worker for prepare and
+both submits. A multi-worker or restart-safe experiment requires a persistent
+atomic registry. This transaction registry is not BORIS memory and does not
+admit a state transition.
 
 The first invalid calculation may add one correction submit under `HOLD` to
 the transaction. Runtime never creates a further automatic work order after
@@ -286,38 +287,29 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS through the sole host-only boris.execute tool. Preserve every gate. Send the initial input, submit semantic_input with the exact signed COMPILATION ID and token, then semantic_result with the signed CALCULATION ID and token. If one HOLD correction is returned, correct its listed paths and submit it once; if HOLD remains, stop. Do not answer between work orders. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
+Connects ChatGPT to BORIS through the sole read-only boris.execute tool. Runtime performs semantic compilation and calculation server-side and returns one ExecutionCandidate. Preserve every gate. For an operator-owned HOLD, request only the declared input and resume through its signed continuation. Never choose an operator resolution mode.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
-Refreshing is required for ChatGPT to display the new schema, but safety does
-not depend on it: a stale `operation=execute` argument cannot select the
-private API route and is forced through host preparation.
+Refreshing is required for ChatGPT to display the new schema. Safety does not
+depend on it: a stale extra `operation` argument cannot select the private
+host-work-order route because the public adapter always calls canonical
+`operation=execute`.
 
 Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
 `boris-execution-trace/1.0`. The execution request has no observability-mode
 selector, and the MCP schema has no calculator-provider selector.
 The MCP server reads the same non-secret mode setting and links
-`boris.execute` to `ui://boris/developer-surface-v2-3.html`. The component
+`boris.execute` to `ui://boris/developer-surface-v2-4.html`. The component
 receives the complete safe trace through tool-result `_meta`, hidden from the
 model, and displays it alongside the candidate and path-aware HOLD resume form.
-After Runtime validates a non-terminal operator decision and returns a signed
-`CALCULATION` work order, the component publishes that work order to model
-context and also embeds the complete signed object directly in every
-`ui/message` as `boris-host-continuation/1.0`. A successful context update
-never shortens the message. The continuation fixes the next call to the exact
-work-order ID and token plus one generated `semantic_result`, and forbids
-`input`, `context`, `resume`, and `semantic_input`. The ChatGPT compatibility
-alias receives the same complete prompt only if the standard bridge request
-fails. The visible
-`Host wake-up requested` status acknowledges delivery to the bridge only; it
-does not confirm that a model turn started. If no separate turn appears, use
-`Retry host wake-up`. The retry repeats only context/message delivery and does
-not create or alter the signed Runtime work order, and an unrelated Runtime
-error does not remove it. The host must continue that exact work order and must
-not open a new compilation session. If Runtime returns `isError` or an error
-payload, the host must report only the technical failure and must not synthesize
-an answer from an earlier HOLD/candidate.
+After Runtime validates a non-terminal operator decision, the component calls
+the same public `boris.execute`; `ServerLLMProvider` recalculates the same phase
+inside Runtime and returns the next candidate directly. The component does not
+publish model context, send `ui/message`, or request a ChatGPT follow-up turn.
+If Runtime returns `isError` or an error payload, the client must report only
+the technical failure and must not synthesize an answer from an earlier
+HOLD/candidate.
 The trace
 combines lexical projection, `SemanticInput`, RuntimeAttestation, norm and
 predicate results, constrained gate, validation issues, continuation status,
