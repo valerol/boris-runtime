@@ -24,8 +24,8 @@ from semantic_executor.calculator import (
 from semantic_executor.models import SemanticView, thaw_value
 
 
-HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.4"
-HOST_WORK_ORDER_TOKEN_VERSION = "boris-host-work-order-token/0.3"
+HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.5"
+HOST_WORK_ORDER_TOKEN_VERSION = "boris-host-work-order-token/0.4"
 HOST_WORK_ORDER_SECRET_ENV = "BORIS_HOST_EXECUTOR_SECRET"
 HOST_WORK_ORDER_TTL_ENV = "BORIS_HOST_WORK_ORDER_TTL_SECONDS"
 DEFAULT_HOST_WORK_ORDER_TTL_SECONDS = 900
@@ -376,6 +376,7 @@ def build_host_compilation_work_order(
         "work_order_id": work_order_id,
         "work_order_type": COMPILATION_WORK_ORDER,
         "session_id": session_id,
+        "resume_count": resume_count,
         "semantic_provider": HOST_SEMANTIC_PROVIDER,
         "core_ref": dict(core_ref),
         "attestation_sha256": attestation_sha256,
@@ -496,6 +497,7 @@ def build_host_work_order(
         "work_order_id": work_order_id,
         "work_order_type": CALCULATION_WORK_ORDER,
         "session_id": session_id,
+        "resume_count": resume_count,
         "semantic_provider": HOST_SEMANTIC_PROVIDER,
         "phase": view.phase,
         "minimum_context_window_tokens": int(
@@ -603,6 +605,7 @@ def _host_work_order_envelope(
         "work_order_id": work_order_id,
         "work_order_type": work_order_type,
         "session_id": session_id,
+        "resume_count": signed_claims["resume_count"],
         "status": "semantic_work_order",
         "semantic_provider": HOST_SEMANTIC_PROVIDER,
         "minimum_context_window_tokens": minimum_context_window_tokens,
@@ -684,6 +687,7 @@ def consume_host_work_order(
         "work_order_id": state.work_order_id,
         "work_order_type": state.work_order_type,
         "session_id": state.session_id,
+        "resume_count": state.resume_count,
         "semantic_provider": HOST_SEMANTIC_PROVIDER,
         "core_ref": dict(state.core_ref),
         "attestation_sha256": state.attestation_sha256,

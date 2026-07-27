@@ -4,6 +4,18 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added Developer Surface 2.2 for observable host wake-up delivery. The
+  component now sends the standards-first MCP Apps `ui/message` request before
+  using `sendFollowUpMessage` as a compatibility fallback, labels the result as
+  an unconfirmed wake-up request, and keeps a manual retry control beside the
+  signed `CALCULATION` work order. Host work orders now expose and sign their
+  top-level `resume_count`, so resumed cycles no longer render as cycle zero.
+  This advances the work-order contract to `boris-semantic-work-order/0.5`
+  and its signed token to `boris-host-work-order-token/0.4`.
+  Added a Node-based bridge integration test covering operator resume,
+  model-context transfer, standard message delivery, retry, and alias fallback.
+  The resource URI is now
+  `ui://boris/developer-surface-v2-2.html` to invalidate cached JavaScript.
 - Added the host wake-up bridge in Developer Surface 2.1. A non-terminal
   operator resume is first validated by Runtime into a signed `CALCULATION`
   work order, then transferred through MCP Apps model context and a follow-up

@@ -180,10 +180,11 @@ class RuntimeHostSubmissionContract(BaseModel):
 
 
 class RuntimeHostWorkOrderResponse(BaseModel):
-    work_order_version: Literal["boris-semantic-work-order/0.4"]
+    work_order_version: Literal["boris-semantic-work-order/0.5"]
     work_order_id: str
     work_order_type: Literal["COMPILATION", "CALCULATION"]
     session_id: str
+    resume_count: int = Field(ge=0)
     status: Literal["semantic_work_order"]
     semantic_provider: Literal["CHATGPT_HOST_ONLY"]
     phase: str | None = Field(

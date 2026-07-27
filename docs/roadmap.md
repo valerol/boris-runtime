@@ -78,9 +78,10 @@
 - no automatic suggestion of the predicate-matching value as an operator
   decision;
 - developer-only MCP Apps resource
-  `ui://boris/developer-surface-v2-1.html`, including validated operator
+  `ui://boris/developer-surface-v2-2.html`, including validated operator
   resume, model-context transfer of the signed `CALCULATION` work order, and
-  explicit host follow-up;
+  standards-first host follow-up with unconfirmed-delivery status and manual
+  retry;
 - complete safe trace delivered to the component through model-hidden `_meta`;
 - production MCP tool without a linked Developer Surface.
 

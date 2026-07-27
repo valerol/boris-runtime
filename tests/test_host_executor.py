@@ -48,11 +48,12 @@ def test_host_prepare_and_submit_use_two_signed_validated_work_orders(
     )
 
     assert compilation_order["work_order_version"] == (
-        "boris-semantic-work-order/0.4"
+        "boris-semantic-work-order/0.5"
     )
     assert compilation_order["work_order_type"] == "COMPILATION"
     assert compilation_order["status"] == "semantic_work_order"
     assert compilation_order["semantic_provider"] == "CHATGPT_HOST_ONLY"
+    assert compilation_order["resume_count"] == 0
     assert "phase" not in compilation_order
     assert compilation_order["minimum_context_window_tokens"] == 0
     assert "host_model_identity_not_attested" in (
@@ -100,6 +101,7 @@ def test_host_prepare_and_submit_use_two_signed_validated_work_orders(
         session_id="host-session",
     )
     assert work_order["work_order_type"] == "CALCULATION"
+    assert work_order["resume_count"] == 0
     assert work_order["phase"] == "C03"
     assert work_order["phase_output_contract"][
         "semantic_output"
@@ -554,7 +556,7 @@ def test_host_prepare_accepts_signed_hold_resume_without_recompiling(
         source,
         surface=surface,
     )
-    _codec, registry = configure_host_executor(service)
+    codec, registry = configure_host_executor(service)
     first = service.execute(
         text,
         session_id="host-resume",
@@ -576,6 +578,10 @@ def test_host_prepare_accepts_signed_hold_resume_without_recompiling(
         },
     )
 
+    assert work_order["resume_count"] == 1
+    assert codec.verify(
+        work_order["submission_contract"]["work_order_token"]
+    )["resume_count"] == 1
     state = registry._entries[work_order["work_order_id"]]
     view = SemanticViewBuilder().build(
         surface,

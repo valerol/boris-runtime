@@ -104,6 +104,21 @@ def test_developer_mode_links_one_ui_resource_to_execute_tool():
     assert "ui/update-model-context" in contents[0].content
     assert "ui/message" in contents[0].content
     assert "sendFollowUpMessage" in contents[0].content
+    assert "Retry host wake-up" in contents[0].content
+    assert (
+        contents[0].content.index('sendRequest("ui/message"')
+        < contents[0].content.index(
+            "window.openai?.sendFollowUpMessage"
+        )
+    )
+    assert (
+        "Host wake-up requested; model execution is not yet confirmed."
+        in contents[0].content
+    )
+    assert (
+        "payload.resume_count ?? payload.hold?.resume_count ?? 0"
+        in contents[0].content
+    )
     assert "Select operator resolution mode" in contents[0].content
     assert 'source_resolution_class === "OPERATOR_INPUT"' in (
         contents[0].content

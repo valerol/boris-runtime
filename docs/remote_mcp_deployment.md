@@ -298,13 +298,18 @@ Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
 `boris-execution-trace/1.0`. The execution request has no observability-mode
 selector, and the MCP schema has no calculator-provider selector.
 The MCP server reads the same non-secret mode setting and links
-`boris.execute` to `ui://boris/developer-surface-v2-1.html`. The component
+`boris.execute` to `ui://boris/developer-surface-v2-2.html`. The component
 receives the complete safe trace through tool-result `_meta`, hidden from the
 model, and displays it alongside the candidate and path-aware HOLD resume form.
 After Runtime validates a non-terminal operator decision and returns a signed
 `CALCULATION` work order, the component publishes that work order to model
-context and sends a follow-up message to wake the ChatGPT host. The host must
-continue that exact work order and must not open a new compilation session.
+context and requests a follow-up turn through `ui/message`, using the ChatGPT
+compatibility alias only if the standard bridge request fails. The visible
+`Host wake-up requested` status acknowledges delivery to the bridge only; it
+does not confirm that a model turn started. If no separate turn appears, use
+`Retry host wake-up`. The retry repeats only context/message delivery and does
+not create or alter the signed Runtime work order. The host must continue that
+exact work order and must not open a new compilation session.
 The trace
 combines lexical projection, `SemanticInput`, RuntimeAttestation, norm and
 predicate results, constrained gate, validation issues, continuation status,

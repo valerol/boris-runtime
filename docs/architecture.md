@@ -139,7 +139,7 @@ boris.execute with new work-order ID, token, and semantic_result
   -> ExecutionCandidate
 ```
 
-Work orders use `boris-semantic-work-order/0.4` and bind:
+Work orders use `boris-semantic-work-order/0.5` and bind:
 
 - session and work-order IDs;
 - Core reference and RuntimeAttestation SHA-256;
@@ -253,7 +253,7 @@ write long-term memory, or authorize an external action.
 ## MCP Developer Surface
 
 In `BORIS_RUNTIME_MODE=dev`, the sole `boris.execute` descriptor links to the
-versioned MCP Apps resource `ui://boris/developer-surface-v2-1.html`. The
+versioned MCP Apps resource `ui://boris/developer-surface-v2-2.html`. The
 component receives:
 
 - the candidate and handoff through model-visible `structuredContent`;
@@ -266,12 +266,15 @@ operator form, semantic summary, and expandable complete trace. Its Resume
 action uses MCP Apps `tools/call` to validate the exact operator decision
 through the same `boris.execute`. A non-terminal resume returns a signed
 `CALCULATION` work order; the component supplies it through
-`ui/update-model-context` and wakes the host through `ui/message` or the
-ChatGPT compatibility alias `sendFollowUpMessage`. This preserves the
-host-only semantic provider while preventing a fresh compilation cycle. There
-is no second debug or continuation tool. The component displays Runtime error
-details, has no external assets or network allowlist, and is not published in
-production mode.
+`ui/update-model-context` and requests a host turn through standards-first
+`ui/message`; the ChatGPT compatibility alias `sendFollowUpMessage` is used
+only when the standard request fails. Bridge acknowledgement is not treated as
+proof that the model started or completed a turn. The signed work order and a
+manual wake-up retry remain visible until another Runtime result arrives. This
+preserves the host-only semantic provider while preventing a fresh compilation
+cycle. There is no second debug or continuation tool. The component displays
+the top-level work-order `resume_count` and Runtime error details, has no
+external assets or network allowlist, and is not published in production mode.
 
 ## Internal context path
 

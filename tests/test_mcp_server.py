@@ -93,7 +93,7 @@ def test_developer_execute_moves_trace_to_component_only_metadata():
     assert response["_meta"]["developer_trace"] == packet[
         "developer_trace"
     ]
-    assert response["_meta"]["developer_surface_version"] == "2.1"
+    assert response["_meta"]["developer_surface_version"] == "2.2"
 
 
 def test_boris_execute_forwards_resume_to_runtime():
@@ -366,10 +366,11 @@ def _blocking_precondition(options):
 
 def _host_work_order_packet():
     return {
-        "work_order_version": "boris-semantic-work-order/0.4",
+        "work_order_version": "boris-semantic-work-order/0.5",
         "work_order_id": "work-order-1",
         "work_order_type": "COMPILATION",
         "session_id": "host-mcp",
+        "resume_count": 0,
         "status": "semantic_work_order",
         "semantic_provider": "CHATGPT_HOST_ONLY",
         "minimum_context_window_tokens": 0,

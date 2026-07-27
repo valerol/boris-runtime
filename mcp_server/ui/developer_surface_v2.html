@@ -283,9 +283,35 @@
       font-weight: 700;
     }
 
+    .secondary {
+      min-height: 38px;
+      padding: 8px 14px;
+      border: 1px solid var(--color-border-default, rgba(23, 23, 23, 0.2));
+      border-radius: 10px;
+      background: var(--color-background-primary, #ffffff);
+      color: inherit;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
     .primary:disabled {
       cursor: wait;
       opacity: 0.55;
+    }
+
+    .secondary:disabled {
+      cursor: wait;
+      opacity: 0.55;
+    }
+
+    .wake-panel {
+      border-color: rgba(43, 116, 255, 0.28);
+    }
+
+    .wake-status {
+      font-size: 13px;
+      font-weight: 660;
+      line-height: 1.45;
     }
 
     .error {
@@ -388,7 +414,7 @@
     }
   </style>
 </head>
-<body data-surface-version="2.1">
+<body data-surface-version="2.2">
   <main class="surface">
     <section class="header">
       <div class="identity">
@@ -454,6 +480,21 @@
       </div>
     </section>
 
+    <section
+      id="host-wake-panel"
+      class="panel wake-panel hidden"
+      aria-live="polite"
+    >
+      <h2>ChatGPT host continuation</h2>
+      <p id="host-wake-status" class="wake-status"></p>
+      <div class="actions">
+        <span id="host-wake-detail" class="muted"></span>
+        <button id="host-wake-button" class="secondary" type="button">
+          Retry host wake-up
+        </button>
+      </div>
+    </section>
+
     <section class="panel">
       <h2>Execution candidate</h2>
       <p id="candidate-note" class="muted"></p>
@@ -478,6 +519,8 @@
       let nextRequestId = 1;
       let currentResult = null;
       let fieldControls = [];
+      let pendingHostContinuation = null;
+      let hostWakeAttempts = 0;
 
       const byId = (id) => document.getElementById(id);
       const phaseChip = byId("phase-chip");
@@ -495,12 +538,16 @@
       const operatorScope = byId("operator-scope");
       const resumeButton = byId("resume-button");
       const formError = byId("form-error");
+      const hostWakePanel = byId("host-wake-panel");
+      const hostWakeStatus = byId("host-wake-status");
+      const hostWakeDetail = byId("host-wake-detail");
+      const hostWakeButton = byId("host-wake-button");
       const candidateNote = byId("candidate-note");
       const candidateJson = byId("candidate-json");
       const semanticJson = byId("semantic-json");
       const traceJson = byId("trace-json");
 
-      function sendRequest(method, params) {
+      function sendRequest(method, params, timeoutMs = 30000) {
         const id = nextRequestId++;
         return new Promise((resolve, reject) => {
           pending.set(id, { resolve, reject });
@@ -512,7 +559,7 @@
             if (!pending.has(id)) return;
             pending.delete(id);
             reject(new Error(`${method} timed out`));
-          }, 30000);
+          }, timeoutMs);
         });
       }
 
@@ -573,7 +620,20 @@
         gateChip.dataset.gate = payload.gate || "";
         sessionValue.textContent = payload.session_id || "—";
         statusValue.textContent = payload.status || payload.error || "unknown";
-        resumeValue.textContent = String(payload.hold?.resume_count ?? 0);
+        resumeValue.textContent = String(
+          payload.resume_count ?? payload.hold?.resume_count ?? 0
+        );
+
+        if (
+          pendingHostContinuation
+          && (
+            payload.status !== "semantic_work_order"
+            || payload.work_order_id
+              !== pendingHostContinuation.workOrderId
+          )
+        ) {
+          clearHostWake();
+        }
 
         if (payload.error) {
           candidateNote.textContent =
@@ -611,6 +671,7 @@
             work_order_id: payload.work_order_id,
             work_order_type: payload.work_order_type,
             semantic_provider: payload.semantic_provider,
+            resume_count: payload.resume_count,
             phase: payload.phase,
             minimum_context_window_tokens:
               payload.minimum_context_window_tokens,
@@ -651,6 +712,22 @@
         );
 
         renderHandoff(payload.hold);
+      }
+
+      function clearHostWake() {
+        pendingHostContinuation = null;
+        hostWakeAttempts = 0;
+        hostWakeStatus.textContent = "";
+        hostWakeDetail.textContent = "";
+        hostWakeButton.disabled = false;
+        hostWakePanel.classList.add("hidden");
+      }
+
+      function showHostWake(status, detail = "", busy = false) {
+        hostWakePanel.classList.remove("hidden");
+        hostWakeStatus.textContent = status;
+        hostWakeDetail.textContent = detail;
+        hostWakeButton.disabled = busy;
       }
 
       function renderHandoff(hold) {
@@ -923,17 +1000,77 @@
           ]),
         ].join("\n\n");
 
-        if (window.openai?.sendFollowUpMessage) {
-          return window.openai.sendFollowUpMessage({
-            prompt,
-            scrollToBottom: true,
-          });
+        try {
+          await sendRequest("ui/message", {
+            role: "user",
+            content: [{ type: "text", text: prompt }],
+          }, 10000);
+          return {
+            contextUpdated,
+            transport: "ui/message",
+          };
+        } catch (standardError) {
+          if (window.openai?.sendFollowUpMessage) {
+            await window.openai.sendFollowUpMessage({
+              prompt,
+              scrollToBottom: true,
+            });
+            return {
+              contextUpdated,
+              transport: "sendFollowUpMessage",
+              standardError: (
+                standardError instanceof Error
+                  ? standardError.message
+                  : String(standardError)
+              ),
+            };
+          }
+          throw standardError;
         }
-        return sendRequest("ui/message", {
-          role: "user",
-          content: [{ type: "text", text: prompt }],
-        });
       }
+
+      async function requestHostWake() {
+        if (!pendingHostContinuation) {
+          showHostWake(
+            "No signed CALCULATION work order is available for retry.",
+            "Run a non-terminal operator resume first."
+          );
+          return;
+        }
+        hostWakeAttempts += 1;
+        showHostWake(
+          "Requesting a ChatGPT host turn…",
+          `Wake-up attempt ${hostWakeAttempts}.`,
+          true
+        );
+        try {
+          const result = await continueHostCalculation(
+            pendingHostContinuation.workOrderResult,
+            pendingHostContinuation.operatorContext
+          );
+          showHostWake(
+            "Host wake-up requested; model execution is not yet confirmed.",
+            `Attempt ${hostWakeAttempts} was accepted through ${result.transport}. ` +
+              "If no new ChatGPT turn appears, retry this wake-up."
+          );
+        } catch (error) {
+          showHostWake(
+            "Host wake-up request failed.",
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
+
+      hostWakeButton.addEventListener("click", async () => {
+        hostWakeButton.disabled = true;
+        try {
+          await requestHostWake();
+        } finally {
+          if (pendingHostContinuation) {
+            hostWakeButton.disabled = false;
+          }
+        }
+      });
 
       resolutionMode.addEventListener("change", updateResolutionMode);
 
@@ -1014,15 +1151,21 @@
             && payload.status === "semantic_work_order"
             && payload.work_order_type === "CALCULATION"
           ) {
-            await continueHostCalculation(result, {
-              session_id: previousSessionId,
-              hold_id: previousHoldId,
-              state_hash: previousStateHash,
-              operator_input: operatorInput,
-            });
+            pendingHostContinuation = {
+              workOrderId: payload.work_order_id,
+              workOrderResult: result,
+              operatorContext: {
+                session_id: previousSessionId,
+                hold_id: previousHoldId,
+                state_hash: previousStateHash,
+                operator_input: operatorInput,
+              },
+            };
+            hostWakeAttempts = 0;
             candidateNote.textContent =
-              "Operator decision accepted. ChatGPT has been asked to submit " +
-              "the signed CALCULATION work order for this same cycle.";
+              "Operator decision accepted. The signed CALCULATION work order " +
+              "is waiting for a ChatGPT host turn.";
+            await requestHostWake();
           }
         } catch (error) {
           formError.textContent =
@@ -1039,7 +1182,7 @@
             protocolVersion: "2026-01-26",
             appInfo: {
               name: "BORIS Developer Surface",
-              version: "2.1.0",
+              version: "2.2.0",
             },
             appCapabilities: {},
           });

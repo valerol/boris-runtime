@@ -76,6 +76,7 @@ class FakeExecutionService:
                 if resume is not None
                 else "COMPILATION"
             ),
+            resume_count=1 if resume is not None else 0,
         )
 
     def submit_host(
@@ -236,6 +237,7 @@ def test_runtime_host_prepare_resume_starts_at_calculation_work_order(
     assert response.status_code == 200
     assert response.json()["status"] == "semantic_work_order"
     assert response.json()["work_order_type"] == "CALCULATION"
+    assert response.json()["resume_count"] == 1
     assert service.calls == []
     assert service.host_calls == [(
         "prepare",
@@ -790,13 +792,18 @@ def blocking_precondition(options):
     }
 
 
-def host_work_order_packet(session_id, work_order_type="COMPILATION"):
+def host_work_order_packet(
+    session_id,
+    work_order_type="COMPILATION",
+    resume_count=0,
+):
     is_compilation = work_order_type == "COMPILATION"
     packet = {
-        "work_order_version": "boris-semantic-work-order/0.4",
+        "work_order_version": "boris-semantic-work-order/0.5",
         "work_order_id": "work-order-1",
         "work_order_type": work_order_type,
         "session_id": session_id,
+        "resume_count": resume_count,
         "status": "semantic_work_order",
         "semantic_provider": "CHATGPT_HOST_ONLY",
         "minimum_context_window_tokens": (

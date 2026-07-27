@@ -28,8 +28,9 @@ Current implemented boundary:
   followed by one signed diagnostic correction under `HOLD`, with `HOLD`
   preserved if the corrected submission remains invalid; canonical `REPAIR`
   remains deferred until new-revision/new-cycle transitions exist;
-- developer-only visual MCP surface v2.1 with model-hidden safe trace and a
-  host wake-up bridge for signed operator continuation;
+- developer-only visual MCP surface v2.2 with model-hidden safe trace,
+  standards-first host wake-up, unconfirmed-delivery status, and manual retry
+  for signed operator continuation;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;
 - stateless answer validation;
@@ -40,7 +41,8 @@ Immediate validation target:
 - production exercise of
   `HOLD → OperatorDecision → signed CALCULATION → host follow-up → same-phase
   gate recheck` for a real system predicate and of terminal compliance-HOLD
-  resolution.
+  resolution. Local bridge integration is covered; acceptance still requires
+  observing the separate ChatGPT model turn and exact signed submission.
 
 Following stages:
 
