@@ -678,7 +678,7 @@ def execution_packet(session_id, gate="HOLD"):
 def host_work_order_packet(session_id, work_order_type="COMPILATION"):
     is_compilation = work_order_type == "COMPILATION"
     packet = {
-        "work_order_version": "boris-semantic-work-order/0.2",
+        "work_order_version": "boris-semantic-work-order/0.3",
         "work_order_id": "work-order-1",
         "work_order_type": work_order_type,
         "session_id": session_id,
@@ -717,9 +717,7 @@ def host_work_order_packet(session_id, work_order_type="COMPILATION"):
         },
         "submission_contract": {
             "tool": "boris.execute",
-            "operation": "submit",
             "required_arguments": [
-                "operation",
                 "work_order_id",
                 "work_order_token",
                 (

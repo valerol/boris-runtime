@@ -20,7 +20,7 @@ from semantic_executor.calculator import (
 from semantic_executor.models import SemanticView, thaw_value
 
 
-HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.2"
+HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.3"
 HOST_WORK_ORDER_TOKEN_VERSION = "boris-host-work-order-token/0.2"
 HOST_WORK_ORDER_SECRET_ENV = "BORIS_HOST_EXECUTOR_SECRET"
 HOST_WORK_ORDER_TTL_ENV = "BORIS_HOST_WORK_ORDER_TTL_SECONDS"
@@ -537,9 +537,7 @@ def _host_work_order_envelope(
         "bindings": dict(bindings),
         "submission_contract": {
             "tool": "boris.execute",
-            "operation": "submit",
             "required_arguments": [
-                "operation",
                 "work_order_id",
                 "work_order_token",
                 submission_field,

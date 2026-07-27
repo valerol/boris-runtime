@@ -17,8 +17,8 @@ immutable CoreSurface
 immutable CoreSurface + trusted server Core selection
   -> Runtime Compatibility
   -> application ExecutionService
-  -> OPENAI_API compiler + calculator
-     or signed CHATGPT_HOST_ONLY compiler + calculator work orders
+  -> signed CHATGPT_HOST_ONLY compiler + calculator work orders (public MCP)
+     or OPENAI_API compiler + calculator (private HTTP only)
   -> SemanticExecutor validation and gate constraints
   -> ExecutionCandidate
 ```
@@ -95,28 +95,30 @@ results, unknowns, conflicts, alternatives, and explicit limitations.
 `HOLD`, `STOP`, and `REPAIR` remain normal Runtime results. The MCP presentation
 layer must not weaken them or substitute a separate ChatGPT answer.
 
-## Experimental ChatGPT host executor
+## ChatGPT host executor
 
-The standard request keeps the existing calculator provider:
+The private HTTP API retains the autonomous provider when a trusted client
+explicitly selects the legacy route:
 
 ```text
-boris.execute
-  -> POST /runtime/execute
+private POST /runtime/execute operation=execute
   -> SemanticInputCompiler
   -> OPENAI_API semantic calculator
   -> validated ExecutionCandidate
 ```
 
-The optional host route uses one prepare and two submit calls to the same tool:
+The public MCP route is unconditionally host-only. Its schema has no
+`operation` field; the adapter infers prepare versus submit from the mutually
+exclusive request shapes:
 
 ```text
-boris.execute operation=prepare
+boris.execute with input or signed resume
   -> Runtime compatibility
   -> signed COMPILATION SemanticWorkOrder
 
 ChatGPT compiles one semantic_input
 
-boris.execute operation=submit
+boris.execute with work-order ID, token, and semantic_input
   -> verify token and one-shot registry state
   -> re-verify Core and RuntimeAttestation
   -> validate SemanticInput
@@ -125,7 +127,7 @@ boris.execute operation=submit
 
 ChatGPT calculates one semantic_result
 
-boris.execute operation=submit
+boris.execute with new work-order ID, token, and semantic_result
   -> verify the second token and one-shot registry state
   -> re-verify Core and RuntimeAttestation
   -> rebuild and hash the Semantic View
@@ -134,7 +136,7 @@ boris.execute operation=submit
   -> ExecutionCandidate
 ```
 
-Both work orders use `boris-semantic-work-order/0.2` and bind:
+Both work orders use `boris-semantic-work-order/0.3` and bind:
 
 - session and work-order IDs;
 - Core reference and RuntimeAttestation SHA-256;

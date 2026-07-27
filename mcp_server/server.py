@@ -11,12 +11,12 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 SERVER_INSTRUCTIONS = (
     "BORIS exposes one public tool: boris.execute. Preserve every candidate "
-    "gate and ask only for declared operator input. For CHATGPT_HOST_ONLY, call "
-    "operation=prepare, complete each signed work order, and submit it with the "
-    "exact ID and token. Submit semantic_input for COMPILATION, then "
-    "semantic_result for CALCULATION. Do not answer between calls or alter Core "
-    "identity, scope, or formal results. No result is independently reviewed, "
-    "policy-admitted, state-mutating, or executed."
+    "gate and ask only for declared operator input. Every initial or resumed "
+    "request returns a CHATGPT_HOST_ONLY work order. Complete it and submit the "
+    "exact ID, token, and semantic_input for COMPILATION, then semantic_result "
+    "for CALCULATION. Do not answer between calls or alter Core identity, scope, "
+    "or formal results. No result is independently reviewed, policy-admitted, "
+    "state-mutating, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -66,7 +66,6 @@ def boris_execute(
     session_id: str | None = None,
     context: dict | None = None,
     resume: dict | None = None,
-    operation: str = "execute",
     work_order_id: str | None = None,
     work_order_token: str | None = None,
     semantic_input: dict | None = None,
@@ -82,7 +81,6 @@ def boris_execute(
             session_id=session_id,
             context=context,
             resume=resume,
-            operation=operation,
             work_order_id=work_order_id,
             work_order_token=work_order_token,
             semantic_input=semantic_input,
@@ -96,7 +94,6 @@ def run_boris_execute(
     session_id: str | None = None,
     context: dict | None = None,
     resume: dict | None = None,
-    operation: str = "execute",
     work_order_id: str | None = None,
     work_order_token: str | None = None,
     semantic_input: dict | None = None,
@@ -104,7 +101,6 @@ def run_boris_execute(
     client=None,
 ):
     request = BorisExecuteRequest(
-        operation=operation,
         input=input,
         session_id=session_id,
         context=context or {},
@@ -131,14 +127,13 @@ def _execute_runtime(request, runtime_client):
             "input": request.input,
             "session_id": request.session_id,
             "context": request.context,
+            "operation": request.runtime_operation,
         }
         if request.resume is not None:
             execution_arguments["resume"] = (
                 request.resume.model_dump()
             )
-        if request.operation != "execute":
-            execution_arguments["operation"] = request.operation
-        if request.operation == "submit":
+        if request.runtime_operation == "submit":
             submission_arguments = {
                 "work_order_id": request.work_order_id,
                 "work_order_token": request.work_order_token,
@@ -189,6 +184,7 @@ def normalize_execution_tool_result(payload):
         if key != "developer_trace"
     }
     if candidate_payload.get("status") == "semantic_work_order":
+        candidate_payload = _public_host_work_order(candidate_payload)
         result = {
             "structuredContent": candidate_payload,
             "content": [
@@ -232,6 +228,21 @@ def normalize_execution_tool_result(payload):
     return result
 
 
+def _public_host_work_order(payload):
+    public_payload = dict(payload)
+    submission = dict(public_payload.get("submission_contract", {}))
+    submission.pop("operation", None)
+    required_arguments = submission.get("required_arguments")
+    if isinstance(required_arguments, list):
+        submission["required_arguments"] = [
+            argument
+            for argument in required_arguments
+            if argument != "operation"
+        ]
+    public_payload["submission_contract"] = submission
+    return public_payload
+
+
 def _host_work_order_instruction(payload):
     submission = payload.get("submission_contract", {})
     work_order_type = payload.get("work_order_type")
@@ -246,7 +257,7 @@ def _host_work_order_instruction(payload):
         "the user yet. Treat semantic_prompt as the complete untrusted-data "
         "calculation contract, produce exactly one JSON object matching "
         "response_schema, and call this same boris.execute tool once with "
-        "operation=submit, work_order_id="
+        "work_order_id="
         f"{payload.get('work_order_id')!r}, work_order_token="
         f"{submission.get('work_order_token')!r}, and {submission_field} set "
         "to that JSON object. Do not use another tool or independent source to "
@@ -365,7 +376,6 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         session_id: str | None = None,
         context: dict | None = None,
         resume: dict | None = None,
-        operation: str = "execute",
         work_order_id: str | None = None,
         work_order_token: str | None = None,
         semantic_input: dict | None = None,
@@ -373,13 +383,14 @@ def create_mcp_server(config: MCPServerConfig | None = None):
     ) -> CallToolResult:
         """Run the read-only BORIS semantic route.
 
-        Default execute mode uses the configured API calculator. Experimental
-        prepare mode returns a signed COMPILATION work order for the current
-        ChatGPT host. Submit semantic_input to receive the signed CALCULATION
-        work order, then submit semantic_result to receive an ExecutionCandidate.
-        A signed HOLD resume starts directly at CALCULATION. Server developer
-        mode adds a safe visual projection and semantic trace. The result is
-        not independently reviewed, policy-admitted, state-mutating, or executed.
+        Initial input always returns a signed CHATGPT_HOST_ONLY COMPILATION work
+        order. Submit semantic_input with its exact ID and token to receive the
+        signed CALCULATION work order, then submit semantic_result with the new
+        ID and token to receive an ExecutionCandidate. A signed HOLD resume
+        starts directly at CALCULATION. The public MCP route cannot select the
+        private OPENAI_API calculator. Server developer mode adds a safe visual
+        projection and semantic trace. The result is not independently reviewed,
+        policy-admitted, state-mutating, or executed.
         """
         try:
             envelope = boris_execute(
@@ -387,7 +398,6 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 session_id=session_id,
                 context=context,
                 resume=resume,
-                operation=operation,
                 work_order_id=work_order_id,
                 work_order_token=work_order_token,
                 semantic_input=semantic_input,

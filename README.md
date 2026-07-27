@@ -15,8 +15,8 @@ external actions, domain physiology, or long-term memory.
 Core release package
   -> core_surface
   -> runtime_compatibility
-  -> OPENAI_API SemanticInputCompiler + semantic calculator
-     or signed CHATGPT_HOST_ONLY compilation + calculation work orders
+  -> signed CHATGPT_HOST_ONLY compilation + calculation work orders (public MCP)
+     or OPENAI_API SemanticInputCompiler + calculator (private HTTP only)
   -> semantic_executor validation and gate constraints
   -> ExecutionCandidate
   -> HOLD handoff / signed stateless continuation
@@ -112,12 +112,14 @@ absent or insufficient; it does not silently narrow the phase-complete norm
 set. Keep the model, reasoning effort, and capacity declaration aligned when
 overriding these settings.
 
-The `CHATGPT_HOST_ONLY` route uses no Runtime LLM call. ChatGPT first completes
+The public MCP route is always `CHATGPT_HOST_ONLY` and uses no Runtime LLM
+call. ChatGPT first completes
 a signed `COMPILATION` work order. Runtime validates the submitted
 `SemanticInput`, selects the exact phase-complete Semantic View, and returns a
 signed `CALCULATION` work order. ChatGPT completes that work order and Runtime
 performs the ordinary strict validation and deterministic gate constraints.
-The `OPENAI_API` route remains available for autonomous clients.
+The `OPENAI_API` route remains available only to autonomous clients of the
+private HTTP API.
 
 ## Private Runtime API
 
@@ -193,10 +195,10 @@ Invalid Core source binding, invalid compiled input, and provider failures
 return controlled fail-closed errors. An archive source with missing or
 mismatched server acceptance also fails closed.
 
-### Experimental ChatGPT-hosted execution
+### Private HTTP host-work-order protocol
 
-The same endpoint supports an optional host-only protocol with one prepare and
-two submit calls. Prepare a compilation work order:
+The private endpoint supports the host-only protocol with one explicit prepare
+and two explicit submit calls. Prepare a compilation work order:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/runtime/execute \
@@ -284,13 +286,13 @@ BORIS_RUNTIME_API_URL=http://127.0.0.1:8000 \
 python -m mcp_server.server
 ```
 
-The MCP server exposes one public read-only tool: `boris.execute`. It communicates
-with the private API over HTTP and does not import Runtime internals, load Core
-packages, call LLMs, or store memory.
-
-Calls without `operation` retain the existing API-calculator behavior.
-`operation=prepare` and `operation=submit` opt into `CHATGPT_HOST_ONLY`; no
-second MCP tool is registered.
+The MCP server exposes one public read-only tool: `boris.execute`. It
+communicates with the private API over HTTP and does not import Runtime
+internals, load Core packages, call LLMs, or store memory. The public schema
+does not expose `operation`: initial input and signed HOLD resume are always
+forwarded as `prepare`, while signed work-order submissions are inferred from
+their exact ID, token, and stage payload and forwarded as `submit`. The legacy
+`execute` operation is available only through the private HTTP API.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
 `ui://boris/developer-surface-v2.html`. The MCP Apps component displays the

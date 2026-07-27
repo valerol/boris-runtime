@@ -73,11 +73,13 @@
 - complete safe trace delivered to the component through model-hidden `_meta`;
 - production MCP tool without a linked Developer Surface.
 
-### Experimental ChatGPT host-only executor
+### ChatGPT host-only executor
 
-- optional `CHATGPT_HOST_ONLY` provider through the sole `boris.execute` tool;
+- unconditional `CHATGPT_HOST_ONLY` provider through the sole public
+  `boris.execute` tool;
+- no public `operation` discriminator or path to the private API calculator;
 - signed `COMPILATION` and `CALCULATION` work orders, each consumed by
-  `operation=submit` exactly once;
+  one exact signed submission;
 - HMAC binding to the session, Core reference, RuntimeAttestation,
   source material, compiler catalog, `SemanticInput`, Semantic View, prompts,
   response schemas, phase, and selected scope;
@@ -88,7 +90,7 @@
 - signed HOLD resume skips compilation and starts at `CALCULATION`;
 - deterministic gate constraints and ordinary HOLD handoff after submission;
 - bounded TTL and size controls;
-- existing `OPENAI_API` route retained unchanged;
+- existing `OPENAI_API` route retained only for private HTTP clients;
 - in-memory single-process registry only for the PoC.
 
 ### Stateless context, validation, and projection observability

@@ -4,21 +4,31 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-- Extended the experimental host provider to `CHATGPT_HOST_ONLY` behind the
-  existing `boris.execute` tool. `operation=prepare` returns a signed
-  `COMPILATION` work order; the first `operation=submit` validates
+- Locked the sole public MCP `boris.execute` route to
+  `CHATGPT_HOST_ONLY`. The public schema no longer exposes `operation`; initial
+  input and signed HOLD resume always become `prepare`, while exact work-order
+  submissions become `submit`. Legacy `OPENAI_API execute` remains available
+  only through the private HTTP API.
+- Versioned the corrected public submission contract as
+  `boris-semantic-work-order/0.3`. It no longer instructs ChatGPT to send an
+  `operation` argument. A stale cached client that still sends
+  `operation=execute` cannot select the legacy route: MCP binding discards the
+  obsolete argument and the adapter forwards the request as `prepare`.
+- Extended the host provider to the full two-stage `CHATGPT_HOST_ONLY`
+  protocol behind the existing `boris.execute` tool. Initial input returns a
+  signed `COMPILATION` work order; the first signed submission validates
   `semantic_input` and returns a signed `CALCULATION` work order; the second
-  submission validates `semantic_result` and returns the candidate.
-- Versioned the two-stage contract as `boris-semantic-work-order/0.2` and bound
-  each stage to the exact session, Core reference, RuntimeAttestation, source
-  material, compiler catalog, `SemanticInput`, Semantic View, prompt, output
-  schema, phase, and selected scope with HMAC-SHA256 digests. Both submissions
-  are TTL-limited, size-limited, and single-use.
-- Preserved the existing `OPENAI_API` execution route and the sole public MCP
-  tool. The host-only route never constructs the Runtime API adapter, while
-  signed HOLD resume skips compilation and starts directly at `CALCULATION`.
-  Pending work orders remain in a bounded single-process registry and are not
-  BORIS memory or state events.
+  validates `semantic_result` and returns the candidate.
+- Bound each work-order stage to the exact session, Core reference,
+  RuntimeAttestation, source material, compiler catalog, `SemanticInput`,
+  Semantic View, prompt, output schema, phase, and selected scope with
+  HMAC-SHA256 digests. Both submissions are TTL-limited, size-limited, and
+  single-use.
+- Preserved the existing `OPENAI_API` execution route for private HTTP clients.
+  The host-only route never constructs the Runtime API adapter, while signed
+  HOLD resume skips compilation and starts directly at `CALCULATION`. Pending
+  work orders remain in a bounded single-process registry and are not BORIS
+  memory or state events.
 - Disclose the Core minimum context requirement in every host work order and
   retain explicit limitations because Runtime cannot attest the exact ChatGPT
   model identity or effective context capacity.

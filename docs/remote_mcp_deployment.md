@@ -113,12 +113,12 @@ then confirm that the live Core reference reports the intended
 Available public MCP tools:
 
 - `boris.execute`: calls private `/runtime/execute`; Runtime verifies
-  compatibility, compiles a strict `SemanticInput`, invokes the existing
-  Semantic Executor, and returns a non-mutating `ExecutionCandidate`. A HOLD
-  returns a signed operator handoff; resume calls the same tool and bypasses
-  repeated input compilation. The optional `operation=prepare` and
-  `operation=submit` forms move only the semantic calculator into the current
-  ChatGPT host; the normal call continues to use the API calculator.
+  compatibility and returns a signed `CHATGPT_HOST_ONLY` compilation work
+  order. ChatGPT submits the strict `SemanticInput`, receives the calculation
+  work order, submits the semantic result, and receives the non-mutating
+  `ExecutionCandidate`. A HOLD returns a signed operator handoff; resume calls
+  the same tool and bypasses repeated input compilation. The public schema has
+  no `operation` field and cannot select the API calculator.
 
 There is no public `boris.frame` alias. Frame diagnostics and answer validation
 remain available through the private Runtime API and are not registered as
@@ -271,14 +271,17 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS through the sole boris.execute tool. Preserve every ExecutionCandidate gate. For CHATGPT_HOST_ONLY, call operation=prepare, submit semantic_input for the signed COMPILATION work order, then submit semantic_result for the signed CALCULATION work order; use each exact ID and token and do not answer between calls. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
+Connects ChatGPT to BORIS through the sole host-only boris.execute tool. Preserve every ExecutionCandidate gate. Send the initial input, submit semantic_input with the exact ID and token from the signed COMPILATION work order, then submit semantic_result with the new exact ID and token from CALCULATION; do not answer between calls. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
+Refreshing is required for ChatGPT to display the new schema, but safety does
+not depend on it: a stale `operation=execute` argument cannot select the
+private API route and is forced through host preparation.
 
 Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
 `boris-execution-trace/1.0`. The execution request has no observability-mode
-selector; `operation` selects only the calculator protocol.
+selector, and the MCP schema has no calculator-provider selector.
 The MCP server reads the same non-secret mode setting and links
 `boris.execute` to `ui://boris/developer-surface-v2.html`. The component
 receives the complete safe trace through tool-result `_meta`, hidden from the

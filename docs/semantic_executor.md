@@ -183,11 +183,11 @@ controlled `SemanticCalculationError` rejections.
 
 `SemanticExecutor` remains calculator-port driven. The ordinary application
 route supplies `LLMSemanticCalculator`, which invokes the configured
-`OPENAI_API` adapter. The experimental `CHATGPT_HOST_ONLY` route supplies
+`OPENAI_API` adapter. The public `CHATGPT_HOST_ONLY` route supplies
 `SubmittedSemanticCalculator` only after a signed work order has been prepared
 and consumed.
 
-`operation=prepare` first returns a signed `COMPILATION` work order containing
+The public MCP input first returns a signed `COMPILATION` work order containing
 the ordinary compiler prompt and a strict JSON Schema. Runtime validates the
 submitted `semantic_input`, mechanically builds the same `SemanticView` and
 `build_semantic_calculation_prompt()` used by `LLMSemanticCalculator`, and
@@ -195,11 +195,13 @@ returns a signed `CALCULATION` work order. HMAC tokens and the in-memory
 registry bind the exact source, compiler catalog, compiled input, view, prompts,
 schemas, Core identity, attestation, session, phase, scope, and expiry.
 
-`operation=submit` never calls an LLM. Runtime consumes each work order once,
-rebuilds its scope against the current Core, verifies all hashes, and gives the
-calculation submission to the ordinary `SemanticCalculationValidator`. All
-existing ownership checks, formal-result checks, candidate-result guards, and
-deterministic gate constraints therefore remain provider-independent.
+Public MCP submission never calls an LLM. Runtime consumes each work order
+once, rebuilds its scope against the current Core, verifies all hashes, and
+gives the calculation submission to the ordinary
+`SemanticCalculationValidator`. All existing ownership checks, formal-result
+checks, candidate-result guards, and deterministic gate constraints therefore
+remain provider-independent. Direct private HTTP clients use explicit
+`operation=prepare` and `operation=submit` values for the same protocol.
 
 This proof of concept moves both semantic compilation and phase-complete
 calculation into the current ChatGPT host, so the host-only route never

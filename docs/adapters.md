@@ -28,21 +28,18 @@ The MCP tool list is exactly `{"boris.execute"}`. The former public
 available for lexical projection diagnostics, and `/runtime/validate` remains a
 private stateless answer-validation service.
 
-The standard `execute` operation accepts either initial input or a signed HOLD
-resume through the same `boris.execute` tool. In developer mode the tool
-descriptor links one
-versioned MCP Apps resource. The adapter moves Runtime `developer_trace` from
-the HTTP payload into tool-result `_meta`, while keeping the candidate and
-handoff in `structuredContent`. Production mode registers neither the link nor
-the resource.
+The public tool has no `operation` discriminator. Initial input or a signed
+HOLD resume is always forwarded to the private API as `prepare`. A request
+containing one exact work-order ID, token, and stage-specific `semantic_input`
+or `semantic_result` is always forwarded as `submit`. The MCP adapter cannot
+select the private legacy `execute` operation or the configured API
+calculator.
 
-The same tool also exposes an optional `operation` discriminator:
-
-- omitted or `execute` uses the configured API calculator;
-- `prepare` returns a signed `CHATGPT_HOST_ONLY` `COMPILATION` work order for
-  initial input, or a `CALCULATION` work order for a signed HOLD resume;
-- `submit` forwards exactly one work-order ID, token, and the stage-specific
-  `semantic_input` or `semantic_result` to the private API.
+In developer mode the tool descriptor links one versioned MCP Apps resource.
+The adapter moves Runtime `developer_trace` from the HTTP payload into
+tool-result `_meta`, while keeping the candidate and handoff in
+`structuredContent`. Production mode registers neither the link nor the
+resource.
 
 The MCP adapter does not calculate or validate the work order itself. It keeps
 the large semantic prompt in `structuredContent` and returns only a concise

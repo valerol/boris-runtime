@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, constr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, constr, model_validator
 
 
 class BorisOperatorInput(BaseModel):
@@ -15,7 +15,8 @@ class BorisExecuteResume(BaseModel):
 
 
 class BorisExecuteRequest(BaseModel):
-    operation: Literal["execute", "prepare", "submit"] = "execute"
+    model_config = ConfigDict(extra="forbid")
+
     input: constr(strip_whitespace=True, min_length=1) | None = None
     session_id: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
@@ -25,6 +26,22 @@ class BorisExecuteRequest(BaseModel):
     semantic_input: dict[str, Any] | None = None
     semantic_result: dict[str, Any] | None = None
 
+    @property
+    def runtime_operation(self) -> Literal["prepare", "submit"]:
+        return (
+            "submit"
+            if any(
+                value is not None
+                for value in (
+                    self.work_order_id,
+                    self.work_order_token,
+                    self.semantic_input,
+                    self.semantic_result,
+                )
+            )
+            else "prepare"
+        )
+
     @model_validator(mode="after")
     def validate_route(self):
         host_fields = (
@@ -33,7 +50,7 @@ class BorisExecuteRequest(BaseModel):
             self.semantic_input,
             self.semantic_result,
         )
-        if self.operation in {"execute", "prepare"}:
+        if self.runtime_operation == "prepare":
             if (self.input is None) == (self.resume is None):
                 raise ValueError(
                     "Provide exactly one of input or resume."

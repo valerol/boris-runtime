@@ -57,7 +57,7 @@ def test_mcp_tool_metadata_includes_annotations_and_instructions():
     assert "ExecutionCandidate" in execute_tool.description
     assert "not independently reviewed" in execute_tool.description
     assert "mode" not in execute_tool.inputSchema["properties"]
-    assert "operation" in execute_tool.inputSchema["properties"]
+    assert "operation" not in execute_tool.inputSchema["properties"]
     assert "work_order_id" in execute_tool.inputSchema["properties"]
     assert "semantic_result" in execute_tool.inputSchema["properties"]
     assert "resume" in execute_tool.inputSchema["properties"]
@@ -167,6 +167,46 @@ async def test_streamable_http_client_receives_native_structured_content(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_cached_legacy_execute_argument_is_forced_to_host_prepare(
+    monkeypatch,
+):
+    import mcp_server.server as server_module
+
+    monkeypatch.setattr(
+        server_module,
+        "RuntimeAPIClient",
+        FakeRuntimeAPIClient,
+    )
+    app = create_remote_app(MCPServerConfig(path="/mcp"))
+    transport = httpx.ASGITransport(app=app)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:9000",
+        ) as http_client:
+            async with streamable_http_client(
+                "http://127.0.0.1:9000/mcp",
+                http_client=http_client,
+            ) as (read_stream, write_stream, _get_session_id):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                ) as session:
+                    await session.initialize()
+                    result = await session.call_tool(
+                        "boris.execute",
+                        {
+                            "input": "Cached legacy invocation",
+                            "operation": "execute",
+                        },
+                    )
+
+    assert result.isError is False
+    assert result.structuredContent["status"] == "semantic_candidate"
+
+
+@pytest.mark.asyncio
 async def test_streamable_http_hides_trace_from_model_and_sends_it_to_ui_meta(
     monkeypatch,
 ):
@@ -220,15 +260,33 @@ class FakeRuntimeAPIClient:
     def __exit__(self, exc_type, exc, traceback):
         return None
 
-    def execute(self, input, session_id=None, context=None):
+    def execute(
+        self,
+        input,
+        session_id=None,
+        context=None,
+        operation=None,
+    ):
+        assert operation == "prepare"
         packet = execution_packet()
         packet["session_id"] = session_id or packet["session_id"]
         return packet
 
 
 class FakeDeveloperRuntimeAPIClient(FakeRuntimeAPIClient):
-    def execute(self, input, session_id=None, context=None):
-        packet = super().execute(input, session_id, context)
+    def execute(
+        self,
+        input,
+        session_id=None,
+        context=None,
+        operation=None,
+    ):
+        packet = super().execute(
+            input,
+            session_id,
+            context,
+            operation,
+        )
         packet["developer_trace"] = {
             "trace_version": "boris-execution-trace/1.0",
             "semantic_execution": {"constrained_gate": "HOLD"},

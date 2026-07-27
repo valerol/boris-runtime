@@ -136,13 +136,12 @@ class RuntimeHostWorkOrderBindings(BaseModel):
 
 class RuntimeHostSubmissionContract(BaseModel):
     tool: Literal["boris.execute"]
-    operation: Literal["submit"]
     required_arguments: list[str]
     work_order_token: str
 
 
 class RuntimeHostWorkOrderResponse(BaseModel):
-    work_order_version: Literal["boris-semantic-work-order/0.2"]
+    work_order_version: Literal["boris-semantic-work-order/0.3"]
     work_order_id: str
     work_order_type: Literal["COMPILATION", "CALCULATION"]
     session_id: str

@@ -19,8 +19,9 @@ Current implemented boundary:
 - deterministic non-empty candidate projection for any non-`HOLD` route,
   including resume;
 - signed `CHATGPT_HOST_ONLY` compilation and calculation work orders through
-  the same `boris.execute`, with zero API calls on that route and the
-  autonomous API provider retained;
+  the same `boris.execute`, with no public provider selector, zero API calls on
+  that route, and the autonomous API provider retained only behind private
+  HTTP;
 - developer-only visual MCP surface v2 with model-hidden safe trace;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;

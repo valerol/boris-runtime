@@ -49,7 +49,7 @@ def test_host_prepare_and_submit_use_two_signed_validated_work_orders(
     )
 
     assert compilation_order["work_order_version"] == (
-        "boris-semantic-work-order/0.2"
+        "boris-semantic-work-order/0.3"
     )
     assert compilation_order["work_order_type"] == "COMPILATION"
     assert compilation_order["status"] == "semantic_work_order"
@@ -62,7 +62,10 @@ def test_host_prepare_and_submit_use_two_signed_validated_work_orders(
     assert "SEMANTIC_INPUT_COMPILER_DATA" in (
         compilation_order["semantic_prompt"]
     )
-    assert compilation_order["submission_contract"]["operation"] == "submit"
+    assert "operation" not in compilation_order["submission_contract"]
+    assert "operation" not in compilation_order[
+        "submission_contract"
+    ]["required_arguments"]
     assert compilation_order["submission_contract"][
         "work_order_token"
     ].startswith("hw1.")

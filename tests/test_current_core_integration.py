@@ -135,7 +135,7 @@ def test_current_core_builds_host_work_order_for_every_phase(
         )
         assert work_order["phase"] == phase
         assert work_order["semantic_prompt"]
-        assert work_order["submission_contract"]["operation"] == "submit"
+        assert "operation" not in work_order["submission_contract"]
 
 
 def test_current_core_runtime_compatibility_attestation(
