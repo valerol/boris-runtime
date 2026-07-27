@@ -12,11 +12,11 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 SERVER_INSTRUCTIONS = (
     "BORIS exposes one public tool: boris.execute. Submit every signed host work "
     "order with its exact ID, token, and requested payload; allow at most one "
-    "correction. Never choose an operator HOLD mode. Operator decisions "
-    "are current-cycle controls, not facts, evidence, authority, or memory. "
-    "Conditional proceeding preserves unknowns and never forces PASS; termination "
-    "ends the cycle. Never alter Core, phase, scope, formal results, or gate. "
-    "Results are candidates, not reviewed, admitted, mutated, or executed."
+    "correction. On isError or payload.error, fail closed: do not answer the "
+    "underlying request, reuse an earlier candidate, or start COMPILATION; report "
+    "only the Runtime failure and await the operator. Never choose an operator "
+    "HOLD mode or alter Core, phase, scope, formal results, or gate. Results are "
+    "candidates, not reviewed, admitted, mutated, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -24,7 +24,7 @@ TOOL_ANNOTATIONS = {
     "openWorldHint": False,
     "destructiveHint": False,
 }
-DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2-2.html"
+DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2-3.html"
 DEVELOPER_SURFACE_MIME_TYPE = "text/html;profile=mcp-app"
 DEVELOPER_SURFACE_PATH = (
     Path(__file__).resolve().parent
@@ -160,13 +160,20 @@ def _execute_runtime(request, runtime_client):
 
 
 def normalize_error_result(payload):
+    error = str(payload.get("error", "runtime_error"))
     detail = str(payload.get("detail", "Runtime API error"))
     return {
         "structuredContent": dict(payload),
         "content": [
             {
                 "type": "text",
-                "text": f"Runtime error: {detail}",
+                "text": (
+                    "BORIS Runtime failed closed. Do not answer the user's "
+                    "underlying request, reuse or summarize any earlier "
+                    "candidate/HOLD, or start a new COMPILATION route. Report "
+                    "only this technical Runtime failure and await explicit "
+                    f"operator action. Runtime error {error}: {detail}"
+                ),
             }
         ],
         "isError": True,
@@ -198,7 +205,7 @@ def normalize_execution_tool_result(payload):
         }
         if developer_trace is not None:
             result["_meta"] = {
-                "developer_surface_version": "2.2",
+                "developer_surface_version": "2.3",
                 "developer_trace": developer_trace,
             }
         return result
@@ -222,7 +229,7 @@ def normalize_execution_tool_result(payload):
     }
     if developer_trace is not None:
         result["_meta"] = {
-            "developer_surface_version": "2.2",
+            "developer_surface_version": "2.3",
             "developer_trace": developer_trace,
         }
     return result
@@ -442,20 +449,11 @@ def create_mcp_server(config: MCPServerConfig | None = None):
                 semantic_result=semantic_result,
             )
         except ValidationError as exc:
-            envelope = {
-                "structuredContent": {
-                    "error": "invalid_request",
-                    "detail": str(exc),
-                    "session_id": session_id,
-                },
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Runtime error: {exc}",
-                    }
-                ],
-                "isError": True,
-            }
+            envelope = normalize_error_result({
+                "error": "invalid_request",
+                "detail": str(exc),
+                "session_id": session_id,
+            })
         return to_call_tool_result(envelope, CallToolResult, TextContent)
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)

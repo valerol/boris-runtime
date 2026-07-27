@@ -66,11 +66,14 @@ def test_boris_execute_surfaces_runtime_error_payload():
 
     response = run_boris_execute(input="hello", session_id="test", client=client)
 
-    assert response == {
-        "structuredContent": error_payload,
-        "content": [{"type": "text", "text": "Runtime error: failed"}],
-        "isError": True,
-    }
+    assert response["structuredContent"] == error_payload
+    assert response["isError"] is True
+    assert response["content"][0]["text"].startswith(
+        "BORIS Runtime failed closed."
+    )
+    assert "Runtime error runtime_error: failed" in (
+        response["content"][0]["text"]
+    )
 
 
 def test_developer_execute_moves_trace_to_component_only_metadata():
@@ -93,7 +96,7 @@ def test_developer_execute_moves_trace_to_component_only_metadata():
     assert response["_meta"]["developer_trace"] == packet[
         "developer_trace"
     ]
-    assert response["_meta"]["developer_surface_version"] == "2.2"
+    assert response["_meta"]["developer_surface_version"] == "2.3"
 
 
 def test_boris_execute_forwards_resume_to_runtime():

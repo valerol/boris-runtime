@@ -321,18 +321,25 @@ their exact ID, token, and stage payload and forwarded as `submit`. The legacy
 `execute` operation is available only through the private HTTP API.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
-`ui://boris/developer-surface-v2-2.html`. The MCP Apps component displays the
+`ui://boris/developer-surface-v2-3.html`. The MCP Apps component displays the
 phase, constrained gate, candidate, path-aware HOLD form, and complete safe
 trace. The trace is delivered only through tool-result `_meta`; it is absent from
 model-visible `content` and `structuredContent`. The component validates an
 operator resume by calling the same `boris.execute` tool. When Runtime returns
-the signed host-only `CALCULATION` work order, the component transfers that
-validated state into model context and requests a new host turn through
-standards-first `ui/message`, with `sendFollowUpMessage` only as a compatibility
-fallback. Request acknowledgement does not attest that ChatGPT started a turn,
-so the component keeps an explicit retry control until another Runtime result
-arrives. Production mode publishes no Developer Surface resource. No public
-`boris.frame` alias is registered.
+the signed host-only `CALCULATION` work order, the component sends the complete
+validated work order in a versioned `boris-host-continuation/1.0` envelope
+directly inside standards-first `ui/message`. `ui/update-model-context` remains
+an additional channel and never causes the message payload to be shortened;
+`sendFollowUpMessage` is only a compatibility fallback. The envelope fixes the
+exact ID and token, requires one generated `semantic_result`, and forbids
+`input`, `context`, `resume`, and `semantic_input`, so a continuation cannot
+silently become a new `COMPILATION`. Request acknowledgement does not attest
+that ChatGPT started a turn, so the component keeps an explicit same-work-order
+retry control until a matching resumed Runtime result arrives. A Runtime error
+is fail-closed for the host: it must report only the technical failure and may
+not answer from an earlier candidate or open a new route. Production mode
+publishes no Developer Surface resource. No public `boris.frame` alias is
+registered.
 
 ## Core Surface and Semantic Executor
 

@@ -7,6 +7,18 @@ function assert(condition, message) {
   }
 }
 
+function continuationFromPrompt(prompt) {
+  const begin = "BEGIN BORIS SIGNED HOST CONTINUATION JSON";
+  const end = "END BORIS SIGNED HOST CONTINUATION JSON";
+  const beginIndex = prompt.indexOf(begin);
+  const endIndex = prompt.indexOf(end);
+  assert(beginIndex >= 0, "The host message has no continuation start marker.");
+  assert(endIndex > beginIndex, "The host message has no continuation end marker.");
+  return JSON.parse(
+    prompt.slice(beginIndex + begin.length, endIndex).trim()
+  );
+}
+
 class FakeClassList {
   constructor() {
     this.values = new Set();
@@ -126,6 +138,9 @@ async function main() {
   const messageListeners = [];
   const requestMethods = [];
   const requestSequence = [];
+  const hostMessages = [];
+  const hostToolCalls = [];
+  const aliasPrompts = [];
   let rejectStandardMessage = false;
   let aliasCalls = 0;
 
@@ -163,6 +178,30 @@ async function main() {
       if (message.id === undefined) return;
       requestMethods.push(message.method);
       requestSequence.push(message.method);
+      if (
+        message.method === "ui/message"
+        && !rejectStandardMessage
+      ) {
+        const prompt = message.params.content[0].text;
+        const continuation = continuationFromPrompt(prompt);
+        hostMessages.push({ prompt, continuation });
+        hostToolCalls.push({
+          name: continuation.next_tool_call.tool,
+          arguments: {
+            ...continuation.next_tool_call.exact_arguments,
+            semantic_result: {
+              candidate_result: {
+                analysis: "Host calculation for the signed work order.",
+              },
+              unknowns: [],
+              conflicts: [],
+              alternatives: [],
+              limitations: [],
+              suggested_gate: "HOLD",
+            },
+          },
+        });
+      }
       queueMicrotask(() => {
         let response;
         if (message.method === "tools/call") {
@@ -198,9 +237,27 @@ async function main() {
     parent,
     openai: {
       toolResponseMetadata: {},
-      async sendFollowUpMessage() {
+      async sendFollowUpMessage({ prompt }) {
         aliasCalls += 1;
         requestSequence.push("sendFollowUpMessage");
+        aliasPrompts.push(prompt);
+        const continuation = continuationFromPrompt(prompt);
+        hostToolCalls.push({
+          name: continuation.next_tool_call.tool,
+          arguments: {
+            ...continuation.next_tool_call.exact_arguments,
+            semantic_result: {
+              candidate_result: {
+                analysis: "Alias host calculation for the signed work order.",
+              },
+              unknowns: [],
+              conflicts: [],
+              alternatives: [],
+              limitations: [],
+              suggested_gate: "HOLD",
+            },
+          },
+        });
       },
     },
     addEventListener(type, listener) {
@@ -299,9 +356,78 @@ async function main() {
     aliasCalls === 0,
     "The compatibility alias ran despite successful ui/message."
   );
+  assert(hostMessages.length === 1, "The host did not receive one message.");
+  const firstContinuation = hostMessages[0].continuation;
+  assert(
+    firstContinuation.continuation_version
+      === "boris-host-continuation/1.0",
+    "The host continuation contract version is missing."
+  );
+  assert(
+    firstContinuation.calculation_work_order.work_order_id
+      === calculationOrder.structuredContent.work_order_id,
+    "The complete work order was omitted after model-context success."
+  );
+  assert(
+    firstContinuation.calculation_work_order.semantic_provider
+      === "CHATGPT_HOST_ONLY",
+    "The full provider-bound work order was not embedded in ui/message."
+  );
+  assert(
+    firstContinuation.next_tool_call.exact_arguments.work_order_token
+      === "hw1.payload.signature",
+    "The exact signed token is absent from the host message."
+  );
+  assert(
+    firstContinuation.next_tool_call.forbidden_arguments.join(",")
+      === "input,context,resume,semantic_input",
+    "The continuation does not forbid a fresh compilation route."
+  );
+  const firstHostCall = hostToolCalls[0];
+  assert(
+    firstHostCall.name === "boris.execute",
+    "The emulated host selected a different tool."
+  );
+  assert(
+    firstHostCall.arguments.work_order_id === "calculation-1"
+      && firstHostCall.arguments.work_order_token
+        === "hw1.payload.signature",
+    "The next boris.execute call did not preserve exact signed arguments."
+  );
+  assert(
+    typeof firstHostCall.arguments.semantic_result === "object",
+    "The next boris.execute call has no generated semantic_result object."
+  );
+  for (const forbidden of ["input", "context", "resume", "semantic_input"]) {
+    assert(
+      !Object.hasOwn(firstHostCall.arguments, forbidden),
+      `The next boris.execute call included forbidden ${forbidden}.`
+    );
+  }
   assert(
     !document.getElementById("host-wake-panel").classList.contains("hidden"),
     "The manual host wake-up control is hidden."
+  );
+
+  for (const listener of messageListeners) {
+    listener({
+      source: parent,
+      data: {
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          structuredContent: {
+            error: "semantic_execution_error",
+            detail: "Synthetic fail-closed Runtime error.",
+            session_id: "unrelated-session",
+          },
+        },
+      },
+    });
+  }
+  assert(
+    !document.getElementById("host-wake-panel").classList.contains("hidden"),
+    "An unrelated Runtime error removed the same-work-order retry."
   );
 
   const initialMessages = requestMethods.filter(
@@ -312,6 +438,11 @@ async function main() {
     requestMethods.filter((method) => method === "ui/message").length
       === initialMessages + 1,
     "Manual host wake-up did not repeat ui/message."
+  );
+  assert(
+    hostMessages[1].continuation.calculation_work_order.work_order_id
+      === "calculation-1",
+    "Manual wake-up did not repeat the same signed work order."
   );
 
   rejectStandardMessage = true;
@@ -325,6 +456,16 @@ async function main() {
     "The ChatGPT alias did not run strictly after ui/message failed."
   );
   assert(aliasCalls === 1, "The compatibility alias fallback did not run.");
+  assert(
+    continuationFromPrompt(aliasPrompts[0])
+      .calculation_work_order.work_order_id === "calculation-1",
+    "The alias fallback omitted the complete signed work order."
+  );
+  assert(
+    hostToolCalls[hostToolCalls.length - 1].arguments.work_order_id
+      === "calculation-1",
+    "The alias path did not preserve the exact next boris.execute arguments."
+  );
 }
 
 main().catch((error) => {

@@ -115,6 +115,20 @@ def test_developer_mode_links_one_ui_resource_to_execute_tool():
         "Host wake-up requested; model execution is not yet confirmed."
         in contents[0].content
     )
+    assert "BEGIN BORIS SIGNED HOST CONTINUATION JSON" in (
+        contents[0].content
+    )
+    assert '"boris-host-continuation/1.0"' in contents[0].content
+    assert "const continuationJson = JSON.stringify(contextPayload);" in (
+        contents[0].content
+    )
+    assert (
+        contents[0].content.count("continuationJson") >= 3
+    )
+    assert '"input",' in contents[0].content
+    assert '"resume",' in contents[0].content
+    assert '"semantic_input",' in contents[0].content
+    assert "isError or payload.error, stop:" in contents[0].content
     assert (
         "payload.resume_count ?? payload.hold?.resume_count ?? 0"
         in contents[0].content
@@ -123,7 +137,7 @@ def test_developer_mode_links_one_ui_resource_to_execute_tool():
     assert 'source_resolution_class === "OPERATOR_INPUT"' in (
         contents[0].content
     )
-    assert "Do not start a new input or COMPILATION route." in (
+    assert "Do not start COMPILATION." in (
         contents[0].content
     )
     assert 'payload.detail || "Runtime execution failed."' in (

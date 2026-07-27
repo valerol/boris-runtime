@@ -4,6 +4,19 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added Developer Surface 2.3 with a self-contained signed host continuation.
+  Every `ui/message` and compatibility-alias prompt now embeds the complete
+  `CALCULATION` work order even when `ui/update-model-context` succeeds. The
+  versioned `boris-host-continuation/1.0` envelope declares exact
+  `work_order_id` and `work_order_token` arguments, the generated
+  `semantic_result`, and forbidden fresh-route arguments. Runtime errors now
+  carry a fail-closed host instruction that forbids an answer from an earlier
+  HOLD/candidate or a new `COMPILATION`. An unrelated or erroneous host result
+  no longer removes the manual retry for the still-pending signed work order.
+  The bridge integration test now parses the delivered envelope and emulates
+  the exact next `boris.execute` call. The resource URI is
+  `ui://boris/developer-surface-v2-3.html`; work-order and token contracts
+  remain at versions 0.5 and 0.4.
 - Added Developer Surface 2.2 for observable host wake-up delivery. The
   component now sends the standards-first MCP Apps `ui/message` request before
   using `sendFollowUpMessage` as a compatibility fallback, labels the result as

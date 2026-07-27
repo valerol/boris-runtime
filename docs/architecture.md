@@ -253,7 +253,7 @@ write long-term memory, or authorize an external action.
 ## MCP Developer Surface
 
 In `BORIS_RUNTIME_MODE=dev`, the sole `boris.execute` descriptor links to the
-versioned MCP Apps resource `ui://boris/developer-surface-v2-2.html`. The
+versioned MCP Apps resource `ui://boris/developer-surface-v2-3.html`. The
 component receives:
 
 - the candidate and handoff through model-visible `structuredContent`;
@@ -265,16 +265,26 @@ The component renders the constrained gate, phase, candidate, structured
 operator form, semantic summary, and expandable complete trace. Its Resume
 action uses MCP Apps `tools/call` to validate the exact operator decision
 through the same `boris.execute`. A non-terminal resume returns a signed
-`CALCULATION` work order; the component supplies it through
-`ui/update-model-context` and requests a host turn through standards-first
-`ui/message`; the ChatGPT compatibility alias `sendFollowUpMessage` is used
-only when the standard request fails. Bridge acknowledgement is not treated as
-proof that the model started or completed a turn. The signed work order and a
-manual wake-up retry remain visible until another Runtime result arrives. This
-preserves the host-only semantic provider while preventing a fresh compilation
-cycle. There is no second debug or continuation tool. The component displays
-the top-level work-order `resume_count` and Runtime error details, has no
-external assets or network allowlist, and is not published in production mode.
+`CALCULATION` work order. The component includes its complete public signed
+envelope in `ui/update-model-context` and, independently, in every
+standards-first `ui/message`. The latter uses
+`boris-host-continuation/1.0`, which identifies the exact next tool, signed ID
+and token, generated `semantic_result`, forbidden fresh-route arguments, and
+the complete calculation contract. Thus successful context update is never
+treated as permission to omit the work order from the host message. The
+ChatGPT compatibility alias `sendFollowUpMessage` is used only when the
+standard request fails and receives the same complete prompt.
+
+Bridge acknowledgement is not treated as proof that the model started or
+completed a turn. The signed work order and manual wake-up retry remain visible
+until a matching session and `resume_count` returns a non-work-order Runtime
+result; unrelated work orders and errors do not discard it. MCP error content
+instructs the host to fail closed: report only the Runtime failure, do not reuse
+an earlier candidate/HOLD, and do not start `COMPILATION`. This preserves the
+host-only semantic provider while preventing a fresh compilation cycle. There
+is no second debug or continuation tool. The component displays the top-level
+work-order `resume_count` and Runtime error details, has no external assets or
+network allowlist, and is not published in production mode.
 
 ## Internal context path
 

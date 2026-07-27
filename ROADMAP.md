@@ -28,9 +28,11 @@ Current implemented boundary:
   followed by one signed diagnostic correction under `HOLD`, with `HOLD`
   preserved if the corrected submission remains invalid; canonical `REPAIR`
   remains deferred until new-revision/new-cycle transitions exist;
-- developer-only visual MCP surface v2.2 with model-hidden safe trace,
-  standards-first host wake-up, unconfirmed-delivery status, and manual retry
-  for signed operator continuation;
+- developer-only visual MCP surface v2.3 with model-hidden safe trace,
+  self-contained signed host continuation, exact next-tool arguments,
+  standards-first host wake-up, fail-closed Runtime errors,
+  unconfirmed-delivery status, and manual retry for signed operator
+  continuation;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;
 - stateless answer validation;

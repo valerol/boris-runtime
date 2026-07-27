@@ -298,18 +298,26 @@ Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
 `boris-execution-trace/1.0`. The execution request has no observability-mode
 selector, and the MCP schema has no calculator-provider selector.
 The MCP server reads the same non-secret mode setting and links
-`boris.execute` to `ui://boris/developer-surface-v2-2.html`. The component
+`boris.execute` to `ui://boris/developer-surface-v2-3.html`. The component
 receives the complete safe trace through tool-result `_meta`, hidden from the
 model, and displays it alongside the candidate and path-aware HOLD resume form.
 After Runtime validates a non-terminal operator decision and returns a signed
 `CALCULATION` work order, the component publishes that work order to model
-context and requests a follow-up turn through `ui/message`, using the ChatGPT
-compatibility alias only if the standard bridge request fails. The visible
+context and also embeds the complete signed object directly in every
+`ui/message` as `boris-host-continuation/1.0`. A successful context update
+never shortens the message. The continuation fixes the next call to the exact
+work-order ID and token plus one generated `semantic_result`, and forbids
+`input`, `context`, `resume`, and `semantic_input`. The ChatGPT compatibility
+alias receives the same complete prompt only if the standard bridge request
+fails. The visible
 `Host wake-up requested` status acknowledges delivery to the bridge only; it
 does not confirm that a model turn started. If no separate turn appears, use
 `Retry host wake-up`. The retry repeats only context/message delivery and does
-not create or alter the signed Runtime work order. The host must continue that
-exact work order and must not open a new compilation session.
+not create or alter the signed Runtime work order, and an unrelated Runtime
+error does not remove it. The host must continue that exact work order and must
+not open a new compilation session. If Runtime returns `isError` or an error
+payload, the host must report only the technical failure and must not synthesize
+an answer from an earlier HOLD/candidate.
 The trace
 combines lexical projection, `SemanticInput`, RuntimeAttestation, norm and
 predicate results, constrained gate, validation issues, continuation status,

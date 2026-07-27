@@ -13,11 +13,14 @@ def test_runtime_error_payload_becomes_error_result():
 
     result = normalize_error_result(payload)
 
-    assert result == {
-        "structuredContent": payload,
-        "content": [{"type": "text", "text": "Runtime error: failed"}],
-        "isError": True,
-    }
+    assert result["structuredContent"] == payload
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert text.startswith("BORIS Runtime failed closed.")
+    assert "Do not answer the user's underlying request" in text
+    assert "reuse or summarize any earlier candidate/HOLD" in text
+    assert "start a new COMPILATION route" in text
+    assert "Runtime error runtime_error: failed" in text
 
 
 def test_execution_payload_becomes_candidate_tool_result():

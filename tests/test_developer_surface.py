@@ -21,7 +21,7 @@ NODE = shutil.which("node")
 
 
 @pytest.mark.skipif(NODE is None, reason="Node.js is not available.")
-def test_operator_resume_wakes_host_through_standard_bridge_with_retry():
+def test_operator_resume_delivers_self_contained_signed_host_submission():
     result = subprocess.run(
         [NODE, str(HARNESS_PATH), str(SURFACE_PATH)],
         cwd=PROJECT_ROOT,

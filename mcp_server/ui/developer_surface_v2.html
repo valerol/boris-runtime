@@ -414,7 +414,7 @@
     }
   </style>
 </head>
-<body data-surface-version="2.2">
+<body data-surface-version="2.3">
   <main class="surface">
     <section class="header">
       <div class="identity">
@@ -626,11 +626,13 @@
 
         if (
           pendingHostContinuation
-          && (
-            payload.status !== "semantic_work_order"
-            || payload.work_order_id
-              !== pendingHostContinuation.workOrderId
-          )
+          && !payload.error
+          && payload.status !== "semantic_work_order"
+          && payload.session_id
+            === pendingHostContinuation.sessionId
+          && Number(
+            payload.resume_count ?? payload.hold?.resume_count ?? -1
+          ) === pendingHostContinuation.resumeCount
         ) {
           clearHostWake();
         }
@@ -960,25 +962,62 @@
       ) {
         const normalized = normalizedToolResult(workOrderResult);
         const workOrder = normalized.structuredContent || {};
+        const submission = workOrder.submission_contract || {};
+        if (
+          workOrder.status !== "semantic_work_order"
+          || workOrder.work_order_type !== "CALCULATION"
+          || workOrder.semantic_provider !== "CHATGPT_HOST_ONLY"
+          || !workOrder.work_order_id
+          || !submission.work_order_token
+        ) {
+          throw new Error(
+            "A complete signed CHATGPT_HOST_ONLY CALCULATION work order " +
+            "is required."
+          );
+        }
         const contextPayload = {
-          kind: "BORIS_OPERATOR_RESUME",
+          continuation_version: "boris-host-continuation/1.0",
+          kind: "BORIS_SIGNED_HOST_CONTINUATION",
           instruction:
-            "Continue only the signed BORIS CALCULATION work order below. " +
-            "The operator decision has already been validated by Runtime. " +
-            "Do not start a new COMPILATION route, alter the decision, or " +
-            "replace the BORIS result.",
-          session_id: operatorContext.session_id,
-          hold_id: operatorContext.hold_id,
-          state_hash: operatorContext.state_hash,
-          operator_input: operatorContext.operator_input,
+            "This is a continuation of an existing BORIS cycle, not a new " +
+            "user phenomenon. Calculate and submit only the signed " +
+            "CALCULATION work order below. Do not start COMPILATION. If " +
+            "boris.execute returns isError or payload.error, stop and report " +
+            "only that Runtime failure without answering the underlying " +
+            "request or reusing an earlier candidate.",
+          operator_decision_context: {
+            session_id: operatorContext.session_id,
+            hold_id: operatorContext.hold_id,
+            state_hash: operatorContext.state_hash,
+            operator_input: operatorContext.operator_input,
+          },
+          next_tool_call: {
+            tool: "boris.execute",
+            exact_arguments: {
+              work_order_id: workOrder.work_order_id,
+              work_order_token: submission.work_order_token,
+            },
+            generated_argument: {
+              name: "semantic_result",
+              source: "calculation_work_order.semantic_prompt",
+              schema: "calculation_work_order.response_schema",
+            },
+            forbidden_arguments: [
+              "input",
+              "context",
+              "resume",
+              "semantic_input",
+            ],
+          },
           calculation_work_order: workOrder,
         };
+        const continuationJson = JSON.stringify(contextPayload);
         let contextUpdated = false;
         try {
           await sendRequest("ui/update-model-context", {
             content: [{
               type: "text",
-              text: json(contextPayload),
+              text: continuationJson,
             }],
           });
           contextUpdated = true;
@@ -987,17 +1026,21 @@
         }
 
         const prompt = [
-          "Continue the exact BORIS cycle authorized in the Developer Surface.",
-          "Use the signed CALCULATION work order and operator decision without " +
-            "changing either.",
-          "Call boris.execute with the exact work_order_id, work_order_token, " +
-            "and one semantic_result matching its response schema.",
-          "Do not start a new input or COMPILATION route.",
-          ...(contextUpdated ? [] : [
-            "The host did not accept a separate model-context update, so the " +
-              "complete validated continuation follows:",
-            json(contextPayload),
-          ]),
+          "BORIS HOST CONTINUATION — this is not a new user request.",
+          "Execute the attached signed CALCULATION work order. Produce exactly " +
+            "one semantic_result matching its response_schema, then call " +
+            "boris.execute exactly once with only the exact work_order_id, " +
+            "exact work_order_token, and generated semantic_result.",
+          "Do not send input, context, resume, or semantic_input. Do not start " +
+            "COMPILATION and do not alter the phase, applicability scope, " +
+            "operator decision, Semantic View, or Core reference.",
+          "After the tool call, use only its returned Runtime result. On " +
+            "isError or payload.error, stop: report only that technical " +
+            "failure and do not answer the underlying request, reuse an " +
+            "earlier HOLD/candidate, or begin another route.",
+          "BEGIN BORIS SIGNED HOST CONTINUATION JSON",
+          continuationJson,
+          "END BORIS SIGNED HOST CONTINUATION JSON",
         ].join("\n\n");
 
         try {
@@ -1008,6 +1051,7 @@
           return {
             contextUpdated,
             transport: "ui/message",
+            workOrderId: workOrder.work_order_id,
           };
         } catch (standardError) {
           if (window.openai?.sendFollowUpMessage) {
@@ -1018,6 +1062,7 @@
             return {
               contextUpdated,
               transport: "sendFollowUpMessage",
+              workOrderId: workOrder.work_order_id,
               standardError: (
                 standardError instanceof Error
                   ? standardError.message
@@ -1051,7 +1096,9 @@
           showHostWake(
             "Host wake-up requested; model execution is not yet confirmed.",
             `Attempt ${hostWakeAttempts} was accepted through ${result.transport}. ` +
-              "If no new ChatGPT turn appears, retry this wake-up."
+              `The complete signed work order ${result.workOrderId} was included ` +
+              "in the message. If no correct ChatGPT turn appears, retry this " +
+              "same work order."
           );
         } catch (error) {
           showHostWake(
@@ -1153,6 +1200,8 @@
           ) {
             pendingHostContinuation = {
               workOrderId: payload.work_order_id,
+              sessionId: payload.session_id || previousSessionId,
+              resumeCount: Number(payload.resume_count ?? 0),
               workOrderResult: result,
               operatorContext: {
                 session_id: previousSessionId,
@@ -1182,7 +1231,7 @@
             protocolVersion: "2026-01-26",
             appInfo: {
               name: "BORIS Developer Surface",
-              version: "2.2.0",
+              version: "2.3.0",
             },
             appCapabilities: {},
           });
