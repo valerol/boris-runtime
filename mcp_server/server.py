@@ -24,7 +24,7 @@ TOOL_ANNOTATIONS = {
     "openWorldHint": False,
     "destructiveHint": False,
 }
-DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2.html"
+DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2-1.html"
 DEVELOPER_SURFACE_MIME_TYPE = "text/html;profile=mcp-app"
 DEVELOPER_SURFACE_PATH = (
     Path(__file__).resolve().parent
@@ -198,7 +198,7 @@ def normalize_execution_tool_result(payload):
         }
         if developer_trace is not None:
             result["_meta"] = {
-                "developer_surface_version": "2.0",
+                "developer_surface_version": "2.1",
                 "developer_trace": developer_trace,
             }
         return result
@@ -222,7 +222,7 @@ def normalize_execution_tool_result(payload):
     }
     if developer_trace is not None:
         result["_meta"] = {
-            "developer_surface_version": "2.0",
+            "developer_surface_version": "2.1",
             "developer_trace": developer_trace,
         }
     return result

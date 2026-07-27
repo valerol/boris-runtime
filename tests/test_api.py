@@ -69,7 +69,14 @@ class FakeExecutionService:
         )
         if self.error:
             raise self.error
-        return host_work_order_packet(session_id)
+        return host_work_order_packet(
+            session_id,
+            work_order_type=(
+                "CALCULATION"
+                if resume is not None
+                else "COMPILATION"
+            ),
+        )
 
     def submit_host(
         self,
@@ -200,6 +207,43 @@ def test_runtime_execute_prepare_and_submit_route_one_host_work_order(
         {"candidate_result": {"summary": "Host"}},
         "host-api",
     )
+
+
+def test_runtime_host_prepare_resume_starts_at_calculation_work_order(
+    monkeypatch,
+):
+    service = FakeExecutionService()
+    monkeypatch.setattr(app_module, "execution_service", service)
+    resume = {
+        "continuation_token": "v1.payload.signature",
+        "operator_input": {
+            "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
+            "statement": "Preserve unknowns and recalculate this cycle.",
+            "values": {},
+            "resolved_unknowns": [],
+        },
+    }
+
+    response = client.post(
+        "/runtime/execute",
+        json={
+            "operation": "prepare",
+            "session_id": "host-resume",
+            "resume": resume,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "semantic_work_order"
+    assert response.json()["work_order_type"] == "CALCULATION"
+    assert service.calls == []
+    assert service.host_calls == [(
+        "prepare",
+        None,
+        "host-resume",
+        {},
+        resume,
+    )]
 
 
 def test_runtime_execute_host_route_validates_contract_and_replay_error(

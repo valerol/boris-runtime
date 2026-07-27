@@ -321,11 +321,14 @@ their exact ID, token, and stage payload and forwarded as `submit`. The legacy
 `execute` operation is available only through the private HTTP API.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
-`ui://boris/developer-surface-v2.html`. The MCP Apps component displays the
+`ui://boris/developer-surface-v2-1.html`. The MCP Apps component displays the
 phase, constrained gate, candidate, path-aware HOLD form, and complete safe
 trace. The trace is delivered only through tool-result `_meta`; it is absent from
-model-visible `content` and `structuredContent`. The component resumes a HOLD
-by calling the same `boris.execute` tool. Production mode publishes no
+model-visible `content` and `structuredContent`. The component validates an
+operator resume by calling the same `boris.execute` tool. When Runtime returns
+the signed host-only `CALCULATION` work order, the component transfers that
+validated state into model context and sends a follow-up message so ChatGPT can
+submit the work order in a new host turn. Production mode publishes no
 Developer Surface resource. No public `boris.frame` alias is registered.
 
 ## Core Surface and Semantic Executor

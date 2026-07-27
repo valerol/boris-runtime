@@ -253,7 +253,7 @@ write long-term memory, or authorize an external action.
 ## MCP Developer Surface
 
 In `BORIS_RUNTIME_MODE=dev`, the sole `boris.execute` descriptor links to the
-versioned MCP Apps resource `ui://boris/developer-surface-v2.html`. The
+versioned MCP Apps resource `ui://boris/developer-surface-v2-1.html`. The
 component receives:
 
 - the candidate and handoff through model-visible `structuredContent`;
@@ -263,9 +263,15 @@ component receives:
 
 The component renders the constrained gate, phase, candidate, structured
 operator form, semantic summary, and expandable complete trace. Its Resume
-action uses MCP Apps `tools/call` to invoke the same `boris.execute`; there is
-no second debug or continuation tool. It has no external assets or network
-allowlist. Production mode neither links nor publishes the UI resource.
+action uses MCP Apps `tools/call` to validate the exact operator decision
+through the same `boris.execute`. A non-terminal resume returns a signed
+`CALCULATION` work order; the component supplies it through
+`ui/update-model-context` and wakes the host through `ui/message` or the
+ChatGPT compatibility alias `sendFollowUpMessage`. This preserves the
+host-only semantic provider while preventing a fresh compilation cycle. There
+is no second debug or continuation tool. The component displays Runtime error
+details, has no external assets or network allowlist, and is not published in
+production mode.
 
 ## Internal context path
 

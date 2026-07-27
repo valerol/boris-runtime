@@ -388,7 +388,7 @@
     }
   </style>
 </head>
-<body>
+<body data-surface-version="2.1">
   <main class="surface">
     <section class="header">
       <div class="identity">
@@ -575,6 +575,32 @@
         statusValue.textContent = payload.status || payload.error || "unknown";
         resumeValue.textContent = String(payload.hold?.resume_count ?? 0);
 
+        if (payload.error) {
+          candidateNote.textContent =
+            payload.detail || "Runtime execution failed.";
+          candidateJson.textContent = json({
+            error: payload.error,
+            detail: payload.detail,
+            session_id: payload.session_id,
+          });
+          semanticJson.textContent = json({
+            norm_results: [],
+            unknowns: [],
+            conflicts: [],
+            alternatives: [],
+            limitations: [],
+          });
+          traceJson.textContent = json(
+            metadata.developer_trace || {
+              status: "runtime_error",
+              error: payload.error,
+              detail: payload.detail,
+            }
+          );
+          renderHandoff(null);
+          return;
+        }
+
         if (payload.status === "semantic_work_order") {
           gateChip.textContent = "work order";
           gateChip.dataset.gate = "";
@@ -644,6 +670,14 @@
         const required = hold.required_operator_input || {};
         holdQuestion.textContent =
           required.question || "Operator input is required.";
+        const modePlaceholder = new Option(
+          "Select operator resolution mode",
+          "",
+          true,
+          true
+        );
+        modePlaceholder.disabled = true;
+        resolutionMode.append(modePlaceholder);
         for (const mode of required.resolution_modes || []) {
           if (!mode.available) continue;
           const option = new Option(
@@ -663,17 +697,24 @@
 
         for (const unknown of required.semantic_unknowns || []) {
           const item = document.createElement("li");
-          const label = document.createElement("label");
-          const checkbox = document.createElement("input");
-          const text = document.createElement("span");
-          checkbox.type = "checkbox";
-          checkbox.checked = false;
-          checkbox.dataset.unknown = String(unknown.unknown_id || "");
-          text.textContent = unknown.target_path
+          const description = unknown.target_path
             ? `${unknown.description} → ${unknown.target_path}`
             : String(unknown.description || unknown.unknown_id || "");
-          label.append(checkbox, text);
-          item.append(label);
+          if (unknown.source_resolution_class === "OPERATOR_INPUT") {
+            const label = document.createElement("label");
+            const checkbox = document.createElement("input");
+            const text = document.createElement("span");
+            checkbox.type = "checkbox";
+            checkbox.checked = false;
+            checkbox.dataset.unknown = String(unknown.unknown_id || "");
+            text.textContent = description;
+            label.append(checkbox, text);
+            item.append(label);
+          } else {
+            item.textContent = `${description} · preserved ${
+              unknown.source_resolution_class || "UNKNOWN"
+            }`;
+          }
           unknownList.append(item);
         }
         for (const target of required.system_targets || []) {
@@ -836,6 +877,64 @@
         }
       }
 
+      async function continueHostCalculation(
+        workOrderResult,
+        operatorContext
+      ) {
+        const normalized = normalizedToolResult(workOrderResult);
+        const workOrder = normalized.structuredContent || {};
+        const contextPayload = {
+          kind: "BORIS_OPERATOR_RESUME",
+          instruction:
+            "Continue only the signed BORIS CALCULATION work order below. " +
+            "The operator decision has already been validated by Runtime. " +
+            "Do not start a new COMPILATION route, alter the decision, or " +
+            "replace the BORIS result.",
+          session_id: operatorContext.session_id,
+          hold_id: operatorContext.hold_id,
+          state_hash: operatorContext.state_hash,
+          operator_input: operatorContext.operator_input,
+          calculation_work_order: workOrder,
+        };
+        let contextUpdated = false;
+        try {
+          await sendRequest("ui/update-model-context", {
+            content: [{
+              type: "text",
+              text: json(contextPayload),
+            }],
+          });
+          contextUpdated = true;
+        } catch {
+          contextUpdated = false;
+        }
+
+        const prompt = [
+          "Continue the exact BORIS cycle authorized in the Developer Surface.",
+          "Use the signed CALCULATION work order and operator decision without " +
+            "changing either.",
+          "Call boris.execute with the exact work_order_id, work_order_token, " +
+            "and one semantic_result matching its response schema.",
+          "Do not start a new input or COMPILATION route.",
+          ...(contextUpdated ? [] : [
+            "The host did not accept a separate model-context update, so the " +
+              "complete validated continuation follows:",
+            json(contextPayload),
+          ]),
+        ].join("\n\n");
+
+        if (window.openai?.sendFollowUpMessage) {
+          return window.openai.sendFollowUpMessage({
+            prompt,
+            scrollToBottom: true,
+          });
+        }
+        return sendRequest("ui/message", {
+          role: "user",
+          content: [{ type: "text", text: prompt }],
+        });
+      }
+
       resolutionMode.addEventListener("change", updateResolutionMode);
 
       resumeButton.addEventListener("click", async () => {
@@ -888,22 +987,43 @@
         resumeButton.textContent = "Resuming…";
         formError.textContent = "";
         try {
+          const operatorInput = {
+            resolution_mode: selectedMode,
+            statement,
+            values,
+            resolved_unknowns: provide
+              ? Array.from(resolvedUnknowns)
+              : [],
+            ...(scopeMode ? { scope } : {}),
+          };
+          const previousSessionId = currentResult.session_id;
+          const previousHoldId = hold.hold_record?.hold_id;
+          const previousStateHash = hold.hold_record?.state_hash;
           const result = await callBoris({
             session_id: currentResult.session_id,
             resume: {
               continuation_token: hold.continuation_token,
-              operator_input: {
-                resolution_mode: selectedMode,
-                statement,
-                values,
-                resolved_unknowns: provide
-                  ? Array.from(resolvedUnknowns)
-                  : [],
-                ...(scopeMode ? { scope } : {}),
-              },
+              operator_input: operatorInput,
             },
           });
           renderToolResult(result);
+          const normalized = normalizedToolResult(result);
+          const payload = normalized.structuredContent || {};
+          if (
+            !payload.error
+            && payload.status === "semantic_work_order"
+            && payload.work_order_type === "CALCULATION"
+          ) {
+            await continueHostCalculation(result, {
+              session_id: previousSessionId,
+              hold_id: previousHoldId,
+              state_hash: previousStateHash,
+              operator_input: operatorInput,
+            });
+            candidateNote.textContent =
+              "Operator decision accepted. ChatGPT has been asked to submit " +
+              "the signed CALCULATION work order for this same cycle.";
+          }
         } catch (error) {
           formError.textContent =
             error instanceof Error ? error.message : String(error);
@@ -919,7 +1039,7 @@
             protocolVersion: "2026-01-26",
             appInfo: {
               name: "BORIS Developer Surface",
-              version: "2.0.0",
+              version: "2.1.0",
             },
             appCapabilities: {},
           });

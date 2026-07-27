@@ -93,7 +93,7 @@ def test_developer_execute_moves_trace_to_component_only_metadata():
     assert response["_meta"]["developer_trace"] == packet[
         "developer_trace"
     ]
-    assert response["_meta"]["developer_surface_version"] == "2.0"
+    assert response["_meta"]["developer_surface_version"] == "2.1"
 
 
 def test_boris_execute_forwards_resume_to_runtime():

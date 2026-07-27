@@ -4,6 +4,16 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added the host wake-up bridge in Developer Surface 2.1. A non-terminal
+  operator resume is first validated by Runtime into a signed `CALCULATION`
+  work order, then transferred through MCP Apps model context and a follow-up
+  message so the active ChatGPT host can submit it. The component no longer
+  leaves host-only continuation inside the iframe or permits the host to start
+  an unrelated `COMPILATION` cycle. Runtime error `detail` is now rendered
+  explicitly. The component requires an explicit mode selection and permits
+  resolved-unknown checkboxes only for signed `OPERATOR_INPUT` items. The UI
+  resource URI was changed to
+  `ui://boris/developer-surface-v2-1.html` to invalidate cached JavaScript.
 - Added operator resolution of system HOLDs through
   `boris-hold-handoff/1.4` and `boris-continuation/1.4`. Every recoverable
   `HOLD`, including Runtime-derived formal predicates and final host submission

@@ -28,7 +28,8 @@ Current implemented boundary:
   followed by one signed diagnostic correction under `HOLD`, with `HOLD`
   preserved if the corrected submission remains invalid; canonical `REPAIR`
   remains deferred until new-revision/new-cycle transitions exist;
-- developer-only visual MCP surface v2 with model-hidden safe trace;
+- developer-only visual MCP surface v2.1 with model-hidden safe trace and a
+  host wake-up bridge for signed operator continuation;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;
 - stateless answer validation;
@@ -37,8 +38,9 @@ Current implemented boundary:
 Immediate validation target:
 
 - production exercise of
-  `HOLD → OperatorDecision → same-phase gate recheck` for a real system
-  predicate and of terminal compliance-HOLD resolution.
+  `HOLD → OperatorDecision → signed CALCULATION → host follow-up → same-phase
+  gate recheck` for a real system predicate and of terminal compliance-HOLD
+  resolution.
 
 Following stages:
 

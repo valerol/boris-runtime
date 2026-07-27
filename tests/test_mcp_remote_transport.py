@@ -101,6 +101,19 @@ def test_developer_mode_links_one_ui_resource_to_execute_tool():
     assert contents[0].mime_type == DEVELOPER_SURFACE_MIME_TYPE
     assert "BORIS Developer Surface" in contents[0].content
     assert "tools/call" in contents[0].content
+    assert "ui/update-model-context" in contents[0].content
+    assert "ui/message" in contents[0].content
+    assert "sendFollowUpMessage" in contents[0].content
+    assert "Select operator resolution mode" in contents[0].content
+    assert 'source_resolution_class === "OPERATOR_INPUT"' in (
+        contents[0].content
+    )
+    assert "Do not start a new input or COMPILATION route." in (
+        contents[0].content
+    )
+    assert 'payload.detail || "Runtime execution failed."' in (
+        contents[0].content
+    )
     assert contents[0].meta["ui"]["csp"] == {
         "connectDomains": [],
         "resourceDomains": [],
