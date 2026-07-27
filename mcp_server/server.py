@@ -10,13 +10,13 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS exposes one public tool: boris.execute. Submit each signed host work "
-    "order with its exact ID, token, and requested semantic payload. Apply at "
-    "most one declared HOLD correction. For operator HOLD, use only an available "
-    "resolution_mode; conditional proceeding preserves unknowns and never forces "
-    "PASS. Never answer between calls or alter Core, phase, scope, formal results, "
-    "or gate. Results are candidates only: not reviewed, admitted, state-mutating, "
-    "or executed."
+    "BORIS exposes one public tool: boris.execute. Submit every signed host work "
+    "order with its exact ID, token, and requested payload; allow at most one "
+    "correction. Never choose an operator HOLD mode. Operator decisions "
+    "are current-cycle controls, not facts, evidence, authority, or memory. "
+    "Conditional proceeding preserves unknowns and never forces PASS; termination "
+    "ends the cycle. Never alter Core, phase, scope, formal results, or gate. "
+    "Results are candidates, not reviewed, admitted, mutated, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -131,7 +131,7 @@ def _execute_runtime(request, runtime_client):
         }
         if request.resume is not None:
             execution_arguments["resume"] = (
-                request.resume.model_dump()
+                request.resume.model_dump(exclude_none=True)
             )
         if request.runtime_operation == "submit":
             submission_arguments = {
@@ -282,6 +282,17 @@ def _host_work_order_instruction(payload):
 def _candidate_instruction(payload, candidate_json):
     if payload.get("gate") == "HOLD":
         hold = payload.get("hold")
+        if (
+            isinstance(hold, dict)
+            and hold.get("status") == "operator_terminated"
+        ):
+            return (
+                "BORIS confirms that the operator terminated this cycle. Do "
+                "not call boris.execute again, do not generate a replacement "
+                "answer, and do not describe the result as PASS or STOP.\n\n"
+                "Terminal operator decision:\n"
+                f"{candidate_json}"
+            )
         required = (
             hold.get("required_operator_input")
             if isinstance(hold, dict)
@@ -298,12 +309,8 @@ def _candidate_instruction(payload, candidate_json):
                     f"{candidate_json}"
                 )
             return (
-                "BORIS returned HOLD without an operator-owned resolution "
-                "target. Do not ask the operator to supply Runtime objects, "
-                "future events, model outcomes, or downstream admission "
-                "artifacts. Present the conditional ExecutionCandidate and its "
-                "declared uncertainty bounds without weakening the gate or "
-                "claiming execution.\n\n"
+                "BORIS returned a terminal HOLD without continuation. Present "
+                "the preserved result and do not call boris.execute again.\n\n"
                 "ExecutionCandidate:\n"
                 f"{candidate_json}"
             )
@@ -323,8 +330,10 @@ def _candidate_instruction(payload, candidate_json):
             f"{modes}. Continue only by calling the same "
             "boris.execute tool with resume.continuation_token and "
             "resume.operator_input from the operator, including one exact "
-            "resolution_mode. ALLOW_CONDITIONAL_PROCEEDING must not include "
-            "values or resolved_unknowns and does not resolve any fact.\n\n"
+            "resolution_mode. Never choose a mode on the operator's behalf. "
+            "PROVIDE_INFORMATION and CONFIRM_ASSUMPTION require all signed "
+            "formal values; ALLOW_CONDITIONAL_PROCEEDING preserves unknowns; "
+            "CHANGE_SCOPE requires scope; TERMINATE_CYCLE ends the cycle.\n\n"
             "ExecutionCandidate:\n"
             f"{candidate_json}"
         )

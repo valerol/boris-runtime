@@ -46,7 +46,12 @@ class SemanticViewBuilder:
         )
         self.predicate_evaluator = predicate_evaluator or PredicateEvaluator()
 
-    def build(self, surface: CoreSurface, semantic_input: SemanticInput) -> SemanticView:
+    def build(
+        self,
+        surface: CoreSurface,
+        semantic_input: SemanticInput,
+        operator_decision: Mapping | None = None,
+    ) -> SemanticView:
         if (
             surface.phase_contexts
             and semantic_input.phase not in surface.phase_contexts
@@ -131,6 +136,7 @@ class SemanticViewBuilder:
                     deontic,
                     semantic_input,
                     predicate_evaluator,
+                    operator_decision=operator_decision,
                 ))
 
         missing_requested = requested - {item.norm_ref for item in candidates}
@@ -176,6 +182,11 @@ class SemanticViewBuilder:
             uncertainty_resolution_catalog=(
                 build_uncertainty_resolution_catalog(execution_context)
             ),
+            operator_decision=(
+                dict(operator_decision)
+                if operator_decision is not None
+                else {}
+            ),
             selection_trace={
                 "active_scopes": sorted(active_scopes),
                 "input_triggers": sorted(input_triggers),
@@ -183,6 +194,11 @@ class SemanticViewBuilder:
                 "selected_count": len(candidates),
                 "excluded": dict(sorted(excluded.items())),
                 "norm_type_policy": "source_values_preserved_with_adapter_coverage",
+                "operator_decision_id": (
+                    operator_decision.get("decision_id")
+                    if isinstance(operator_decision, Mapping)
+                    else None
+                ),
             },
         )
 
@@ -222,9 +238,15 @@ class SemanticViewBuilder:
         deontic,
         semantic_input,
         predicate_evaluator,
+        operator_decision=None,
     ):
         when = _optional_json_object_field(record, "when")
         predicate_context = semantic_input.predicate_context()
+        if isinstance(operator_decision, Mapping):
+            _apply_predicate_overrides(
+                predicate_context,
+                operator_decision.get("values", {}),
+            )
         if record.predicate_mode == "runtime_typed":
             applicability_predicate = _json_object_field(
                 record,
@@ -439,6 +461,31 @@ class SemanticViewBuilder:
             norm_ref: tuple(records)
             for norm_ref, records in result.items()
         }
+
+
+def _apply_predicate_overrides(context, values):
+    if not isinstance(values, Mapping):
+        raise SemanticViewError(
+            "OperatorDecision values must be a path-to-value object."
+        )
+    for path, value in values.items():
+        if not isinstance(path, str) or not path.strip():
+            raise SemanticViewError(
+                "OperatorDecision selector paths must be non-empty strings."
+            )
+        parts = path.split(".")
+        current = context
+        for part in parts[:-1]:
+            nested = current.get(part)
+            if nested is None:
+                nested = {}
+                current[part] = nested
+            if not isinstance(nested, dict):
+                raise SemanticViewError(
+                    "OperatorDecision selector conflicts with semantic context."
+                )
+            current = nested
+        current[parts[-1]] = value
 
 
 def _source_bool(record, field):

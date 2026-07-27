@@ -1,6 +1,12 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, constr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    constr,
+    model_validator,
+)
 
 
 class RuntimeFrameRequest(BaseModel):
@@ -53,11 +59,40 @@ class RuntimeFrameResponse(BaseModel):
 class RuntimeOperatorInput(BaseModel):
     resolution_mode: Literal[
         "PROVIDE_INFORMATION",
+        "CONFIRM_ASSUMPTION",
         "ALLOW_CONDITIONAL_PROCEEDING",
+        "CHANGE_SCOPE",
+        "TERMINATE_CYCLE",
     ]
     statement: str = ""
     values: dict[str, Any] = Field(default_factory=dict)
     resolved_unknowns: list[str] | None = None
+    scope: "RuntimeOperatorScopeChange | None" = None
+
+
+class RuntimeOperatorScopeChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    active_layers: list[str] | None = None
+    triggers: list[str] | None = None
+    applicability_scopes: list[str] | None = None
+    requested_norm_refs: list[str] | None = None
+
+    @model_validator(mode="after")
+    def require_selector(self):
+        if all(
+            value is None
+            for value in (
+                self.active_layers,
+                self.triggers,
+                self.applicability_scopes,
+                self.requested_norm_refs,
+            )
+        ):
+            raise ValueError(
+                "Operator scope change requires at least one selector array."
+            )
+        return self
 
 
 class RuntimeExecutionResume(BaseModel):
@@ -235,6 +270,8 @@ class RuntimeSemanticUnknown(BaseModel):
     expected_type: str
     norm_refs: list[str] = Field(default_factory=list)
     core_refs: list[str] = Field(default_factory=list)
+    source_resolution_class: str
+    resolution_owner: Literal["OPERATOR"]
     question: str
 
 
@@ -247,13 +284,28 @@ class RuntimePredicateInput(BaseModel):
     constraints: list[dict[str, Any]] = Field(default_factory=list)
     uncertainty_ids: list[str] = Field(default_factory=list)
     uncertainty_descriptions: list[str] = Field(default_factory=list)
+    source_resolution_class: str
+    resolution_owner: Literal["OPERATOR"]
     question: str
+
+
+class RuntimeSystemHoldTarget(BaseModel):
+    target_id: str
+    kind: str
+    description: str
+    target_path: str | None = None
+    norm_refs: list[str] = Field(default_factory=list)
+    source_resolution_class: str
+    resolution_owner: Literal["OPERATOR"]
 
 
 class RuntimeHoldResolutionMode(BaseModel):
     mode: Literal[
         "PROVIDE_INFORMATION",
+        "CONFIRM_ASSUMPTION",
         "ALLOW_CONDITIONAL_PROCEEDING",
+        "CHANGE_SCOPE",
+        "TERMINATE_CYCLE",
     ]
     available: bool
     effect: str
@@ -271,10 +323,14 @@ class RuntimeRequiredOperatorInput(BaseModel):
     predicate_inputs: list[RuntimePredicateInput] = Field(
         default_factory=list,
     )
+    system_targets: list[RuntimeSystemHoldTarget] = Field(
+        default_factory=list,
+    )
     response_contract: dict[str, str] = Field(default_factory=dict)
 
 
 class RuntimeHoldRecord(BaseModel):
+    hold_id: str
     cycle_id: str
     return_state: str
     return_gate: str
@@ -290,22 +346,27 @@ class RuntimeHoldRecord(BaseModel):
 class RuntimeBlockingPrecondition(BaseModel):
     precondition_id: str
     condition: Literal["RECOVERABLE_PRECONDITION_UNRESOLVED"]
-    status: Literal["UNRESOLVED"]
+    status: Literal["UNRESOLVED", "RESOLVED"]
+    owner: Literal["OPERATOR"]
     description: str
     resolution_options: list[
         Literal[
             "PROVIDE_INFORMATION",
+            "CONFIRM_ASSUMPTION",
             "ALLOW_CONDITIONAL_PROCEEDING",
+            "CHANGE_SCOPE",
+            "TERMINATE_CYCLE",
         ]
     ] = Field(default_factory=list)
 
 
 class RuntimeHoldHandoff(BaseModel):
-    handoff_version: Literal["boris-hold-handoff/1.3"]
+    handoff_version: Literal["boris-hold-handoff/1.4"]
     status: Literal[
         "operator_input_required",
-        "resolution_not_operator_owned",
+        "operator_terminated",
     ]
+    resolution_owner: Literal["OPERATOR"]
     reason: str
     hold_record: RuntimeHoldRecord
     blocking_precondition: RuntimeBlockingPrecondition
@@ -336,14 +397,17 @@ class RuntimeHoldHandoff(BaseModel):
                     "An operator handoff requires input, token, expiry, and a "
                     "signed resolution mode."
                 )
-        elif (
-            self.required_operator_input is not None
-            or self.continuation_token is not None
-            or self.expires_at is not None
-        ):
-            raise ValueError(
-                "A non-operator HOLD cannot contain operator continuation."
-            )
+        else:
+            if (
+                self.required_operator_input is not None
+                or self.continuation_token is not None
+                or self.expires_at is not None
+                or self.blocking_precondition.status != "RESOLVED"
+            ):
+                raise ValueError(
+                    "A terminated HOLD must contain one resolved operator "
+                    "precondition and no continuation."
+                )
         return self
 
 

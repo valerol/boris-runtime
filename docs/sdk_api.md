@@ -114,7 +114,7 @@ result = service.execute(
 if result["gate"] == "HOLD":
     required = result["hold"]["required_operator_input"]
     if required is not None:
-        # Collect only the declared operator-owned values.
+        # Collect only the signed current-cycle selector values.
         operator_values = {
             "authorization.granted": True,
         }
@@ -138,16 +138,16 @@ if result["gate"] == "HOLD":
 ```
 
 `BORIS_CONTINUATION_SECRET` must contain at least 32 bytes before Runtime can
-issue or verify an operator-owned HOLD token. A non-operator `HOLD` requires no
-token. A valid resume reconstructs the signed
-`SemanticInput`, verifies the current Core identity and session, records
-operator evidence, applies only signed input paths, and skips
-`SemanticInputCompiler`. `semantic_unknowns` and `predicate_inputs` are
-separate. `PROVIDE_INFORMATION` must close every signed target.
-`ALLOW_CONDITIONAL_PROCEEDING` is available only for unbound unknowns; it
-preserves them and records no fact, authority, or automatic gate decision. It
-does not
-create persistent Runtime state.
+issue or verify a system-HOLD token. A valid resume reconstructs the signed
+`SemanticInput`, verifies the current Core identity and session, creates a
+current-cycle `OperatorDecision`, and skips `SemanticInputCompiler`.
+`semantic_unknowns`, `predicate_inputs`, and `system_targets` remain separate.
+The five modes are `PROVIDE_INFORMATION`, `CONFIRM_ASSUMPTION`,
+`ALLOW_CONDITIONAL_PROCEEDING`, `CHANGE_SCOPE`, and `TERMINATE_CYCLE`.
+The decision is not written into `facts`, `evidence`, `authority`, or
+persistent Runtime state. Value and conditional modes never force a gate;
+termination returns a terminal operator-resolved `HOLD` without invoking the
+calculator.
 
 The return value is an `ExecutionCandidate`, not an executed action or
 `KernelDecision`.

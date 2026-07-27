@@ -52,9 +52,7 @@
 - typed uncertainty ownership and resolution classes;
 - schema-driven internal-object ownership projection from Core phase
   capsules;
-- structured operator handoff only when a `HOLD` contains an explicit
-  operator-owned target;
-- non-operator `HOLD` disclosure without a continuation token;
+- structured operator handoff for every recoverable system `HOLD`;
 - non-empty conditional candidate or explicit null-candidate reason;
 - HMAC-SHA256 stateless continuation bound to exact `SemanticInput`, Core
   identity, session, HOLD targets, expiry, and resume count;
@@ -63,15 +61,17 @@
 - path-aware semantic unknowns kept separate from signed formal-predicate
   input paths;
 - explicit completeness check before semantic recalculation;
-- Core-compatible `HoldRecord` projection with `cycle_id`, return state/gate,
-  scope, source/evidence references, unknowns, open debts, and state hash;
+- Core-compatible `HoldRecord` projection with `hold_id`, `cycle_id`, return
+  state/gate, scope, source/evidence references, unknowns, open debts, and
+  state hash;
 - blocking-precondition resolution kept separate from resolution of unknowns;
-- distinct `PROVIDE_INFORMATION` and
-  `ALLOW_CONDITIONAL_PROCEEDING` modes, with conditional recalculation available
-  only when no path, authority, norm-linked, Core-linked, or predicate
-  requirement can be bypassed;
+- current-cycle `OperatorDecision` modes `PROVIDE_INFORMATION`,
+  `CONFIRM_ASSUMPTION`, `ALLOW_CONDITIONAL_PROCEEDING`, `CHANGE_SCOPE`, and
+  `TERMINATE_CYCLE`;
 - preservation of unknowns and open debts during conditional recalculation,
-  with a fresh same-phase gate calculation and no automatic `PASS`;
+  with authority and mandatory proof excluded from conditional bypass, a fresh
+  same-phase gate calculation, and no automatic `PASS`;
+- terminal operator resolution without another semantic calculation;
 - guaranteed non-empty candidate material after a completed non-`HOLD`
   resume, with a trace-marked deterministic projection of the validated
   calculation when the provider returns an empty object;

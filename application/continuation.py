@@ -13,11 +13,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from semantic_executor import CoreReference, SemanticInput
-from semantic_executor.uncertainty import OPERATOR_RESOLUTION_CLASS
-
-
-CONTINUATION_VERSION = "boris-continuation/1.3"
-HOLD_HANDOFF_VERSION = "boris-hold-handoff/1.3"
+CONTINUATION_VERSION = "boris-continuation/1.4"
+HOLD_HANDOFF_VERSION = "boris-hold-handoff/1.4"
+OPERATOR_DECISION_VERSION = "boris-operator-decision/1.0"
 CONTINUATION_SECRET_ENV = "BORIS_CONTINUATION_SECRET"
 CONTINUATION_TTL_ENV = "BORIS_CONTINUATION_TTL_SECONDS"
 DEFAULT_CONTINUATION_TTL_SECONDS = 3600
@@ -25,12 +23,19 @@ MIN_CONTINUATION_SECRET_BYTES = 32
 MAX_CONTINUATION_TOKEN_CHARACTERS = 262144
 MAX_OPERATOR_VALUE_CHARACTERS = 2000
 PROVIDE_INFORMATION = "PROVIDE_INFORMATION"
+CONFIRM_ASSUMPTION = "CONFIRM_ASSUMPTION"
 ALLOW_CONDITIONAL_PROCEEDING = "ALLOW_CONDITIONAL_PROCEEDING"
+CHANGE_SCOPE = "CHANGE_SCOPE"
+TERMINATE_CYCLE = "TERMINATE_CYCLE"
 OPERATOR_RESOLUTION_MODES = frozenset({
     PROVIDE_INFORMATION,
+    CONFIRM_ASSUMPTION,
     ALLOW_CONDITIONAL_PROCEEDING,
+    CHANGE_SCOPE,
+    TERMINATE_CYCLE,
 })
 HOLD_RECORD_FIELDS = {
+    "hold_id",
     "cycle_id",
     "return_state",
     "return_gate",
@@ -83,6 +88,8 @@ class ContinuationResume:
     cycle_id: str
     hold_record: Mapping
     precondition_resolution: Mapping
+    operator_decision: Mapping
+    terminated: bool
 
 
 class ContinuationCodec:
@@ -236,6 +243,7 @@ def build_hold_handoff(
     session_id,
     resume_count,
     cycle_id=None,
+    operator_decision=None,
 ):
     required_inputs = candidate.trace.to_dict()["required_inputs"]
     semantic_unknowns = _semantic_unknown_resolutions(
@@ -243,35 +251,70 @@ def build_hold_handoff(
         required_inputs,
     )
     predicate_inputs = _predicate_operator_inputs(required_inputs)
-    if not semantic_unknowns and not predicate_inputs:
-        raise ContinuationUnavailable(
-            "Operator continuation cannot be issued without an "
-            "operator-owned resolution target."
-        )
+    system_targets = _system_hold_targets(
+        candidate,
+        semantic_unknowns,
+        predicate_inputs,
+    )
     hold_reason = (
         "Runtime gate is HOLD because material information or a "
         "recoverable precondition remains unresolved."
     )
+    value_resolution_available = bool(
+        predicate_inputs
+        or any(
+            item["source_resolution_class"] == "OPERATOR_INPUT"
+            for item in semantic_unknowns
+        )
+    )
+    assumption_resolution_available = bool(
+        semantic_unknowns or predicate_inputs
+    )
     conditional_proceeding_allowed = (
-        _conditional_proceeding_allowed(
-            semantic_unknowns,
-            predicate_inputs,
+        bool(candidate.to_dict()["candidate_result"])
+        and any(
+            _conditional_path_allowed(item.get("target_path"))
+            for item in (*semantic_unknowns, *predicate_inputs)
         )
     )
     resolution_modes = [{
         "mode": PROVIDE_INFORMATION,
-        "available": True,
+        "available": value_resolution_available,
         "effect": (
-            "Add signed operator-supplied facts or observations and resolve "
-            "every declared target before the same phase is recalculated."
+            "Record signed current-cycle operator values for every declared "
+            "target and recalculate the same phase without writing memory."
         ),
         "preserves_unknowns": False,
+    }, {
+        "mode": CONFIRM_ASSUMPTION,
+        "available": assumption_resolution_available,
+        "effect": (
+            "Record signed current-cycle assumptions for every formal target, "
+            "preserve unknowns, and recalculate the same phase."
+        ),
+        "preserves_unknowns": True,
     }, {
         "mode": ALLOW_CONDITIONAL_PROCEEDING,
         "available": conditional_proceeding_allowed,
         "effect": (
-            "Resolve only the operator scope decision, preserve every unknown "
-            "and open debt, and recalculate the same phase without forcing PASS."
+            "Resolve only the signed blocking role, preserve every unknown and "
+            "open debt, and recalculate the same phase without forcing PASS."
+        ),
+        "preserves_unknowns": True,
+    }, {
+        "mode": CHANGE_SCOPE,
+        "available": True,
+        "effect": (
+            "Replace only the declared semantic selector scope and recalculate "
+            "the same phase against the verified Core."
+        ),
+        "preserves_unknowns": True,
+    }, {
+        "mode": TERMINATE_CYCLE,
+        "available": True,
+        "effect": (
+            "Close the blocking precondition by operator decision and end this "
+            "cycle without PASS or another semantic calculation."
         ),
         "preserves_unknowns": True,
     }]
@@ -284,24 +327,29 @@ def build_hold_handoff(
         "resolution_modes": resolution_modes,
         "semantic_unknowns": semantic_unknowns,
         "predicate_inputs": predicate_inputs,
+        "system_targets": system_targets,
         "response_contract": {
             "resolution_mode": (
-                "Required. Use PROVIDE_INFORMATION, or "
-                "ALLOW_CONDITIONAL_PROCEEDING only when that signed mode is "
-                "available."
+                "Required. Use exactly one mode whose signed availability is "
+                "true."
             ),
             "statement": (
-                "Required for ALLOW_CONDITIONAL_PROCEEDING and for every "
-                "resolved semantic unknown without a target_path."
+                "Required for assumption, conditional, scope-change, and "
+                "termination decisions, and for resolved semantic unknowns "
+                "without a target_path."
             ),
             "values": (
-                "Path-to-value object. Paths must be declared by a semantic "
-                "unknown target_path or predicate_inputs. Must be empty for "
-                "ALLOW_CONDITIONAL_PROCEEDING."
+                "Path-to-value object for PROVIDE_INFORMATION or "
+                "CONFIRM_ASSUMPTION. Paths must be declared by the signed HOLD."
             ),
             "resolved_unknowns": (
                 "Exact unknown_id values resolved by provided information. "
-                "Must be empty for ALLOW_CONDITIONAL_PROCEEDING."
+                "Allowed only for PROVIDE_INFORMATION."
+            ),
+            "scope": (
+                "Required only for CHANGE_SCOPE. Supply one object containing "
+                "one or more of active_layers, triggers, applicability_scopes, "
+                "or requested_norm_refs."
             ),
         },
     }
@@ -327,16 +375,23 @@ def build_hold_handoff(
         "resume_count": resume_count,
         "semantic_input": semantic_input.to_prompt_dict(),
         "core_ref": candidate.core_ref.to_dict(),
+        "operator_decision": (
+            dict(operator_decision)
+            if isinstance(operator_decision, Mapping)
+            else None
+        ),
         "hold": {
             "hold_record": hold_record,
             "blocking_precondition": blocking_precondition,
             "semantic_unknowns": semantic_unknowns,
             "predicate_inputs": predicate_inputs,
+            "system_targets": system_targets,
         },
     })
     return {
         "handoff_version": HOLD_HANDOFF_VERSION,
         "status": "operator_input_required",
+        "resolution_owner": "OPERATOR",
         "reason": hold_reason,
         "hold_record": hold_record,
         "blocking_precondition": blocking_precondition,
@@ -347,72 +402,116 @@ def build_hold_handoff(
     }
 
 
-def hold_requires_operator_input(candidate):
-    if any(
-        uncertainty.resolution_class == OPERATOR_RESOLUTION_CLASS
-        for uncertainty in candidate.uncertainties
-    ):
-        return True
-    return any(
-        item.get("resolution_class") == OPERATOR_RESOLUTION_CLASS
-        for item in candidate.trace.to_dict()["required_inputs"]
-    )
-
-
-def build_non_operator_hold(
-    candidate,
+def build_system_issue_handoff(
+    *,
+    codec,
     semantic_input,
+    core_ref,
     session_id,
     resume_count,
+    reason,
+    issues,
     cycle_id=None,
+    operator_decision=None,
 ):
-    grouped = {}
-    for uncertainty in candidate.uncertainties:
-        if uncertainty.resolution_class == OPERATOR_RESOLUTION_CLASS:
-            continue
-        grouped.setdefault(uncertainty.resolution_class, []).append(
-            uncertainty.to_dict()
-        )
-    for item in candidate.trace.to_dict()["required_inputs"]:
-        resolution_class = item.get("resolution_class")
-        if resolution_class == OPERATOR_RESOLUTION_CLASS:
-            continue
-        grouped.setdefault(resolution_class, []).append({
-            "target_path": item.get("path"),
-            "norm_refs": item.get("norm_refs", []),
-            "constraints": item.get("constraints", []),
-            "uncertainty_ids": item.get("uncertainty_ids", []),
-        })
-    reason = (
-        "Runtime gate is HOLD, but no unresolved target is owned by the "
-        "operator. The conditional semantic candidate remains available."
-    )
-    required_inputs = candidate.trace.to_dict()["required_inputs"]
+    system_targets = [{
+        "target_id": f"system_issue:{index}",
+        "kind": "SYSTEM_COMPLIANCE_HOLD",
+        "description": (
+            f"{issue.get('path', '$')}: "
+            f"{issue.get('instruction') or reason}"
+        ),
+        "target_path": None,
+        "norm_refs": [],
+        "source_resolution_class": "SYSTEM_HOLD",
+        "resolution_owner": "OPERATOR",
+    } for index, issue in enumerate(issues)]
+    if not system_targets:
+        system_targets = [{
+            "target_id": "system_issue:hold",
+            "kind": "SYSTEM_COMPLIANCE_HOLD",
+            "description": reason,
+            "target_path": None,
+            "norm_refs": [],
+            "source_resolution_class": "SYSTEM_HOLD",
+            "resolution_owner": "OPERATOR",
+        }]
+    resolution_modes = [{
+        "mode": CHANGE_SCOPE,
+        "available": True,
+        "effect": (
+            "Change only the semantic selector scope and request a fresh "
+            "calculation for the same phase."
+        ),
+        "preserves_unknowns": True,
+    }, {
+        "mode": TERMINATE_CYCLE,
+        "available": True,
+        "effect": (
+            "End the cycle by explicit operator decision without PASS or "
+            "another semantic calculation."
+        ),
+        "preserves_unknowns": True,
+    }]
     hold_record = build_hold_record(
         semantic_input=semantic_input,
-        core_ref=candidate.core_ref.to_dict(),
+        core_ref=core_ref,
         session_id=session_id,
         hold_reason=reason,
-        unknowns=candidate.unknowns,
-        open_debts=_hold_open_debts(candidate, required_inputs),
+        unknowns=semantic_input.unknowns,
+        open_debts=("host-semantic-submission-compliance",),
         cycle_id=cycle_id,
     )
     blocking_precondition = _blocking_precondition(
         hold_record,
-        [],
+        resolution_modes,
     )
+    token, claims = codec.issue({
+        "session_id": session_id,
+        "resume_count": resume_count,
+        "semantic_input": semantic_input.to_prompt_dict(),
+        "core_ref": dict(core_ref),
+        "operator_decision": (
+            dict(operator_decision)
+            if isinstance(operator_decision, Mapping)
+            else None
+        ),
+        "hold": {
+            "hold_record": hold_record,
+            "blocking_precondition": blocking_precondition,
+            "semantic_unknowns": [],
+            "predicate_inputs": [],
+            "system_targets": system_targets,
+        },
+    })
     return {
         "handoff_version": HOLD_HANDOFF_VERSION,
-        "status": "resolution_not_operator_owned",
+        "status": "operator_input_required",
+        "resolution_owner": "OPERATOR",
         "reason": reason,
         "hold_record": hold_record,
         "blocking_precondition": blocking_precondition,
-        "required_operator_input": None,
-        "resolution_summary": {
-            key: values
-            for key, values in sorted(grouped.items())
-            if key and values
+        "required_operator_input": {
+            "question": (
+                "Operator decision required: change semantic scope for a fresh "
+                "same-phase calculation, or terminate this cycle."
+            ),
+            "resolution_modes": resolution_modes,
+            "semantic_unknowns": [],
+            "predicate_inputs": [],
+            "system_targets": system_targets,
+            "response_contract": {
+                "resolution_mode": (
+                    "Required. Use CHANGE_SCOPE or TERMINATE_CYCLE."
+                ),
+                "statement": "Required explicit operator decision.",
+                "values": "Must be empty.",
+                "resolved_unknowns": "Must be empty.",
+                "scope": "Required only for CHANGE_SCOPE.",
+            },
         },
+        "continuation_token": token,
+        "expires_at": continuation_expiry_iso(claims),
         "resume_count": resume_count,
     }
 
@@ -454,6 +553,7 @@ def build_hold_record(
         },
     )
     material = {
+        "hold_id": f"hold-{uuid4()}",
         "cycle_id": resolved_cycle_id,
         "return_state": semantic_input.phase,
         "return_gate": semantic_input.phase,
@@ -552,6 +652,7 @@ def resume_hold(state, resume):
         "blocking_precondition",
         "semantic_unknowns",
         "predicate_inputs",
+        "system_targets",
     }:
         raise InvalidContinuationToken(
             "continuation_token HOLD state is invalid."
@@ -573,6 +674,10 @@ def resume_hold(state, resume):
         hold.get("predicate_inputs", []),
         "hold.predicate_inputs",
     )
+    system_targets = _continuation_system_target_array(
+        hold.get("system_targets", []),
+        "hold.system_targets",
+    )
     allowed_paths = {
         item["target_path"]
         for item in (*semantic_unknowns, *predicate_inputs)
@@ -589,7 +694,11 @@ def resume_hold(state, resume):
         )
     unknown_resolutions = (
         set(operator_input["resolved_unknowns"])
-        - {item["unknown_id"] for item in semantic_unknowns}
+        - {
+            item["unknown_id"]
+            for item in semantic_unknowns
+            if item["source_resolution_class"] == "OPERATOR_INPUT"
+        }
     )
     if unknown_resolutions:
         raise InvalidContinuationToken(
@@ -610,12 +719,22 @@ def resume_hold(state, resume):
             predicate_inputs,
             operator_input,
         )
-    else:
+    elif resolution_mode == CONFIRM_ASSUMPTION:
+        _require_confirmed_assumption(
+            semantic_unknowns,
+            predicate_inputs,
+            operator_input,
+        )
+    elif resolution_mode == ALLOW_CONDITIONAL_PROCEEDING:
         _require_conditional_proceeding_resolution(
             semantic_unknowns,
             predicate_inputs,
             operator_input,
         )
+    elif resolution_mode == CHANGE_SCOPE:
+        _require_scope_change(operator_input)
+    else:
+        _require_cycle_termination(operator_input)
 
     facts = _continuation_object(snapshot.get("facts"), "facts")
     authority = _continuation_object(
@@ -627,20 +746,6 @@ def resume_hold(state, resume):
         "evidence",
     )
     if resolution_mode == PROVIDE_INFORMATION:
-        for path, value in operator_input["values"].items():
-            _apply_operator_value(facts, authority, path, value)
-        evidence.append({
-            "source": "operator",
-            "kind": "hold_information_resolution",
-            "resolution_mode": resolution_mode,
-            "blocking_precondition_id": blocking_precondition[
-                "precondition_id"
-            ],
-            "statement": operator_input["statement"],
-            "values": operator_input["values"],
-            "resolved_unknowns": operator_input["resolved_unknowns"],
-            "hold_record": hold_record,
-        })
         resolved_descriptions = {
             item["description"]
             for item in semantic_unknowns
@@ -653,23 +758,6 @@ def resume_hold(state, resume):
             for description in item["uncertainty_descriptions"]
         )
     else:
-        preserved_unknown_ids = [
-            item["unknown_id"]
-            for item in semantic_unknowns
-        ]
-        evidence.append({
-            "source": "operator",
-            "kind": "hold_precondition_resolution",
-            "resolution_mode": resolution_mode,
-            "blocking_precondition_id": blocking_precondition[
-                "precondition_id"
-            ],
-            "statement": operator_input["statement"],
-            "unknowns_preserved": preserved_unknown_ids,
-            "hold_record": hold_record,
-            "does_not_establish_facts": True,
-            "does_not_force_gate": "PASS",
-        })
         resolved_descriptions = set()
     remaining_unknowns = [
         item
@@ -679,6 +767,107 @@ def resume_hold(state, resume):
         )
         if item not in resolved_descriptions
     ]
+    scope_change = operator_input["scope"] or {}
+    operator_decision = {
+        "decision_version": OPERATOR_DECISION_VERSION,
+        "decision_id": f"operator-decision-{uuid4()}",
+        "actor": "OPERATOR",
+        "hold_id": hold_record["hold_id"],
+        "cycle_id": hold_record["cycle_id"],
+        "state_hash": hold_record["state_hash"],
+        "blocking_precondition_id": blocking_precondition[
+            "precondition_id"
+        ],
+        "resolution_mode": resolution_mode,
+        "statement": operator_input["statement"],
+        "target_ids": [
+            item["target_id"]
+            for item in system_targets
+        ],
+        "values": dict(operator_input["values"]),
+        "resolved_unknowns": list(
+            operator_input["resolved_unknowns"]
+        ),
+        "scope_change": dict(scope_change),
+        "unknowns_preserved": (
+            list(dict.fromkeys((
+                *(
+                    item["unknown_id"]
+                    for item in semantic_unknowns
+                    if item["unknown_id"]
+                    not in operator_input["resolved_unknowns"]
+                ),
+                *(
+                    uncertainty_id
+                    for item in predicate_inputs
+                    for uncertainty_id in item[
+                        "uncertainty_ids"
+                    ]
+                ),
+            )))
+            if resolution_mode != PROVIDE_INFORMATION
+            else []
+        ),
+        "predicate_paths": [
+            item["target_path"]
+            for item in predicate_inputs
+        ],
+        "conditionally_non_blocking_paths": (
+            [
+                item["target_path"]
+                for item in predicate_inputs
+                if _conditional_path_allowed(item["target_path"])
+            ]
+            if resolution_mode == ALLOW_CONDITIONAL_PROCEEDING
+            else []
+        ),
+        "conditionally_non_blocking_unknown_ids": (
+            list(dict.fromkeys((
+                *(
+                    item["unknown_id"]
+                    for item in semantic_unknowns
+                    if _conditional_path_allowed(
+                        item.get("target_path")
+                    )
+                ),
+                *(
+                    uncertainty_id
+                    for item in predicate_inputs
+                    if _conditional_path_allowed(
+                        item.get("target_path")
+                    )
+                    for uncertainty_id in item[
+                        "uncertainty_ids"
+                    ]
+                ),
+            )))
+            if resolution_mode == ALLOW_CONDITIONAL_PROCEEDING
+            else []
+        ),
+        "conditionally_non_blocking_norm_refs": (
+            list(dict.fromkeys(
+                norm_ref
+                for item in (*semantic_unknowns, *predicate_inputs)
+                if _conditional_path_allowed(item.get("target_path"))
+                for norm_ref in item["norm_refs"]
+            ))
+            if resolution_mode == ALLOW_CONDITIONAL_PROCEEDING
+            else []
+        ),
+        "conditional_authorized": (
+            resolution_mode == ALLOW_CONDITIONAL_PROCEEDING
+        ),
+        "does_not_write_memory": True,
+        "does_not_establish_fact_or_evidence": True,
+        "gate_forced": False,
+        "gate_recheck_required": (
+            resolution_mode != TERMINATE_CYCLE
+        ),
+    }
+    operator_decision = _merge_operator_decision(
+        state.get("operator_decision"),
+        operator_decision,
+    )
     try:
         semantic_input = SemanticInput(
             phenomenon=snapshot["phenomenon"],
@@ -687,10 +876,22 @@ def resume_hold(state, resume):
             unknowns=remaining_unknowns,
             evidence=evidence,
             authority=authority,
-            active_layers=snapshot["active_layers"],
-            triggers=snapshot["triggers"],
-            applicability_scopes=snapshot["applicability_scopes"],
-            requested_norm_refs=snapshot["requested_norm_refs"],
+            active_layers=scope_change.get(
+                "active_layers",
+                snapshot["active_layers"],
+            ),
+            triggers=scope_change.get(
+                "triggers",
+                snapshot["triggers"],
+            ),
+            applicability_scopes=scope_change.get(
+                "applicability_scopes",
+                snapshot["applicability_scopes"],
+            ),
+            requested_norm_refs=scope_change.get(
+                "requested_norm_refs",
+                snapshot["requested_norm_refs"],
+            ),
             evaluate_inactive=snapshot["evaluate_inactive"],
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -702,6 +903,7 @@ def resume_hold(state, resume):
         cycle_id=hold_record["cycle_id"],
         hold_record=hold_record,
         precondition_resolution={
+            "operator_decision": operator_decision,
             "precondition_id": blocking_precondition[
                 "precondition_id"
             ],
@@ -715,9 +917,13 @@ def resume_hold(state, resume):
             "return_state": hold_record["return_state"],
             "return_gate": hold_record["return_gate"],
             "preserved_hold_record": hold_record,
-            "gate_recheck_required": True,
+            "gate_recheck_required": (
+                resolution_mode != TERMINATE_CYCLE
+            ),
             "gate_forced": False,
         },
+        operator_decision=operator_decision,
+        terminated=resolution_mode == TERMINATE_CYCLE,
     )
 
 
@@ -731,16 +937,91 @@ def trace_handoff(hold):
     }
 
 
+def _merge_operator_decision(previous, current):
+    if not isinstance(previous, Mapping):
+        return current
+    if (
+        previous.get("decision_version") != OPERATOR_DECISION_VERSION
+        or previous.get("actor") != "OPERATOR"
+        or previous.get("cycle_id") != current["cycle_id"]
+    ):
+        raise InvalidContinuationToken(
+            "continuation_token prior OperatorDecision is invalid."
+        )
+    merged_values = {
+        **dict(previous.get("values", {})),
+        **dict(current.get("values", {})),
+    }
+    supplied_paths = set(current.get("values", {}))
+    conditional_paths = list(dict.fromkeys((
+        *previous.get("conditionally_non_blocking_paths", []),
+        *current.get("conditionally_non_blocking_paths", []),
+    )))
+    conditional_paths = [
+        path
+        for path in conditional_paths
+        if path not in supplied_paths
+    ]
+    decision_history = [
+        *previous.get("decision_history", [{
+            "decision_id": previous.get("decision_id"),
+            "resolution_mode": previous.get("resolution_mode"),
+            "statement": previous.get("statement"),
+        }]),
+        {
+            "decision_id": current["decision_id"],
+            "resolution_mode": current["resolution_mode"],
+            "statement": current["statement"],
+        },
+    ]
+    return {
+        **current,
+        "values": merged_values,
+        "resolved_unknowns": list(dict.fromkeys((
+            *previous.get("resolved_unknowns", []),
+            *current.get("resolved_unknowns", []),
+        ))),
+        "unknowns_preserved": list(dict.fromkeys((
+            *previous.get("unknowns_preserved", []),
+            *current.get("unknowns_preserved", []),
+        ))),
+        "conditionally_non_blocking_paths": conditional_paths,
+        "conditionally_non_blocking_unknown_ids": list(dict.fromkeys((
+            *previous.get(
+                "conditionally_non_blocking_unknown_ids",
+                [],
+            ),
+            *current.get(
+                "conditionally_non_blocking_unknown_ids",
+                [],
+            ),
+        ))),
+        "conditionally_non_blocking_norm_refs": list(dict.fromkeys((
+            *previous.get(
+                "conditionally_non_blocking_norm_refs",
+                [],
+            ),
+            *current.get(
+                "conditionally_non_blocking_norm_refs",
+                [],
+            ),
+        ))),
+        "conditional_authorized": bool(
+            conditional_paths
+            or current.get("conditionally_non_blocking_unknown_ids")
+            or previous.get("conditional_authorized")
+        ),
+        "decision_history": decision_history,
+    }
+
+
 def _semantic_unknown_resolutions(candidate, required_inputs):
     result = []
     predicate_paths = {
         item.get("path")
         for item in required_inputs
-        if item.get("resolution_class") == OPERATOR_RESOLUTION_CLASS
     }
     for uncertainty in candidate.uncertainties:
-        if uncertainty.resolution_class != OPERATOR_RESOLUTION_CLASS:
-            continue
         target_path = uncertainty.target_path
         if target_path in predicate_paths:
             continue
@@ -760,7 +1041,12 @@ def _semantic_unknown_resolutions(candidate, required_inputs):
             ),
             "norm_refs": list(uncertainty.norm_refs),
             "core_refs": list(uncertainty.core_refs),
-            "question": uncertainty.operator_question,
+            "source_resolution_class": uncertainty.resolution_class,
+            "resolution_owner": "OPERATOR",
+            "question": (
+                uncertainty.operator_question
+                or "State the operator decision for this unresolved condition."
+            ),
         })
     return result
 
@@ -768,11 +1054,6 @@ def _semantic_unknown_resolutions(candidate, required_inputs):
 def _predicate_operator_inputs(required_inputs):
     result = []
     for item in required_inputs:
-        if (
-            item.get("resolution_class")
-            != OPERATOR_RESOLUTION_CLASS
-        ):
-            continue
         path = _operator_path(item.get("path"))
         constraints = item.get("constraints", [])
         if not isinstance(constraints, list):
@@ -792,28 +1073,82 @@ def _predicate_operator_inputs(required_inputs):
             "uncertainty_descriptions": list(
                 item.get("uncertainty_descriptions", [])
             ),
+            "source_resolution_class": item.get(
+                "resolution_class",
+                "UNRESOLVABLE_LIMITATION",
+            ),
+            "resolution_owner": "OPERATOR",
             "question": (
-                f"Provide the observed value for Core selector {path}. "
-                "The value that makes a predicate true is not assumed."
+                f"Provide or confirm the current-cycle operator value for Core "
+                f"selector {path}. The value that makes a predicate true is "
+                "not assumed."
             ),
         })
     return result
 
 
-def _conditional_proceeding_allowed(
+def _system_hold_targets(
+    candidate,
     semantic_unknowns,
     predicate_inputs,
 ):
-    return (
-        bool(semantic_unknowns)
-        and not predicate_inputs
-        and all(
-            item["target_path"] is None
-            and not item["norm_refs"]
-            and not item["core_refs"]
-            for item in semantic_unknowns
-        )
-    )
+    result = []
+    for item in semantic_unknowns:
+        result.append({
+            "target_id": f"semantic_unknown:{item['unknown_id']}",
+            "kind": "SEMANTIC_UNKNOWN",
+            "description": item["description"],
+            "target_path": item["target_path"],
+            "norm_refs": list(item["norm_refs"]),
+            "source_resolution_class": item[
+                "source_resolution_class"
+            ],
+            "resolution_owner": "OPERATOR",
+        })
+    for item in predicate_inputs:
+        result.append({
+            "target_id": f"predicate_input:{item['input_id']}",
+            "kind": "FORMAL_PREDICATE_INPUT",
+            "description": item["question"],
+            "target_path": item["target_path"],
+            "norm_refs": list(item["norm_refs"]),
+            "source_resolution_class": item[
+                "source_resolution_class"
+            ],
+            "resolution_owner": "OPERATOR",
+        })
+    represented_norms = {
+        norm_ref
+        for item in result
+        for norm_ref in item["norm_refs"]
+    }
+    for index, issue in enumerate(candidate.validation_issues):
+        norm_refs = list(issue.norm_refs)
+        if norm_refs and set(norm_refs).issubset(represented_norms):
+            continue
+        result.append({
+            "target_id": f"validation_issue:{issue.code}:{index}",
+            "kind": "RUNTIME_GATE_ISSUE",
+            "description": issue.message,
+            "target_path": None,
+            "norm_refs": norm_refs,
+            "source_resolution_class": "SYSTEM_HOLD",
+            "resolution_owner": "OPERATOR",
+        })
+    if not result:
+        result.append({
+            "target_id": "runtime_gate:hold",
+            "kind": "RUNTIME_GATE_HOLD",
+            "description": (
+                "The semantic calculator retained HOLD without a more specific "
+                "machine-resolvable target."
+            ),
+            "target_path": None,
+            "norm_refs": [],
+            "source_resolution_class": "SYSTEM_HOLD",
+            "resolution_owner": "OPERATOR",
+        })
+    return result
 
 
 def _hold_open_debts(candidate, required_inputs):
@@ -837,6 +1172,7 @@ def _blocking_precondition(hold_record, resolution_modes):
         if item.get("available")
     ]
     digest = hashlib.sha256(_canonical_json({
+        "hold_id": hold_record["hold_id"],
         "cycle_id": hold_record["cycle_id"],
         "return_state": hold_record["return_state"],
         "state_hash": hold_record["state_hash"],
@@ -846,6 +1182,7 @@ def _blocking_precondition(hold_record, resolution_modes):
         "precondition_id": f"hold-precondition-{digest}",
         "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
         "status": "UNRESOLVED",
+        "owner": "OPERATOR",
         "description": hold_record["hold_reason"],
         "resolution_options": available_modes,
     }
@@ -873,11 +1210,14 @@ def _hold_question(
                 for item in predicate_inputs[:5]
             )
         )
+    if not parts:
+        parts.append("resolve the signed Runtime gate issue")
     question = "Operator input required: " + "; ".join(parts) + "."
     if conditional_proceeding_allowed:
         question += (
-            " You may instead authorize bounded conditional recalculation; "
-            "this preserves every unknown and does not force PASS."
+            " You may provide values, confirm assumptions, authorize bounded "
+            "conditional recalculation, change semantic scope, or terminate "
+            "the cycle. No operator mode forces PASS."
         )
     return question
 
@@ -917,6 +1257,7 @@ def _normalize_operator_input(value):
         "statement",
         "values",
         "resolved_unknowns",
+        "scope",
     }
     if not set(value).issubset(allowed_fields):
         raise InvalidContinuationToken(
@@ -950,15 +1291,23 @@ def _normalize_operator_input(value):
             raw_resolved,
             "operator_input.resolved_unknowns",
         )
-    if not statement and not values:
+    raw_scope = value.get("scope")
+    scope = (
+        None
+        if raw_scope is None
+        else _normalize_scope_change(raw_scope)
+    )
+    if not statement and not values and scope is None:
         raise InvalidContinuationToken(
-            "resume.operator_input requires a statement or a confirmed value."
+            "resume.operator_input requires a statement, a confirmed value, "
+            "or a scope change."
         )
     return {
         "resolution_mode": resolution_mode,
         "statement": statement,
         "values": values,
         "resolved_unknowns": resolved_unknowns,
+        "scope": scope,
     }
 
 
@@ -971,6 +1320,8 @@ def _require_complete_operator_resolution(
     supplied_paths = set(operator_input["values"])
     missing = []
     for item in semantic_unknowns:
+        if item["source_resolution_class"] != "OPERATOR_INPUT":
+            continue
         unknown_id = item["unknown_id"]
         if unknown_id not in resolved_unknowns:
             missing.append(f"semantic_unknown:{unknown_id}")
@@ -989,6 +1340,39 @@ def _require_complete_operator_resolution(
             "Operator input does not close every signed HOLD target: "
             f"{sorted(set(missing))}"
         )
+    if operator_input["scope"] is not None:
+        raise InvalidContinuationToken(
+            "PROVIDE_INFORMATION cannot change semantic scope."
+        )
+
+
+def _require_confirmed_assumption(
+    semantic_unknowns,
+    predicate_inputs,
+    operator_input,
+):
+    missing_paths = sorted(
+        item["target_path"]
+        for item in predicate_inputs
+        if item["target_path"] not in operator_input["values"]
+    )
+    if missing_paths:
+        raise IncompleteOperatorResolution(
+            "Confirmed assumptions must cover every signed formal target: "
+            f"{missing_paths}"
+        )
+    if not operator_input["statement"]:
+        raise IncompleteOperatorResolution(
+            "Confirmed assumptions require an explicit operator statement."
+        )
+    if operator_input["resolved_unknowns"]:
+        raise InvalidContinuationToken(
+            "CONFIRM_ASSUMPTION preserves unknowns and cannot mark them resolved."
+        )
+    if operator_input["scope"] is not None:
+        raise InvalidContinuationToken(
+            "CONFIRM_ASSUMPTION cannot change semantic scope."
+        )
 
 
 def _require_conditional_proceeding_resolution(
@@ -996,16 +1380,6 @@ def _require_conditional_proceeding_resolution(
     predicate_inputs,
     operator_input,
 ):
-    if predicate_inputs or any(
-        item["target_path"] is not None
-        or item["norm_refs"]
-        or item["core_refs"]
-        for item in semantic_unknowns
-    ):
-        raise IncompleteOperatorResolution(
-            "Conditional proceeding cannot replace a signed value, authority, "
-            "Core reference, or norm-linked evidence requirement."
-        )
     if not operator_input["statement"]:
         raise IncompleteOperatorResolution(
             "Conditional proceeding requires an explicit operator statement."
@@ -1015,6 +1389,84 @@ def _require_conditional_proceeding_resolution(
             "Conditional proceeding must not provide values or mark unknowns "
             "resolved."
         )
+    if operator_input["scope"] is not None:
+        raise InvalidContinuationToken(
+            "Conditional proceeding cannot change semantic scope."
+        )
+
+
+def _require_scope_change(operator_input):
+    if operator_input["scope"] is None:
+        raise IncompleteOperatorResolution(
+            "CHANGE_SCOPE requires an explicit semantic scope object."
+        )
+    if not operator_input["statement"]:
+        raise IncompleteOperatorResolution(
+            "CHANGE_SCOPE requires an explicit operator statement."
+        )
+    if operator_input["values"] or operator_input["resolved_unknowns"]:
+        raise InvalidContinuationToken(
+            "CHANGE_SCOPE cannot provide target values or resolve unknowns."
+        )
+
+
+def _require_cycle_termination(operator_input):
+    if not operator_input["statement"]:
+        raise IncompleteOperatorResolution(
+            "TERMINATE_CYCLE requires an explicit operator statement."
+        )
+    if (
+        operator_input["values"]
+        or operator_input["resolved_unknowns"]
+        or operator_input["scope"] is not None
+    ):
+        raise InvalidContinuationToken(
+            "TERMINATE_CYCLE cannot provide values, resolve unknowns, or "
+            "change semantic scope."
+        )
+
+
+def _normalize_scope_change(value):
+    if not isinstance(value, Mapping):
+        raise InvalidContinuationToken(
+            "operator_input.scope must be an object."
+        )
+    allowed = {
+        "active_layers",
+        "triggers",
+        "applicability_scopes",
+        "requested_norm_refs",
+    }
+    if not value or not set(value).issubset(allowed):
+        raise InvalidContinuationToken(
+            "operator_input.scope must contain one or more supported semantic "
+            "selector arrays."
+        )
+    return {
+        field: _continuation_string_array(
+            nested,
+            f"operator_input.scope.{field}",
+        )
+        for field, nested in value.items()
+    }
+
+
+def _conditional_path_allowed(path):
+    if path is None:
+        return True
+    normalized = path.lower().replace("-", "_")
+    return not any(
+        marker in normalized
+        for marker in (
+            "authority",
+            "authorization",
+            "evidence",
+            "proof",
+            "owner",
+            "revision",
+            "transition",
+        )
+    )
 
 
 def _expected_path_type(path, required_inputs):
@@ -1100,35 +1552,6 @@ def _operator_json_value(value):
     return value
 
 
-def _apply_operator_value(facts, authority, path, value):
-    parts = path.split(".")
-    root = parts[0]
-    if root in {"authority", "authorization"}:
-        _set_nested(authority, parts[1:], value)
-        _set_nested(facts, parts, value)
-        return
-    _set_nested(facts, parts, value)
-
-
-def _set_nested(target, parts, value):
-    if not parts:
-        raise InvalidContinuationToken(
-            "Operator input cannot replace a complete semantic container."
-        )
-    current = target
-    for part in parts[:-1]:
-        nested = current.get(part)
-        if nested is None:
-            nested = {}
-            current[part] = nested
-        if not isinstance(nested, dict):
-            raise InvalidContinuationToken(
-                "Operator input path conflicts with existing semantic data."
-            )
-        current = nested
-    current[parts[-1]] = value
-
-
 def _continuation_object(value, label):
     if not isinstance(value, Mapping):
         raise InvalidContinuationToken(
@@ -1161,6 +1584,8 @@ def _continuation_resolution_array(value, label):
         "expected_type",
         "norm_refs",
         "core_refs",
+        "source_resolution_class",
+        "resolution_owner",
         "question",
     }
     result = []
@@ -1197,6 +1622,14 @@ def _continuation_resolution_array(value, label):
                 item["core_refs"],
                 f"{label}[{index}].core_refs",
             ),
+            "source_resolution_class": continuation_text(
+                item,
+                "source_resolution_class",
+            ),
+            "resolution_owner": _operator_owner(
+                item,
+                "resolution_owner",
+            ),
             "question": continuation_text(item, "question"),
         })
     return result
@@ -1208,6 +1641,7 @@ def _continuation_hold_record(value, semantic_input, core_ref):
             "continuation_token hold.hold_record fields are invalid."
         )
     record = {
+        "hold_id": continuation_text(value, "hold_id"),
         "cycle_id": continuation_text(value, "cycle_id"),
         "return_state": continuation_text(value, "return_state"),
         "return_gate": continuation_text(value, "return_gate"),
@@ -1269,6 +1703,7 @@ def _continuation_blocking_precondition(value, hold_record):
         "precondition_id",
         "condition",
         "status",
+        "owner",
         "description",
         "resolution_options",
     }
@@ -1279,6 +1714,7 @@ def _continuation_blocking_precondition(value, hold_record):
     condition = continuation_text(value, "condition")
     status = continuation_text(value, "status")
     description = continuation_text(value, "description")
+    owner = _operator_owner(value, "owner")
     options = _continuation_string_array(
         value["resolution_options"],
         "hold.blocking_precondition.resolution_options",
@@ -1299,6 +1735,7 @@ def _continuation_blocking_precondition(value, hold_record):
         ),
         "condition": condition,
         "status": status,
+        "owner": owner,
         "description": description,
         "resolution_options": options,
     }
@@ -1315,6 +1752,8 @@ def _continuation_predicate_input_array(value, label):
         "constraints",
         "uncertainty_ids",
         "uncertainty_descriptions",
+        "source_resolution_class",
+        "resolution_owner",
         "question",
     }
     result = []
@@ -1364,9 +1803,74 @@ def _continuation_predicate_input_array(value, label):
                 item["uncertainty_descriptions"],
                 f"{label}[{index}].uncertainty_descriptions",
             ),
+            "source_resolution_class": continuation_text(
+                item,
+                "source_resolution_class",
+            ),
+            "resolution_owner": _operator_owner(
+                item,
+                "resolution_owner",
+            ),
             "question": continuation_text(item, "question"),
         })
     return result
+
+
+def _continuation_system_target_array(value, label):
+    items = _continuation_object_array(value, label)
+    required = {
+        "target_id",
+        "kind",
+        "description",
+        "target_path",
+        "norm_refs",
+        "source_resolution_class",
+        "resolution_owner",
+    }
+    result = []
+    seen = set()
+    for index, item in enumerate(items):
+        if set(item) != required:
+            raise InvalidContinuationToken(
+                f"continuation_token {label}[{index}] fields are invalid."
+            )
+        target_id = continuation_text(item, "target_id")
+        if target_id in seen:
+            raise InvalidContinuationToken(
+                f"continuation_token {label} contains duplicate target_id."
+            )
+        seen.add(target_id)
+        target_path = item["target_path"]
+        if target_path is not None:
+            target_path = _operator_path(target_path)
+        result.append({
+            "target_id": target_id,
+            "kind": continuation_text(item, "kind"),
+            "description": continuation_text(item, "description"),
+            "target_path": target_path,
+            "norm_refs": _continuation_string_array(
+                item["norm_refs"],
+                f"{label}[{index}].norm_refs",
+            ),
+            "source_resolution_class": continuation_text(
+                item,
+                "source_resolution_class",
+            ),
+            "resolution_owner": _operator_owner(
+                item,
+                "resolution_owner",
+            ),
+        })
+    return result
+
+
+def _operator_owner(value, field):
+    owner = continuation_text(value, field)
+    if owner != "OPERATOR":
+        raise InvalidContinuationToken(
+            f"continuation_token {field} must be OPERATOR."
+        )
+    return owner
 
 
 def _continuation_string_array(value, label):

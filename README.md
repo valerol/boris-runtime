@@ -158,12 +158,12 @@ The response uses `execution_version: "boris-execution/1.0"` and
 result, norm results, unknowns, conflicts, alternatives, and explicit
 typed uncertainties, and limitations. `HOLD`, `STOP`, and `REPAIR` are normal
 HTTP 200 Runtime results.
-Every unresolved item also has a typed ownership and resolution route.
-`boris-hold-handoff/1.3` adds a Core-compatible `hold_record` and separates the
-blocking precondition from retained `semantic_unknowns`, `predicate_inputs`,
-and open debts. A non-operator `HOLD` keeps the conditional candidate and
-returns `resolution_not_operator_owned` without a token. Resume an
-operator-owned route without resending the original input:
+Every unresolved item also has a typed source classification and resolution
+route. `boris-hold-handoff/1.4` assigns every recoverable system `HOLD` to the
+operator until operator-machine delegation exists. It adds a Core-compatible
+`hold_record`, including `hold_id`, and separates the signed blocking
+precondition from retained `semantic_unknowns`, formal `predicate_inputs`,
+system targets, and open debts. Resume without resending the original input:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/runtime/execute \
@@ -183,14 +183,17 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
 ```
 
 The token binds the exact `SemanticInput`, Core identity, session, `HoldRecord`,
-blocking precondition, targets, and expiry. `PROVIDE_INFORMATION` skips the
-Semantic Input compiler, applies only signed operator-input paths, and requires
-complete target closure. `ALLOW_CONDITIONAL_PROCEEDING` is available only when
-no signed path, authority, Core reference, or norm-linked evidence requirement
-would be bypassed. It preserves every unknown and open debt, records only the
-operator scope decision as evidence, and recalculates the same phase without
-forcing `PASS`. Runtime returns `incomplete_operator_resolution` without
-recalculation when the selected mode cannot resolve the signed precondition.
+blocking precondition, system targets, prior current-cycle decisions, and
+expiry. Runtime records the response as
+`boris-operator-decision/1.0`, not as a fact, evidence item, authority grant, or
+memory write. Available modes are `PROVIDE_INFORMATION`,
+`CONFIRM_ASSUMPTION`, `ALLOW_CONDITIONAL_PROCEEDING`, `CHANGE_SCOPE`, and
+`TERMINATE_CYCLE`. Value modes use only signed selector paths during the
+same-phase recalculation. Conditional proceeding preserves unknowns and may
+remove only signed non-authority, non-proof targets from the blocking set.
+Scope change replaces only verified semantic selectors. Termination ends the
+cycle without another semantic calculation. No mode forces `PASS`, weakens
+`STOP`, or creates authority.
 Empty
 `candidate_result: {}` is never exposed: `HOLD` uses `null` plus
 `candidate_unavailable_reason`; other gates require a non-empty candidate.
@@ -261,10 +264,12 @@ diagnostics containing `code`, JSON `path`, `received`, `expected`, and
 `instruction`. The correction preserves the original semantic scope and names
 the current phase as its return state. It is not canonical `REPAIR`, whose
 Core contract requires a new revision and new cycle. If that single correction
-submission is also invalid, Runtime returns `HOLD` with no
-candidate and no further work order.
+submission is also invalid, Runtime returns `HOLD` with no candidate and no
+third automatic work order. That compliance `HOLD` is still operator-owned:
+the operator may change semantic scope for a fresh calculation or terminate
+the cycle.
 
-Every work order is single-use. An operator-owned HOLD can be resumed with
+Every work order is single-use. A system HOLD can be resumed with
 `operation: "prepare"` plus the ordinary signed `resume` object; resume skips
 compilation and starts directly with a `CALCULATION` work order.
 

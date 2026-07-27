@@ -365,27 +365,26 @@ def test_runtime_execute_hold_is_a_normal_runtime_result(monkeypatch):
     )
 
 
-def test_runtime_execute_accepts_non_operator_hold_without_token(
+def test_runtime_execute_accepts_operator_terminated_hold_without_token(
     monkeypatch,
 ):
-    class NonOperatorHoldService(FakeExecutionService):
+    class TerminatedHoldService(FakeExecutionService):
         def execute(self, *args, **kwargs):
             packet = super().execute(*args, **kwargs)
-            packet["uncertainties"] = [{
-                "uncertainty_id": "future-event",
-                "description": "A future event remains contingent.",
-                "resolution_class": "FUTURE_CONTINGENT",
-            }]
             packet["hold"] = {
-                "handoff_version": "boris-hold-handoff/1.3",
-                "status": "resolution_not_operator_owned",
-                "reason": "No unresolved target is operator-owned.",
+                "handoff_version": "boris-hold-handoff/1.4",
+                "status": "operator_terminated",
+                "resolution_owner": "OPERATOR",
+                "reason": "The operator terminated this cycle.",
                 "hold_record": hold_record(),
-                "blocking_precondition": blocking_precondition([]),
+                "blocking_precondition": {
+                    **blocking_precondition([]),
+                    "status": "RESOLVED",
+                },
                 "required_operator_input": None,
                 "resolution_summary": {
-                    "FUTURE_CONTINGENT": [{
-                        "uncertainty_id": "future-event",
+                    "OPERATOR_DECISION": [{
+                        "resolution_mode": "TERMINATE_CYCLE",
                     }],
                 },
                 "resume_count": 0,
@@ -395,7 +394,7 @@ def test_runtime_execute_accepts_non_operator_hold_without_token(
     monkeypatch.setattr(
         app_module,
         "execution_service",
-        NonOperatorHoldService(),
+        TerminatedHoldService(),
     )
 
     response = client.post(
@@ -405,7 +404,7 @@ def test_runtime_execute_accepts_non_operator_hold_without_token(
     body = response.json()
 
     assert response.status_code == 200
-    assert body["hold"]["status"] == "resolution_not_operator_owned"
+    assert body["hold"]["status"] == "operator_terminated"
     assert body["hold"]["required_operator_input"] is None
     assert "continuation_token" not in body["hold"]
     assert "expires_at" not in body["hold"]
@@ -649,6 +648,7 @@ def execution_packet(session_id, gate="HOLD"):
         "candidate_result": {"summary": "Candidate only."},
         "norm_results": [],
         "unknowns": [],
+        "uncertainties": [],
         "conflicts": [],
         "alternatives": [],
         "limitations": [
@@ -660,8 +660,9 @@ def execution_packet(session_id, gate="HOLD"):
     }
     if gate == "HOLD":
         packet["hold"] = {
-            "handoff_version": "boris-hold-handoff/1.3",
+            "handoff_version": "boris-hold-handoff/1.4",
             "status": "operator_input_required",
+            "resolution_owner": "OPERATOR",
             "reason": "Material information remains unresolved.",
             "hold_record": hold_record(),
             "blocking_precondition": blocking_precondition([
@@ -689,14 +690,26 @@ def execution_packet(session_id, gate="HOLD"):
                     "expected_type": "text",
                     "norm_refs": [],
                     "core_refs": [],
+                    "source_resolution_class": "OPERATOR_INPUT",
+                    "resolution_owner": "OPERATOR",
                     "question": "Resolve: Permission is unknown.",
                 }],
                 "predicate_inputs": [],
+                "system_targets": [{
+                    "target_id": "semantic_unknown:unknown-001",
+                    "kind": "SEMANTIC_UNKNOWN",
+                    "description": "Permission is unknown.",
+                    "target_path": None,
+                    "norm_refs": [],
+                    "source_resolution_class": "OPERATOR_INPUT",
+                    "resolution_owner": "OPERATOR",
+                }],
                 "response_contract": {
                     "resolution_mode": "Required mode.",
                     "statement": "Plain text.",
                     "values": "Optional object.",
                     "resolved_unknowns": "Optional array.",
+                    "scope": "Optional scope object.",
                 },
             },
             "continuation_token": "v1.payload.signature",
@@ -708,6 +721,7 @@ def execution_packet(session_id, gate="HOLD"):
 
 def hold_record():
     return {
+        "hold_id": "hold-1",
         "cycle_id": "cycle-1",
         "return_state": "C03",
         "return_gate": "C03",
@@ -726,6 +740,7 @@ def blocking_precondition(options):
         "precondition_id": "hold-precondition-1",
         "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
         "status": "UNRESOLVED",
+        "owner": "OPERATOR",
         "description": "Material information remains unresolved.",
         "resolution_options": options,
     }

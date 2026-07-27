@@ -14,10 +14,10 @@ Current implemented boundary:
 - ownership-aware uncertainty resolution derived from Core phase capsules;
 - Core-compatible `HoldRecord` projection for every `HOLD`, with the blocking
   precondition separated from unknowns and open debts;
-- signed path-aware HOLD handoff with distinct complete-information and bounded
-  conditional-proceeding resolution modes through the same tool;
-- non-operator HOLD disclosure that preserves the conditional candidate
-  without issuing a continuation token;
+- signed operator resolution for every recoverable system `HOLD`, including
+  formal predicate and final semantic-submission compliance targets;
+- current-cycle `OperatorDecision` with information, assumption, conditional,
+  scope-change, and termination modes, without writing semantic memory;
 - deterministic non-empty candidate projection for any non-`HOLD` route,
   including resume;
 - signed `CHATGPT_HOST_ONLY` compilation and calculation work orders through
@@ -34,14 +34,11 @@ Current implemented boundary:
 - stateless answer validation;
 - consolidated architecture with earlier middleware generations removed.
 
-Immediate next stage:
+Immediate validation target:
 
-- typed Semantic Input:
-  - compile established material into explicit `facts`, `evidence`, and
-    `authority` objects rather than retaining it only in `phenomenon.input`;
-  - preserve source identity, reliability, provenance, and claim linkage;
-  - reject unsupported fact/evidence/authority promotion fail-closed;
-  - add trace links from source material to semantic claims and norm results.
+- production exercise of
+  `HOLD → OperatorDecision → same-phase gate recheck` for a real system
+  predicate and of terminal compliance-HOLD resolution.
 
 Following stages:
 
@@ -50,4 +47,8 @@ Following stages:
 - Policy Kernel;
 - admitted State Events and Cycle Guard;
 - domain physiology and memory;
+- typed `facts`, `evidence`, and domain `authority`, backed by that physiology
+  and memory rather than unverified LLM promotion;
+- delegated `OPERATOR_MACHINE` resolution after a signed authority registry
+  exists;
 - authorized external actions.

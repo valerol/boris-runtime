@@ -219,19 +219,19 @@ error.
 Production output omits diagnostic trace data.
 
 Every `HOLD` contains a Core-compatible `hold_record` and a separate
-`blocking_precondition`. An operator-owned `HOLD` additionally contains
-`hold.required_operator_input`, the available `resolution_modes`, and a signed
-`continuation_token`. `PROVIDE_INFORMATION` closes declared targets;
-`ALLOW_CONDITIONAL_PROCEEDING` preserves every unknown and merely permits the
-same phase to be recalculated. The latter is not offered for formal predicate,
-authority, norm-linked, or Core-linked requirements and never forces `PASS`.
-A `HOLD` caused only by Runtime-owned, future, model, downstream, or
-unresolvable uncertainty returns
-`resolution_not_operator_owned`, preserves the conditional candidate, and
-contains no token. A token contains the exact semantic continuation state but
-no server secret. It is replayable until expiry because this stage has no
-persistent token registry. Apply rate limits to `/mcp`, keep the TTL bounded,
-and rotate `BORIS_CONTINUATION_SECRET` to invalidate all outstanding tokens.
+`blocking_precondition`. Every recoverable system `HOLD` additionally contains
+`resolution_owner: OPERATOR`, `hold.required_operator_input`, exact
+`system_targets`, the available `resolution_modes`, and a signed
+`continuation_token`. `PROVIDE_INFORMATION` and `CONFIRM_ASSUMPTION` supply
+current-cycle selector values; `ALLOW_CONDITIONAL_PROCEEDING` preserves
+unknowns and removes only signed non-authority/non-proof blockers;
+`CHANGE_SCOPE` recalculates the same phase against verified selectors; and
+`TERMINATE_CYCLE` ends the cycle without another work order. No mode forces
+`PASS` or weakens `STOP`. A token contains the exact semantic continuation
+state but no server secret. It is replayable until expiry because this stage
+has no persistent token registry. Apply rate limits to `/mcp`, keep the TTL
+bounded, and rotate `BORIS_CONTINUATION_SECRET` to invalidate all outstanding
+tokens.
 
 `/runtime/frame` returns packets with `packet_version:
 "boris-context/2.0"`, `runtime_mode: "context_provider"`, `llm_called: false`,

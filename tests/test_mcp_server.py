@@ -215,18 +215,22 @@ def test_public_mcp_request_has_no_legacy_operation_selector():
     ).runtime_operation == "submit"
 
 
-def test_non_operator_hold_is_presented_without_inventing_a_question():
+def test_operator_terminated_hold_is_presented_as_terminal():
     packet = _execution_packet()
     packet["hold"] = {
-        "handoff_version": "boris-hold-handoff/1.3",
-        "status": "resolution_not_operator_owned",
-        "reason": "The remaining uncertainty is future-contingent.",
+        "handoff_version": "boris-hold-handoff/1.4",
+        "status": "operator_terminated",
+        "resolution_owner": "OPERATOR",
+        "reason": "The operator terminated this cycle.",
         "hold_record": _hold_record(),
-        "blocking_precondition": _blocking_precondition([]),
+        "blocking_precondition": {
+            **_blocking_precondition([]),
+            "status": "RESOLVED",
+        },
         "required_operator_input": None,
         "resolution_summary": {
-            "FUTURE_CONTINGENT": [{
-                "uncertainty_id": "future-event",
+            "OPERATOR_DECISION": [{
+                "resolution_mode": "TERMINATE_CYCLE",
             }],
         },
         "resume_count": 0,
@@ -239,9 +243,9 @@ def test_non_operator_hold_is_presented_without_inventing_a_question():
     text = response["content"][0]["text"]
 
     assert text.startswith(
-        "BORIS returned HOLD without an operator-owned resolution target."
+        "BORIS confirms that the operator terminated this cycle."
     )
-    assert "Do not ask the operator" in text
+    assert "do not describe the result as PASS or STOP" in text
     assert "resume.continuation_token" not in text
     assert response["structuredContent"] == packet
 
@@ -270,6 +274,7 @@ def _execution_packet():
         "candidate_result": {"summary": "Candidate only."},
         "norm_results": [],
         "unknowns": ["Independent review is absent."],
+        "uncertainties": [],
         "conflicts": [],
         "alternatives": [],
         "limitations": [
@@ -279,8 +284,9 @@ def _execution_packet():
             "no_external_action",
         ],
         "hold": {
-            "handoff_version": "boris-hold-handoff/1.3",
+            "handoff_version": "boris-hold-handoff/1.4",
             "status": "operator_input_required",
+            "resolution_owner": "OPERATOR",
             "reason": "Material information remains unresolved.",
             "hold_record": _hold_record(),
             "blocking_precondition": _blocking_precondition([
@@ -308,9 +314,20 @@ def _execution_packet():
                     "expected_type": "text",
                     "norm_refs": [],
                     "core_refs": [],
+                    "source_resolution_class": "OPERATOR_INPUT",
+                    "resolution_owner": "OPERATOR",
                     "question": "Resolve: Independent review is absent.",
                 }],
                 "predicate_inputs": [],
+                "system_targets": [{
+                    "target_id": "semantic_unknown:unknown-001",
+                    "kind": "SEMANTIC_UNKNOWN",
+                    "description": "Independent review is absent.",
+                    "target_path": None,
+                    "norm_refs": [],
+                    "source_resolution_class": "OPERATOR_INPUT",
+                    "resolution_owner": "OPERATOR",
+                }],
                 "response_contract": {},
             },
             "continuation_token": "v1.payload.signature",
@@ -322,6 +339,7 @@ def _execution_packet():
 
 def _hold_record():
     return {
+        "hold_id": "hold-1",
         "cycle_id": "cycle-1",
         "return_state": "C03",
         "return_gate": "C03",
@@ -340,6 +358,7 @@ def _blocking_precondition(options):
         "precondition_id": "hold-precondition-1",
         "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
         "status": "UNRESOLVED",
+        "owner": "OPERATOR",
         "description": "Material information remains unresolved.",
         "resolution_options": options,
     }

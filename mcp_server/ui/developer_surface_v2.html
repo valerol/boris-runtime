@@ -437,6 +437,15 @@
         id="operator-statement"
         placeholder="Provide the missing fact, decision, or authorization."
       ></textarea>
+      <div id="scope-control" class="hidden">
+        <label for="operator-scope" class="muted">
+          Semantic scope change (JSON object)
+        </label>
+        <textarea
+          id="operator-scope"
+          placeholder='{"requested_norm_refs":["N-..."]}'
+        ></textarea>
+      </div>
       <div class="actions">
         <span id="form-error" class="error" role="alert"></span>
         <button id="resume-button" class="primary" type="button">
@@ -482,6 +491,8 @@
       const unknownList = byId("unknown-list");
       const fieldGrid = byId("field-grid");
       const operatorStatement = byId("operator-statement");
+      const scopeControl = byId("scope-control");
+      const operatorScope = byId("operator-scope");
       const resumeButton = byId("resume-button");
       const formError = byId("form-error");
       const candidateNote = byId("candidate-note");
@@ -622,6 +633,7 @@
         fieldGrid.replaceChildren();
         resolutionMode.replaceChildren();
         operatorStatement.value = "";
+        operatorScope.value = "";
         formError.textContent = "";
 
         if (!hold || hold.status !== "operator_input_required") {
@@ -635,9 +647,14 @@
         for (const mode of required.resolution_modes || []) {
           if (!mode.available) continue;
           const option = new Option(
-            mode.mode === "ALLOW_CONDITIONAL_PROCEEDING"
-              ? "Allow bounded conditional recalculation"
-              : "Provide missing information",
+            ({
+              PROVIDE_INFORMATION: "Provide current-cycle values",
+              CONFIRM_ASSUMPTION: "Confirm explicit assumptions",
+              ALLOW_CONDITIONAL_PROCEEDING:
+                "Allow bounded conditional recalculation",
+              CHANGE_SCOPE: "Change semantic scope",
+              TERMINATE_CYCLE: "Terminate this cycle",
+            })[mode.mode] || mode.mode,
             mode.mode
           );
           option.title = mode.effect || "";
@@ -657,6 +674,17 @@
             : String(unknown.description || unknown.unknown_id || "");
           label.append(checkbox, text);
           item.append(label);
+          unknownList.append(item);
+        }
+        for (const target of required.system_targets || []) {
+          if (
+            target.kind === "SEMANTIC_UNKNOWN"
+            || target.kind === "FORMAL_PREDICATE_INPUT"
+          ) continue;
+          const item = document.createElement("li");
+          item.textContent = String(
+            target.description || target.target_id || ""
+          );
           unknownList.append(item);
         }
 
@@ -707,21 +735,36 @@
       }
 
       function updateResolutionMode() {
+        const mode = resolutionMode.value;
+        const provide = mode === "PROVIDE_INFORMATION";
+        const valueMode =
+          provide || mode === "CONFIRM_ASSUMPTION";
         const conditional =
-          resolutionMode.value === "ALLOW_CONDITIONAL_PROCEEDING";
+          mode === "ALLOW_CONDITIONAL_PROCEEDING";
+        const scopeMode = mode === "CHANGE_SCOPE";
+        const terminate = mode === "TERMINATE_CYCLE";
         for (const checkbox of unknownList.querySelectorAll(
           "input[type=checkbox]"
         )) {
-          checkbox.disabled = conditional;
-          if (conditional) checkbox.checked = false;
+          checkbox.disabled = !provide;
+          if (!provide) checkbox.checked = false;
         }
         for (const control of fieldControls) {
-          control.element.disabled = conditional;
-          if (conditional) control.element.value = "";
+          control.element.disabled = !valueMode;
+          if (!valueMode) control.element.value = "";
         }
-        operatorStatement.placeholder = conditional
-          ? "Explicitly authorize bounded recalculation with all unknowns preserved."
-          : "Provide the missing fact, decision, or authorization.";
+        scopeControl.classList.toggle("hidden", !scopeMode);
+        operatorStatement.placeholder = (
+          conditional
+            ? "Explicitly authorize bounded recalculation with unknowns preserved."
+            : scopeMode
+              ? "Explain the operator-approved scope change."
+              : terminate
+                ? "State why this cycle is being terminated."
+                : mode === "CONFIRM_ASSUMPTION"
+                  ? "Confirm that supplied values are current-cycle assumptions."
+                  : "Provide the current-cycle operator decision."
+        );
       }
 
       function constraintLabel(constraints) {
@@ -806,13 +849,16 @@
           formError.textContent = "Select an available resolution mode.";
           return;
         }
-        const conditional =
-          selectedMode === "ALLOW_CONDITIONAL_PROCEEDING";
+        const provide =
+          selectedMode === "PROVIDE_INFORMATION";
+        const valueMode =
+          provide || selectedMode === "CONFIRM_ASSUMPTION";
+        const scopeMode = selectedMode === "CHANGE_SCOPE";
         const values = {};
         const resolvedUnknowns = new Set(Array.from(
           unknownList.querySelectorAll("input[type=checkbox]:checked")
         ).map((item) => item.dataset.unknown));
-        for (const control of conditional ? [] : fieldControls) {
+        for (const control of valueMode ? fieldControls : []) {
           const value = control.read();
           if (value !== undefined) {
             values[control.path] = value;
@@ -822,22 +868,20 @@
           }
         }
         const statement = operatorStatement.value.trim();
-        if (
-          conditional
-          && !statement
-        ) {
+        if (!statement) {
           formError.textContent =
-            "Conditional recalculation requires an explicit operator statement.";
+            "Every operator decision requires an explicit statement.";
           return;
         }
-        if (
-          !conditional
-          && !statement
-          && !Object.keys(values).length
-        ) {
-          formError.textContent =
-            "Provide a clarification or confirm at least one field.";
-          return;
+        let scope;
+        if (scopeMode) {
+          try {
+            scope = JSON.parse(operatorScope.value);
+          } catch {
+            formError.textContent =
+              "Semantic scope must be a valid JSON object.";
+            return;
+          }
         }
 
         resumeButton.disabled = true;
@@ -852,9 +896,10 @@
                 resolution_mode: selectedMode,
                 statement,
                 values,
-                resolved_unknowns: conditional
-                  ? []
-                  : Array.from(resolvedUnknowns),
+                resolved_unknowns: provide
+                  ? Array.from(resolvedUnknowns)
+                  : [],
+                ...(scopeMode ? { scope } : {}),
               },
             },
           });

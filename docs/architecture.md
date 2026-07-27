@@ -196,39 +196,45 @@ the `CALCULATION` work order.
 
 ## Stateless HOLD continuation
 
-An operator-owned `HOLD` closes over an explicit handoff without introducing
-Runtime memory. The `boris-execution/1.0` envelope requires:
+Until a signed operator-machine authority registry and memory physiology exist,
+every recoverable system `HOLD` is owned by the human operator. The explicit
+handoff introduces no Runtime memory. The `boris-execution/1.0` envelope
+requires:
 
 - a non-empty conditional `candidate_result`, or `candidate_result: null` with
   `candidate_unavailable_reason`;
-- `hold.hold_record` with the Core-required `cycle_id`, return state and gate,
-  reason, scope, source/evidence references, unknowns, open debts, and
-  state hash;
+- `hold.hold_record` with `hold_id`, the Core-required `cycle_id`, return state
+  and gate, reason, scope, source/evidence references, unknowns, open debts,
+  and state hash;
 - a separate `hold.blocking_precondition` whose resolution permits a same-phase
-  gate recheck but does not itself imply `PASS`;
-- for operator-owned targets, `hold.required_operator_input` with separate
-  path-aware semantic unknowns
-  and Core selector inputs used by formal predicates that evaluated to
-  `UNKNOWN`;
-- for operator-owned targets, an HMAC-SHA256 `continuation_token` bound to the exact `SemanticInput`, Core
-  identity, session, HOLD targets, expiry, and resume count.
-
-Runtime-owned, future, model, downstream, and unresolvable uncertainties never
-become operator targets by default. A `HOLD` containing only those classes
-retains the conditional candidate and returns
-`resolution_not_operator_owned` without a token.
+  gate recheck but does not itself imply `PASS`, plus
+  `owner: OPERATOR`;
+- `hold.required_operator_input` with separate path-aware semantic unknowns,
+  formal Core selector inputs, and exact system targets;
+- an HMAC-SHA256 `continuation_token` bound to the exact `SemanticInput`, Core
+  identity, session, HOLD targets, prior current-cycle decisions, expiry, and
+  resume count.
 
 Resume uses the same `/runtime/execute` and `boris.execute` entry. Runtime
 verifies the signature, expiry, session, current Core identity, and signed
-`HoldRecord.state_hash` before any semantic LLM call. `PROVIDE_INFORMATION`
-records operator evidence, applies only declared paths, and requires every
-signed target to close. `ALLOW_CONDITIONAL_PROCEEDING` is offered only for
-unbound, non-norm-linked and non-Core-linked semantic unknowns; it changes no
-fact or authority, preserves every unknown, and records only the operator scope
-decision. Both modes return to the same phase for a fresh gate calculation.
-Neither mode can force `PASS`, weaken `STOP`, or bypass formal predicate,
-authority, or mandatory-evidence requirements. A new `HOLD` issues a new token
-while preserving the cycle identity.
+`HoldRecord.state_hash` before any semantic LLM call. The response becomes a
+`boris-operator-decision/1.0` current-cycle control object, never a fact,
+evidence item, authority grant, or memory write.
+
+- `PROVIDE_INFORMATION` supplies every signed current-cycle selector and may
+  mark declared semantic unknown IDs resolved.
+- `CONFIRM_ASSUMPTION` supplies explicit temporary selector assumptions while
+  preserving unknowns.
+- `ALLOW_CONDITIONAL_PROCEEDING` preserves unknowns and removes only signed
+  non-authority, non-mandatory-proof targets from the blocking set.
+- `CHANGE_SCOPE` replaces only verified selector arrays and returns to the same
+  phase.
+- `TERMINATE_CYCLE` resolves the precondition by ending the cycle without
+  another semantic calculation.
+
+No mode forces `PASS`, weakens `STOP`, creates authority, or supplies mandatory
+proof. A new `HOLD` issues a new token while preserving the cycle identity and
+prior effective decisions.
 
 After resume, a non-`HOLD` calculation cannot escape with an empty public
 candidate. The LLM contract requires candidate material, while Semantic

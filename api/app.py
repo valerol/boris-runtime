@@ -145,7 +145,7 @@ def execute_runtime(request: RuntimeExecutionRequest):
         }
         if request.resume is not None:
             execution_arguments["resume"] = (
-                request.resume.model_dump()
+                request.resume.model_dump(exclude_none=True)
             )
         if request.operation == "prepare":
             return execution_service.prepare_host(

@@ -4,20 +4,24 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
-- Replaced the ambiguous HOLD-resume semantics with
-  `boris-hold-handoff/1.3` and `boris-continuation/1.3`. Every `HOLD` now
-  projects the Core-required `HoldRecord` fields and a separate signed blocking
-  precondition.
-- Added explicit `PROVIDE_INFORMATION` and
-  `ALLOW_CONDITIONAL_PROCEEDING` resume modes. The information route still
-  requires complete closure of every signed target. Conditional proceeding is
-  available only for unbound semantic unknowns without path, norm, Core, or
-  predicate requirements; it preserves all unknowns and open debts, establishes
-  no fact or authority, and triggers a same-phase gate recalculation without
-  forcing `PASS`.
-- Updated the Developer Surface to expose only signed available resolution
-  modes and to disable fact-resolution controls during conditional proceeding.
-  Old 1.2 continuation tokens are rejected by the new versioned codec.
+- Added operator resolution of system HOLDs through
+  `boris-hold-handoff/1.4` and `boris-continuation/1.4`. Every recoverable
+  `HOLD`, including Runtime-derived formal predicates and final host submission
+  compliance, now has `resolution_owner=OPERATOR`, exact signed targets, a
+  `hold_id`, and a real continuation or terminal operator route.
+- Added `boris-operator-decision/1.0` with five explicit modes:
+  `PROVIDE_INFORMATION`, `CONFIRM_ASSUMPTION`,
+  `ALLOW_CONDITIONAL_PROCEEDING`, `CHANGE_SCOPE`, and `TERMINATE_CYCLE`.
+  Decisions are bound to `hold_id`, `cycle_id`, `state_hash`, and the blocking
+  precondition. They are current-cycle control objects and do not mutate
+  `facts`, `evidence`, `authority`, or memory.
+- Formal selector values and explicit assumptions are applied only as verified
+  same-cycle predicate overrides. Conditional proceeding preserves unknowns,
+  cannot make authority or mandatory proof non-blocking, never forces `PASS`,
+  and never weakens `STOP`. Scope changes are checked against the current Core;
+  termination ends the cycle without invoking the semantic model.
+- Updated API models, MCP instructions, and Developer Surface for all five
+  signed modes. Old 1.3 continuation tokens are rejected by the new codec.
 - Added `boris-phase-output-contract/1.0`. Every host `CALCULATION`
   work order now derives `candidate_result` from the current phase capsule's
   canonical `primary_object` and full `required_object_schemas` projection.
@@ -70,10 +74,9 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   Runtime-owned, while gate evidence, registries, and later-stage
   prerequisites remain downstream-owned.
 - Replaced the unsafe unknown-to-operator default with
-  `boris-hold-handoff/1.2`. Only explicit `OPERATOR_INPUT` targets can issue a
-  signed continuation. Future, model, downstream, Runtime-owned, and
-  unresolvable limitations preserve the conditional candidate and return
-  `resolution_not_operator_owned` without a token.
+  `boris-hold-handoff/1.2`. That intermediate contract limited continuations to
+  explicit `OPERATOR_INPUT`; version 1.4 supersedes its ownerless system-HOLD
+  route while retaining the source-resolution classifications.
 - Reject attempts to relabel `CURRENT_RUNTIME` requirements or internal
   `violation.*` selectors as operator inputs. Unclassified formal-predicate
   paths fail closed as limitations rather than being silently assigned to the
@@ -118,9 +121,10 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
   continuation token bound to the exact `SemanticInput`, Core identity,
   session, expiry, and resume count.
 - Added resume to the sole `boris.execute` entry. Runtime verifies the signed
-  state, records operator evidence, accepts values only for paths declared by
-  the signed HOLD, skips repeated Semantic Input compilation, and recalculates
-  the same non-mutating semantic route.
+  state, accepts values only for paths declared by the signed HOLD, skips
+  repeated Semantic Input compilation, and recalculates the same non-mutating
+  semantic route. Version 1.4 moves those values out of evidence into an
+  explicit current-cycle `OperatorDecision`.
 - Rejected empty public `candidate_result` objects. A `HOLD` may expose `null`
   only with `candidate_unavailable_reason`; every other gate requires a
   non-empty candidate.

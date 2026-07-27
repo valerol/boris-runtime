@@ -150,12 +150,14 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
     assert result["candidate_result"] is None
     assert result["candidate_unavailable_reason"]
     assert result["hold"]["handoff_version"] == (
-        "boris-hold-handoff/1.3"
+        "boris-hold-handoff/1.4"
     )
     assert result["hold"]["status"] == "operator_input_required"
+    assert result["hold"]["resolution_owner"] == "OPERATOR"
     assert result["hold"]["continuation_token"].startswith("v1.")
     assert result["hold"]["expires_at"]
     assert set(result["hold"]["hold_record"]) == {
+        "hold_id",
         "cycle_id",
         "return_state",
         "return_gate",
@@ -171,7 +173,12 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
     assert result["hold"]["hold_record"]["return_gate"] == "C03"
     assert result["hold"]["blocking_precondition"][
         "resolution_options"
-    ] == ["PROVIDE_INFORMATION"]
+    ] == [
+        "PROVIDE_INFORMATION",
+        "CONFIRM_ASSUMPTION",
+        "CHANGE_SCOPE",
+        "TERMINATE_CYCLE",
+    ]
     required = result["hold"]["required_operator_input"]
     assert required["semantic_unknowns"] == []
     assert required["predicate_inputs"] == [
@@ -192,10 +199,12 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
             "uncertainty_descriptions": [
                 "authorization.granted remains unknown."
             ],
+            "source_resolution_class": "OPERATOR_INPUT",
+            "resolution_owner": "OPERATOR",
             "question": (
-                "Provide the observed value for Core selector "
-                "authorization.granted. The value that makes a predicate "
-                "true is not assumed."
+                "Provide or confirm the current-cycle operator value for Core "
+                "selector authorization.granted. The value that makes a "
+                "predicate true is not assumed."
             ),
         }
     ]
@@ -271,24 +280,32 @@ def test_hold_maps_semantic_unknown_path_without_conflating_predicate_input(
             "expected_type": "json",
             "norm_refs": ["N-ACTION"],
             "core_refs": [],
+            "source_resolution_class": "OPERATOR_INPUT",
+            "resolution_owner": "OPERATOR",
             "question": (
                 "Provide the operator-confirmed value for "
                 "authorization.status."
             ),
         }
     ]
-    assert required["predicate_inputs"] == []
+    assert [
+        item["target_path"]
+        for item in required["predicate_inputs"]
+    ] == ["violation.N-GEN-001"]
+    assert required["predicate_inputs"][0][
+        "resolution_owner"
+    ] == "OPERATOR"
     assert all(
         "UNKNOWN formal predicate" not in item["description"]
         for item in required["semantic_unknowns"]
     )
 
 
-def test_non_operator_hold_keeps_conditional_candidate_without_continuation(
+def test_system_hold_requires_operator_resolution(
     monkeypatch,
 ):
     monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
-    monkeypatch.delenv("BORIS_CONTINUATION_SECRET", raising=False)
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "f" * 32)
     description = "The result depends on a future event."
     service, _adapter, calculator, _events = build_service(
         compiler_payload("Evaluate a conditional route."),
@@ -312,14 +329,23 @@ def test_non_operator_hold_keeps_conditional_candidate_without_continuation(
     assert result["candidate_result"] == {
         "status": "CANDIDATE_ONLY"
     }
-    assert result["hold"]["status"] == (
-        "resolution_not_operator_owned"
-    )
-    assert result["hold"]["required_operator_input"] is None
-    assert "continuation_token" not in result["hold"]
-    assert result["hold"]["resolution_summary"][
-        "FUTURE_CONTINGENT"
-    ][0]["uncertainty_id"] == "future-event"
+    assert result["hold"]["status"] == "operator_input_required"
+    assert result["hold"]["resolution_owner"] == "OPERATOR"
+    assert result["hold"]["continuation_token"].startswith("v1.")
+    required = result["hold"]["required_operator_input"]
+    assert required["semantic_unknowns"][0][
+        "source_resolution_class"
+    ] == "FUTURE_CONTINGENT"
+    assert {
+        item["mode"]
+        for item in required["resolution_modes"]
+        if item["available"]
+    } == {
+        "CONFIRM_ASSUMPTION",
+        "ALLOW_CONDITIONAL_PROCEEDING",
+        "CHANGE_SCOPE",
+        "TERMINATE_CYCLE",
+    }
 
 
 def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
@@ -368,6 +394,19 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
         "N-ACTION"
     ).formal_predicate_result == "TRUE"
     trace = second["developer_trace"]
+    assert trace["semantic_input"]["facts"] == {}
+    assert trace["semantic_input"]["evidence"] == []
+    assert trace["semantic_input"]["authority"] == {}
+    operator_decision = trace["continuation"][
+        "precondition_resolution"
+    ]["operator_decision"]
+    assert operator_decision["values"] == {
+        "authorization.granted": True
+    }
+    assert operator_decision["does_not_write_memory"] is True
+    assert operator_decision[
+        "does_not_establish_fact_or_evidence"
+    ] is True
     assert trace["continuation"]["resumed"] is True
     assert trace["continuation"]["resume_count"] == 1
     assert trace["stages"]["semantic_input_compiler"] == (
@@ -377,6 +416,213 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
         "continuation_token"
         not in json.dumps(trace, ensure_ascii=False)
     )
+
+
+def test_operator_can_confirm_formal_assumption_without_writing_facts(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "a" * 32)
+    text = "Evaluate an action."
+    description = "authorization.granted remains unknown."
+    context = {"unknowns": [description]}
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, context, triggers=["action"]),
+    )
+
+    def assumption_uncertainty(view, _semantic_input):
+        formal = view.get_candidate(
+            "N-ACTION"
+        ).formal_predicate_result
+        if formal == "UNKNOWN":
+            return _authorization_uncertainties(
+                view,
+                _semantic_input,
+            )
+        return [
+            uncertainty(
+                description,
+                resolution_class="UNRESOLVABLE_LIMITATION",
+                uncertainty_id="authorization.granted",
+            )
+        ]
+
+    calculator.uncertainties = assumption_uncertainty
+    first = service.execute(
+        text,
+        session_id="assumption-resolution",
+        context=context,
+    )
+
+    second = service.execute(
+        session_id="assumption-resolution",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "resolution_mode": "CONFIRM_ASSUMPTION",
+                "statement": (
+                    "Treat authorization.granted=true only as this cycle's "
+                    "explicit operator assumption."
+                ),
+                "values": {"authorization.granted": True},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    assert second["gate"] == "PASS"
+    assert second["unknowns"] == [description]
+    assert calculator.last_view.get_candidate(
+        "N-ACTION"
+    ).formal_predicate_result == "TRUE"
+    semantic_input = second["developer_trace"]["semantic_input"]
+    assert semantic_input["facts"] == {}
+    assert semantic_input["evidence"] == []
+    assert semantic_input["authority"] == {}
+    decision = calculator.last_view.to_prompt_dict()[
+        "operator_decision"
+    ]
+    assert decision["resolution_mode"] == "CONFIRM_ASSUMPTION"
+    assert decision["unknowns_preserved"]
+    assert decision["gate_forced"] is False
+
+
+def test_operator_can_change_scope_and_recheck_same_phase(monkeypatch):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "o" * 32)
+    text = "Evaluate an action."
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+    first = service.execute(text, session_id="scope-resolution")
+
+    second = service.execute(
+        session_id="scope-resolution",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "resolution_mode": "CHANGE_SCOPE",
+                "statement": "Remove the action trigger from this cycle.",
+                "values": {},
+                "resolved_unknowns": [],
+                "scope": {"triggers": []},
+            },
+        },
+    )
+
+    assert second["gate"] == "PASS"
+    assert second["phase"] == first["phase"] == "C03"
+    assert calculator.calls == 2
+    assert calculator.last_view.selection_trace[
+        "operator_decision_id"
+    ]
+    assert second["developer_trace"]["semantic_input"]["triggers"] == []
+
+
+def test_operator_can_terminate_hold_without_semantic_recalculation(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "x" * 32)
+    text = "Evaluate an action."
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+    first = service.execute(text, session_id="terminate-resolution")
+
+    terminated = service.execute(
+        session_id="terminate-resolution",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "resolution_mode": "TERMINATE_CYCLE",
+                "statement": "End this cycle without a semantic result.",
+                "values": {},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    assert terminated["gate"] == "HOLD"
+    assert terminated["candidate_result"]["status"] == (
+        "OPERATOR_TERMINATED"
+    )
+    assert terminated["hold"]["status"] == "operator_terminated"
+    assert terminated["hold"]["blocking_precondition"][
+        "status"
+    ] == "RESOLVED"
+    assert "continuation_token" not in terminated["hold"]
+    assert calculator.calls == 1
+
+
+def test_repeated_system_hold_preserves_operator_decision_chain(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "j" * 32)
+    text = "Evaluate a future-dependent route."
+    description = "A future event remains unresolved."
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text),
+    )
+    calculator.suggested_gate = "HOLD"
+    calculator.unknowns = [description]
+    calculator.uncertainties = [
+        uncertainty(
+            description,
+            resolution_class="FUTURE_CONTINGENT",
+            uncertainty_id="future-event",
+        )
+    ]
+    first = service.execute(text, session_id="decision-chain")
+
+    second = service.execute(
+        session_id="decision-chain",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
+                "statement": "Keep the future event as a bounded condition.",
+                "values": {},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    assert second["gate"] == "HOLD"
+    assert second["hold"]["hold_record"]["cycle_id"] == first[
+        "hold"
+    ]["hold_record"]["cycle_id"]
+    assert second["hold"]["hold_record"]["hold_id"] != first[
+        "hold"
+    ]["hold_record"]["hold_id"]
+
+    terminated = service.execute(
+        session_id="decision-chain",
+        resume={
+            "continuation_token": second["hold"][
+                "continuation_token"
+            ],
+            "operator_input": {
+                "resolution_mode": "TERMINATE_CYCLE",
+                "statement": "End the still-held cycle.",
+                "values": {},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    decision = terminated["candidate_result"]["operator_decision"]
+    assert [item["resolution_mode"] for item in decision[
+        "decision_history"
+    ]] == [
+        "ALLOW_CONDITIONAL_PROCEEDING",
+        "TERMINATE_CYCLE",
+    ]
+    assert decision["cycle_id"] == first["hold"][
+        "hold_record"
+    ]["cycle_id"]
+    assert calculator.calls == 2
 
 
 def test_resume_projects_non_hold_candidate_when_calculator_returns_empty(
@@ -513,7 +759,10 @@ def test_conditional_resume_preserves_unknowns_and_rechecks_same_phase(
         "resolution_options"
     ] == [
         "PROVIDE_INFORMATION",
+        "CONFIRM_ASSUMPTION",
         "ALLOW_CONDITIONAL_PROCEEDING",
+        "CHANGE_SCOPE",
+        "TERMINATE_CYCLE",
     ]
     first_record = first["hold"]["hold_record"]
 
@@ -540,12 +789,15 @@ def test_conditional_resume_preserves_unknowns_and_rechecks_same_phase(
     assert semantic_input["unknowns"] == [description]
     assert semantic_input["facts"] == {}
     assert semantic_input["authority"] == {}
-    decision = semantic_input["evidence"][-1]
-    assert decision["kind"] == "hold_precondition_resolution"
+    assert semantic_input["evidence"] == []
+    decision = second["developer_trace"]["continuation"][
+        "precondition_resolution"
+    ]["operator_decision"]
     assert decision["resolution_mode"] == (
         "ALLOW_CONDITIONAL_PROCEEDING"
     )
-    assert decision["does_not_establish_facts"] is True
+    assert decision["does_not_establish_fact_or_evidence"] is True
+    assert decision["does_not_write_memory"] is True
     continuation = second["developer_trace"]["continuation"]
     assert continuation["cycle_id"] == first_record["cycle_id"]
     assert continuation["precondition_resolution"][
@@ -556,7 +808,7 @@ def test_conditional_resume_preserves_unknowns_and_rechecks_same_phase(
     ] is False
 
 
-def test_conditional_resume_cannot_bypass_predicate_input(monkeypatch):
+def test_conditional_resume_cannot_bypass_authority_predicate(monkeypatch):
     monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "d" * 32)
     text = "Evaluate an action."
     service, _adapter, calculator, _events = build_service(
@@ -564,6 +816,9 @@ def test_conditional_resume_cannot_bypass_predicate_input(monkeypatch):
     )
     first = service.execute(text, session_id="conditional-blocked")
 
+    assert "ALLOW_CONDITIONAL_PROCEEDING" not in first["hold"][
+        "blocking_precondition"
+    ]["resolution_options"]
     with pytest.raises(
         IncompleteOperatorResolution,
         match="is not available",
@@ -586,6 +841,81 @@ def test_conditional_resume_cannot_bypass_predicate_input(monkeypatch):
         )
 
     assert calculator.calls == 1
+
+
+def test_operator_can_bound_non_authority_system_predicate_conditionally(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "n" * 32)
+    text = "Evaluate a material change."
+    surface = build_surface()
+    action = surface.get_norm("N-ACTION")
+    action_fields = dict(action.fields)
+    action_fields["when"] = json.dumps({
+        "op": "fact",
+        "path": "material_change",
+        "equals": True,
+    }, separators=(",", ":"))
+    updated_action = NormRecord(
+        norm_id=action.norm_id,
+        layer=action.layer,
+        norm_type=action.norm_type,
+        fields=action_fields,
+    )
+    surface = replace(
+        surface,
+        norms_by_layer={
+            **dict(surface.norms_by_layer),
+            "BASE": tuple(
+                updated_action
+                if item.norm_id == action.norm_id
+                else item
+                for item in surface.norms_for_layer("BASE")
+            ),
+        },
+        _norm_index={
+            **dict(surface._norm_index),
+            action.norm_id: updated_action,
+        },
+    )
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+        surface=surface,
+    )
+    calculator.uncertainties = []
+    first = service.execute(text, session_id="system-conditional")
+
+    second = service.execute(
+        session_id="system-conditional",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
+                "statement": (
+                    "Retain material_change as unknown and continue only "
+                    "conditionally."
+                ),
+                "values": {},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    assert first["hold"]["required_operator_input"][
+        "predicate_inputs"
+    ][0]["target_path"] == "material_change"
+    assert second["gate"] == "PASS"
+    assert calculator.last_view.get_candidate(
+        "N-ACTION"
+    ).formal_predicate_result == "UNKNOWN"
+    decision = second["developer_trace"]["continuation"][
+        "precondition_resolution"
+    ]["operator_decision"]
+    assert decision["conditionally_non_blocking_paths"] == [
+        "material_change"
+    ]
+    assert decision["gate_forced"] is False
 
 
 def test_resume_rejects_tampered_token(monkeypatch):

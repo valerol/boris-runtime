@@ -349,6 +349,7 @@ def test_invalid_hold_correction_preserves_hold_without_third_attempt(
     monkeypatch,
 ):
     monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "c" * 32)
     surface = build_surface()
     source = compiler_payload("Explain the runtime.")
     service, _adapter, _api_calculator, _events = build_service(
@@ -382,19 +383,45 @@ def test_invalid_hold_correction_preserves_hold_without_third_attempt(
 
     assert hold["gate"] == "HOLD"
     assert hold["candidate_result"] is None
-    assert hold["hold"]["status"] == "resolution_not_operator_owned"
-    assert hold["hold"]["required_operator_input"] is None
+    assert hold["hold"]["status"] == "operator_input_required"
+    assert hold["hold"]["resolution_owner"] == "OPERATOR"
+    assert hold["hold"]["required_operator_input"] is not None
     assert hold["hold"]["handoff_version"] == (
-        "boris-hold-handoff/1.3"
+        "boris-hold-handoff/1.4"
     )
     assert hold["hold"]["hold_record"]["return_state"] == "C03"
-    assert hold["hold"]["resolution_summary"][
-        "MODEL_UNCERTAINTY"
-    ][0]["issues"][0]["code"] == (
-        "PHASE_OUTPUT_REQUIRED_FIELDS_MISSING"
-    )
+    assert hold["hold"]["blocking_precondition"][
+        "resolution_options"
+    ] == ["CHANGE_SCOPE", "TERMINATE_CYCLE"]
+    assert hold["hold"]["required_operator_input"][
+        "system_targets"
+    ][0]["kind"] == "SYSTEM_COMPLIANCE_HOLD"
+    assert hold["hold"]["continuation_token"].startswith("v1.")
     assert "work_order_id" not in hold
     assert "submission_contract" not in hold
+
+    terminated = service.prepare_host(
+        session_id="invalid-correction",
+        resume={
+            "continuation_token": hold["hold"][
+                "continuation_token"
+            ],
+            "operator_input": {
+                "resolution_mode": "TERMINATE_CYCLE",
+                "statement": (
+                    "Terminate the invalid submission cycle."
+                ),
+                "values": {},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    assert terminated["gate"] == "HOLD"
+    assert terminated["hold"]["status"] == "operator_terminated"
+    assert terminated["candidate_result"]["operator_decision"][
+        "resolution_mode"
+    ] == "TERMINATE_CYCLE"
 
 
 def test_malformed_host_compilation_is_rejected_and_consumes_attempt(
@@ -553,6 +580,7 @@ def test_host_prepare_accepts_signed_hold_resume_without_recompiling(
     view = SemanticViewBuilder().build(
         surface,
         state.semantic_input,
+        operator_decision=state.operator_decision,
     )
     semantic_result = AutoCalculator().calculate(
         view,
@@ -636,16 +664,20 @@ def test_host_conditional_resume_preserves_hold_state_and_rechecks_gate(
     assert state.continuation_resolution[
         "preserved_hold_record"
     ] == first["hold"]["hold_record"]
-    decision = state.semantic_input.evidence[-1]
-    assert decision["kind"] == "hold_precondition_resolution"
-    assert list(decision["unknowns_preserved"]) == ["historical-fact"]
-    assert decision["hold_record"]["state_hash"] == first["hold"][
+    assert state.semantic_input.evidence == ()
+    decision = state.operator_decision
+    assert decision["resolution_mode"] == (
+        "ALLOW_CONDITIONAL_PROCEEDING"
+    )
+    assert decision["unknowns_preserved"] == ["historical-fact"]
+    assert decision["state_hash"] == first["hold"][
         "hold_record"
     ]["state_hash"]
 
     view = SemanticViewBuilder().build(
         surface,
         state.semantic_input,
+        operator_decision=state.operator_decision,
     )
     semantic_result = AutoCalculator().calculate(
         view,

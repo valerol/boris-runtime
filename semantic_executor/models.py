@@ -289,6 +289,10 @@ class SemanticView:
         default_factory=dict,
         repr=False,
     )
+    operator_decision: Mapping[str, Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
     def __post_init__(self):
         object.__setattr__(
@@ -315,6 +319,11 @@ class SemanticView:
             self,
             "uncertainty_resolution_catalog",
             freeze_value(dict(self.uncertainty_resolution_catalog)),
+        )
+        object.__setattr__(
+            self,
+            "operator_decision",
+            freeze_value(dict(self.operator_decision)),
         )
         object.__setattr__(
             self,
@@ -350,6 +359,10 @@ class SemanticView:
         if self.uncertainty_resolution_catalog:
             result["uncertainty_resolution_catalog"] = thaw_value(
                 self.uncertainty_resolution_catalog
+            )
+        if self.operator_decision:
+            result["operator_decision"] = thaw_value(
+                self.operator_decision
             )
         return result
 

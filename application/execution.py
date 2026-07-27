@@ -12,13 +12,11 @@ from uuid import uuid4
 from application.continuation import (
     ContinuationCodec,
     ContinuationStateMismatch,
-    build_hold_record,
     build_hold_handoff,
-    build_non_operator_hold,
+    build_system_issue_handoff,
     continuation_count,
     continuation_source_input,
     continuation_text,
-    hold_requires_operator_input,
     require_continuation_core,
     resume_hold,
     resume_token,
@@ -465,8 +463,23 @@ class ExecutionService:
             continuation_state,
             resume,
         )
+        if continuation_resume.terminated:
+            return _operator_termination_envelope(
+                session_id=resolved_session_id,
+                resume_count=resume_count,
+                continuation_resume=continuation_resume,
+            )
         semantic_input = continuation_resume.semantic_input
-        view = SemanticViewBuilder().build(surface, semantic_input)
+        _validate_operator_scope_change(
+            surface,
+            semantic_input,
+            continuation_resume.operator_decision,
+        )
+        view = SemanticViewBuilder().build(
+            surface,
+            semantic_input,
+            operator_decision=continuation_resume.operator_decision,
+        )
         return build_host_work_order(
             codec=codec,
             registry=self.host_work_order_registry,
@@ -480,6 +493,9 @@ class ExecutionService:
             continuation_cycle_id=continuation_resume.cycle_id,
             continuation_resolution=dict(
                 continuation_resume.precondition_resolution
+            ),
+            operator_decision=dict(
+                continuation_resume.operator_decision
             ),
         )
 
@@ -593,7 +609,11 @@ class ExecutionService:
             raise HostWorkOrderStateMismatch(
                 "Calculation work-order state is incomplete."
             )
-        view = SemanticViewBuilder().build(surface, state.semantic_input)
+        view = SemanticViewBuilder().build(
+            surface,
+            state.semantic_input,
+            operator_decision=state.operator_decision,
+        )
         require_current_host_scope(
             state,
             view=view,
@@ -609,7 +629,10 @@ class ExecutionService:
                 calculator,
                 compatibility,
             )
-            candidate = executor.execute(state.semantic_input)
+            candidate = executor.execute(
+                state.semantic_input,
+                operator_decision=state.operator_decision,
+            )
         except (
             PhaseOutputValidationError,
             SemanticCalculationError,
@@ -641,6 +664,7 @@ class ExecutionService:
                     continuation_resolution=(
                         state.continuation_resolution
                     ),
+                    operator_decision=state.operator_decision,
                 )
             return self._host_compliance_hold(
                 state=state,
@@ -663,11 +687,12 @@ class ExecutionService:
             host_work_order_id=state.work_order_id,
             continuation_cycle_id=state.continuation_cycle_id,
             continuation_resolution=state.continuation_resolution,
+            operator_decision=state.operator_decision,
             started=started,
         )
 
-    @staticmethod
     def _host_compliance_hold(
+        self,
         *,
         state,
         semantic_input,
@@ -699,48 +724,17 @@ class ExecutionService:
                 *HOST_EXECUTOR_LIMITATIONS,
                 *PUBLIC_LIMITATIONS,
             ],
-            "hold": {
-                "handoff_version": "boris-hold-handoff/1.3",
-                "status": "resolution_not_operator_owned",
-                "reason": reason,
-                "hold_record": build_hold_record(
-                    semantic_input=semantic_input,
-                    core_ref=state.core_ref,
-                    session_id=state.session_id,
-                    hold_reason=reason,
-                    unknowns=semantic_input.unknowns,
-                    open_debts=(
-                        "host-semantic-submission-compliance",
-                    ),
-                    cycle_id=state.continuation_cycle_id,
-                ),
-                "blocking_precondition": {},
-                "required_operator_input": None,
-                "resolution_summary": {
-                    "MODEL_UNCERTAINTY": [{
-                        "uncertainty_id": (
-                            "host-semantic-submission-compliance"
-                        ),
-                        "description": reason,
-                        "resolution_action": (
-                            "OPERATOR_DECISION_REQUIRED"
-                        ),
-                        "issues": [dict(issue) for issue in issues],
-                    }],
-                },
-                "resume_count": state.resume_count,
-            },
-        }
-        hold_record = result["hold"]["hold_record"]
-        result["hold"]["blocking_precondition"] = {
-            "precondition_id": (
-                "hold-precondition-"
-                + hold_record["state_hash"][:24]
+            "hold": build_system_issue_handoff(
+                codec=self.continuation_codec_factory(),
+                semantic_input=semantic_input,
+                core_ref=state.core_ref,
+                session_id=state.session_id,
+                resume_count=state.resume_count,
+                reason=reason,
+                issues=issues,
+                cycle_id=state.continuation_cycle_id,
+                operator_decision=state.operator_decision,
             ),
-            "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
-            "status": "UNRESOLVED",
-            "description": reason,
-            "resolution_options": [],
         }
         if developer_mode_enabled():
             result["developer_trace"] = {
@@ -839,7 +833,18 @@ class ExecutionService:
                 continuation_state,
                 resume,
             )
+            if continuation_resume.terminated:
+                return _operator_termination_envelope(
+                    session_id=resolved_session_id,
+                    resume_count=resume_count,
+                    continuation_resume=continuation_resume,
+                )
             semantic_input = continuation_resume.semantic_input
+            _validate_operator_scope_change(
+                surface,
+                semantic_input,
+                continuation_resume.operator_decision,
+            )
             timings["continuation_resume"] = _elapsed_ms(stage_started)
 
         calculator = self.calculator_factory(adapter)
@@ -849,7 +854,14 @@ class ExecutionService:
             compatibility,
         )
         stage_started = perf_counter()
-        candidate = executor.execute(semantic_input)
+        candidate = executor.execute(
+            semantic_input,
+            operator_decision=(
+                continuation_resume.operator_decision
+                if continuation_resume is not None
+                else None
+            ),
+        )
         timings["semantic_executor"] = _elapsed_ms(stage_started)
         return self._candidate_envelope(
             candidate=candidate,
@@ -868,6 +880,11 @@ class ExecutionService:
             ),
             continuation_resolution=(
                 continuation_resume.precondition_resolution
+                if continuation_resume is not None
+                else None
+            ),
+            operator_decision=(
+                continuation_resume.operator_decision
                 if continuation_resume is not None
                 else None
             ),
@@ -890,6 +907,7 @@ class ExecutionService:
         host_work_order_id=None,
         continuation_cycle_id=None,
         continuation_resolution=None,
+        operator_decision=None,
     ):
         candidate_result = candidate.to_dict()["candidate_result"]
         candidate_unavailable_reason = None
@@ -940,24 +958,16 @@ class ExecutionService:
                 candidate_unavailable_reason
             )
         if candidate.gate == "HOLD":
-            if hold_requires_operator_input(candidate):
-                codec = self.continuation_codec_factory()
-                envelope["hold"] = build_hold_handoff(
-                    codec,
-                    semantic_input,
-                    candidate,
-                    session_id,
-                    resume_count,
-                    cycle_id=continuation_cycle_id,
-                )
-            else:
-                envelope["hold"] = build_non_operator_hold(
-                    candidate,
-                    semantic_input,
-                    session_id,
-                    resume_count,
-                    cycle_id=continuation_cycle_id,
-                )
+            codec = self.continuation_codec_factory()
+            envelope["hold"] = build_hold_handoff(
+                codec,
+                semantic_input,
+                candidate,
+                session_id,
+                resume_count,
+                cycle_id=continuation_cycle_id,
+                operator_decision=operator_decision,
+            )
         if developer_mode_enabled():
             stage_started = perf_counter()
             frame = self.context_provider.frame(
@@ -992,6 +1002,122 @@ class ExecutionService:
                 host_work_order_id=host_work_order_id,
             )
         return envelope
+
+
+def _operator_termination_envelope(
+    *,
+    session_id,
+    resume_count,
+    continuation_resume,
+):
+    decision = dict(continuation_resume.operator_decision)
+    hold_record = dict(continuation_resume.hold_record)
+    precondition_id = continuation_resume.precondition_resolution[
+        "precondition_id"
+    ]
+    reason = (
+        "The operator terminated this HOLD cycle without PASS or another "
+        "semantic calculation."
+    )
+    result = {
+        "execution_version": EXECUTION_VERSION,
+        "session_id": session_id,
+        "status": "semantic_candidate",
+        "phase": hold_record["return_state"],
+        "gate": "HOLD",
+        "candidate_result": {
+            "status": "OPERATOR_TERMINATED",
+            "operator_decision": decision,
+        },
+        "norm_results": [],
+        "unknowns": list(
+            continuation_resume.semantic_input.unknowns
+        ),
+        "uncertainties": [],
+        "conflicts": [],
+        "alternatives": [],
+        "limitations": list(PUBLIC_LIMITATIONS),
+        "hold": {
+            "handoff_version": "boris-hold-handoff/1.4",
+            "status": "operator_terminated",
+            "resolution_owner": "OPERATOR",
+            "reason": reason,
+            "hold_record": hold_record,
+            "blocking_precondition": {
+                "precondition_id": precondition_id,
+                "condition": (
+                    "RECOVERABLE_PRECONDITION_UNRESOLVED"
+                ),
+                "status": "RESOLVED",
+                "owner": "OPERATOR",
+                "description": hold_record["hold_reason"],
+                "resolution_options": [],
+            },
+            "required_operator_input": None,
+            "resolution_summary": {
+                "OPERATOR_DECISION": [decision],
+            },
+            "resume_count": resume_count,
+        },
+    }
+    if developer_mode_enabled():
+        result["developer_trace"] = {
+            "continuation": {
+                "resumed": True,
+                "resume_count": resume_count,
+                "cycle_id": hold_record["cycle_id"],
+                "precondition_resolution": dict(
+                    continuation_resume.precondition_resolution
+                ),
+                "handoff": trace_handoff(result["hold"]),
+            },
+            "stages": {
+                "semantic_input_compiler": "not_invoked_resume",
+                "semantic_executor": "not_invoked_operator_termination",
+                "independent_reviewer": "not_implemented",
+                "policy_kernel": "not_implemented",
+                "state_event": "not_implemented",
+            },
+        }
+    return sanitize_public_value(result)
+
+
+def _validate_operator_scope_change(
+    surface,
+    semantic_input,
+    operator_decision,
+):
+    if (
+        not isinstance(operator_decision, Mapping)
+        or operator_decision.get("resolution_mode") != "CHANGE_SCOPE"
+    ):
+        return
+    catalog = SemanticViewBuilder().applicability_catalog(surface)
+    values = {
+        "active_layers": (
+            semantic_input.active_layers,
+            "layers",
+        ),
+        "triggers": (
+            semantic_input.triggers,
+            "triggers",
+        ),
+        "applicability_scopes": (
+            semantic_input.applicability_scopes,
+            "applicability_scopes",
+        ),
+        "requested_norm_refs": (
+            semantic_input.requested_norm_refs,
+            "norm_refs",
+        ),
+    }
+    for field, (selected, catalog_field) in values.items():
+        unknown = set(selected) - set(catalog[catalog_field])
+        if unknown:
+            raise ContinuationStateMismatch(
+                f"Operator scope change selects values outside the verified "
+                f"Core {field}: {sorted(unknown)}"
+            )
 
 
 def build_semantic_input_prompt(surface, source, catalog) -> str:

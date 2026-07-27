@@ -38,7 +38,11 @@ class SemanticExecutor:
         self.view_builder = view_builder or SemanticViewBuilder()
         self.validator = validator or SemanticCalculationValidator()
 
-    def execute(self, semantic_input: SemanticInput) -> ExecutionCandidate:
+    def execute(
+        self,
+        semantic_input: SemanticInput,
+        operator_decision: Mapping | None = None,
+    ) -> ExecutionCandidate:
         try:
             self.compatibility.require_semantic_evaluation(self.surface)
         except (AttributeError, ValueError) as exc:
@@ -46,14 +50,22 @@ class SemanticExecutor:
                 "Semantic execution requires a valid RuntimeAttestation "
                 "accepted for semantic_evaluation."
             ) from exc
-        view = self.view_builder.build(self.surface, semantic_input)
+        view = self.view_builder.build(
+            self.surface,
+            semantic_input,
+            operator_decision=operator_decision,
+        )
         raw_calculation = self.calculator.calculate(view, semantic_input)
         calculation = self.validator.validate(
             raw_calculation,
             view,
             semantic_input,
         )
-        issues = self._guard_issues(view, calculation)
+        issues = self._guard_issues(
+            view,
+            calculation,
+            operator_decision,
+        )
         final_gate = self._constrain_gate(view, calculation, issues)
         candidate_result = calculation.candidate_result
         if not candidate_result and final_gate != "HOLD":
@@ -118,7 +130,7 @@ class SemanticExecutor:
         )
 
     @staticmethod
-    def _guard_issues(view, calculation):
+    def _guard_issues(view, calculation, operator_decision=None):
         issues = []
         uncertainty_index = _uncertainty_index(calculation)
         result_index = {
@@ -149,6 +161,11 @@ class SemanticExecutor:
                 and _norm_uncertainty_blocks(
                     candidate.norm_ref,
                     uncertainty_index,
+                    operator_decision,
+                )
+                and not _operator_conditionally_bounds_norm(
+                    candidate,
+                    operator_decision,
                 )
             ):
                 issues.append(ValidationIssue(
@@ -190,6 +207,7 @@ class SemanticExecutor:
                 and _norm_uncertainty_blocks(
                     candidate.norm_ref,
                     uncertainty_index,
+                    operator_decision,
                 )
             ):
                 issues.append(ValidationIssue(
@@ -214,6 +232,7 @@ class SemanticExecutor:
                 and _norm_uncertainty_blocks(
                     candidate.norm_ref,
                     uncertainty_index,
+                    operator_decision,
                 )
             ):
                 issues.append(ValidationIssue(
@@ -237,22 +256,32 @@ class SemanticExecutor:
                 ))
             if result.unknowns:
                 issues.extend(_uncertainty_issues(
-                    uncertainty
-                    for unknown in result.unknowns
-                    for uncertainty in uncertainty_index["description"].get(
-                        unknown,
-                        (),
-                    )
+                    (
+                        uncertainty
+                        for unknown in result.unknowns
+                        for uncertainty in uncertainty_index[
+                            "description"
+                        ].get(
+                            unknown,
+                            (),
+                        )
+                    ),
+                    operator_decision=operator_decision,
                 ))
 
         if calculation.unknowns:
             issues.extend(_uncertainty_issues(
-                uncertainty
-                for unknown in calculation.unknowns
-                for uncertainty in uncertainty_index["description"].get(
-                    unknown,
-                    (),
-                )
+                (
+                    uncertainty
+                    for unknown in calculation.unknowns
+                    for uncertainty in uncertainty_index[
+                        "description"
+                    ].get(
+                        unknown,
+                        (),
+                    )
+                ),
+                operator_decision=operator_decision,
             ))
         if any(conflict.disposition == "HOLD" for conflict in calculation.conflicts):
             norm_refs = tuple(dict.fromkeys(
@@ -461,18 +490,37 @@ def _uncertainty_index(calculation):
     }
 
 
-def _norm_uncertainty_blocks(norm_ref, uncertainty_index):
+def _norm_uncertainty_blocks(
+    norm_ref,
+    uncertainty_index,
+    operator_decision=None,
+):
     values = uncertainty_index["norm"].get(norm_ref, ())
     if not values:
+        if (
+            _is_conditional_operator_decision(operator_decision)
+            and norm_ref in set(operator_decision.get(
+                "conditionally_non_blocking_norm_refs",
+                (),
+            ))
+        ):
+            return False
         return True
     return any(
         uncertainty.resolution_class
         not in NON_BLOCKING_RESOLUTION_CLASSES
+        and not _operator_conditionally_bounds_uncertainty(
+            uncertainty,
+            operator_decision,
+        )
         for uncertainty in values
     )
 
 
-def _uncertainty_issues(uncertainties):
+def _uncertainty_issues(
+    uncertainties,
+    operator_decision=None,
+):
     result = []
     seen = set()
     issue_contract = {
@@ -503,6 +551,11 @@ def _uncertainty_issues(uncertainties):
         ),
     }
     for uncertainty in uncertainties:
+        if _operator_conditionally_bounds_uncertainty(
+            uncertainty,
+            operator_decision,
+        ):
+            continue
         marker = uncertainty.uncertainty_id
         if marker in seen:
             continue
@@ -514,6 +567,68 @@ def _uncertainty_issues(uncertainties):
             norm_refs=uncertainty.norm_refs,
         ))
     return result
+
+
+def _operator_conditionally_bounds_uncertainty(
+    uncertainty,
+    operator_decision,
+):
+    if not _is_conditional_operator_decision(operator_decision):
+        return False
+    return (
+        uncertainty.uncertainty_id
+        in set(operator_decision.get(
+            "conditionally_non_blocking_unknown_ids",
+            (),
+        ))
+        or (
+            uncertainty.target_path is not None
+            and uncertainty.target_path
+            in set(operator_decision.get(
+                "conditionally_non_blocking_paths",
+                (),
+            ))
+        )
+    )
+
+
+def _operator_conditionally_bounds_norm(candidate, operator_decision):
+    if not _is_conditional_operator_decision(operator_decision):
+        return False
+    allowed_paths = set(operator_decision.get(
+        "conditionally_non_blocking_paths",
+        (),
+    ))
+    allowed_norms = set(operator_decision.get(
+        "conditionally_non_blocking_norm_refs",
+        (),
+    ))
+    if candidate.norm_ref not in allowed_norms:
+        return False
+    if candidate.predicate_mode == "runtime_typed":
+        predicate = (
+            candidate.applicability_predicate
+            if candidate.formal_applicability_result == "UNKNOWN"
+            else candidate.violation_predicate
+        )
+    else:
+        predicate = candidate.when
+    required_paths = {
+        path
+        for path, _constraint in _predicate_path_requirements(predicate)
+    }
+    return bool(required_paths) and required_paths.issubset(allowed_paths)
+
+
+def _is_conditional_operator_decision(value):
+    return (
+        isinstance(value, Mapping)
+        and value.get("decision_version")
+        == "boris-operator-decision/1.0"
+        and value.get("actor") == "OPERATOR"
+        and value.get("conditional_authorized") is True
+        and value.get("gate_forced") is False
+    )
 
 
 def _path_resolution_class(
