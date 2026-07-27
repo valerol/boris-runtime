@@ -117,7 +117,12 @@ call. ChatGPT first completes
 a signed `COMPILATION` work order. Runtime validates the submitted
 `SemanticInput`, selects the exact phase-complete Semantic View, and returns a
 signed `CALCULATION` work order. ChatGPT completes that work order and Runtime
-performs the ordinary strict validation and deterministic gate constraints.
+enforces the current phase's canonical output object before the ordinary
+strict validation and deterministic gate constraints. One invalid calculation
+returns one signed correction work order under `HOLD` with exact diagnostics;
+a second invalid submission preserves `HOLD` without another automatic
+attempt. Canonical `REPAIR` is not invoked because it requires a new revision
+and new cycle through `C00`.
 The `OPENAI_API` route remains available only to autonomous clients of the
 private HTTP API.
 
@@ -229,7 +234,10 @@ compiler prompt, an exact response JSON Schema, binding digests, and a signed
 Runtime accepts that order only once, re-verifies Core and
 RuntimeAttestation, validates the input, and returns a
 `work_order_type: "CALCULATION"` order with the Core-declared minimum context
-window. Submit its result with the new exact ID and token:
+window, `phase_output_contract`, and a response schema whose
+`candidate_result` is the phase's canonical primary object. The shorter gate
+context is declared separately as Runtime-owned and is not a semantic
+submission. Submit the result with the new exact ID and token:
 
 ```json
 {
@@ -241,9 +249,19 @@ window. Submit its result with the new exact ID and token:
 }
 ```
 
-Runtime re-verifies the exact Semantic View and passes the result through the
-existing `SemanticCalculationValidator` and deterministic gate constraints.
-Both work orders are single-use. An operator-owned HOLD can be resumed with
+Runtime re-verifies the exact Semantic View and first validates
+`candidate_result` against the full current-phase object schema. A correct
+result then passes through the existing `SemanticCalculationValidator` and
+deterministic gate constraints. If the submission is invalid, Runtime returns
+one new signed `CALCULATION` work order with `gate: "HOLD"` and structured
+diagnostics containing `code`, JSON `path`, `received`, `expected`, and
+`instruction`. The correction preserves the original semantic scope and names
+the current phase as its return state. It is not canonical `REPAIR`, whose
+Core contract requires a new revision and new cycle. If that single correction
+submission is also invalid, Runtime returns `HOLD` with no
+candidate and no further work order.
+
+Every work order is single-use. An operator-owned HOLD can be resumed with
 `operation: "prepare"` plus the ordinary signed `resume` object; resume skips
 compilation and starts directly with a `CALCULATION` work order.
 

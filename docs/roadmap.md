@@ -93,6 +93,24 @@
 - existing `OPENAI_API` route retained only for private HTTP clients;
 - in-memory single-process registry only for the PoC.
 
+### Semantic submission compliance
+
+- `boris-phase-output-contract/1.0` derived from each verified phase capsule;
+- canonical primary output object kept separate from the future Runtime-owned
+  gate context;
+- strict phase-specific `candidate_result` schema in every signed calculation
+  work order;
+- one signed correction submission under `HOLD` with exact structured
+  violations;
+- unchanged Core, phase, `SemanticInput`, Semantic View, and provenance across
+  correction;
+- second invalid submission preserves `HOLD` without another automatic
+  attempt or an invented `STOP`;
+- canonical `REPAIR` remains out of scope until new-revision and new-cycle
+  transitions through `C00` are implemented;
+- no phase transition, Independent Review, Policy Kernel admission, state
+  mutation, or external action added by this stage.
+
 ### Stateless context, validation, and projection observability
 
 - CoreSurface-based internal `/runtime/frame`;

@@ -131,12 +131,15 @@ boris.execute with new work-order ID, token, and semantic_result
   -> verify the second token and one-shot registry state
   -> re-verify Core and RuntimeAttestation
   -> rebuild and hash the Semantic View
+  -> validate candidate_result as the phase capsule primary object
+     -> invalid first submission: HOLD + one signed correction work order
+     -> invalid correction: HOLD without another work order
   -> SemanticCalculationValidator
   -> deterministic gate constraints
   -> ExecutionCandidate
 ```
 
-Both work orders use `boris-semantic-work-order/0.3` and bind:
+Work orders use `boris-semantic-work-order/0.4` and bind:
 
 - session and work-order IDs;
 - Core reference and RuntimeAttestation SHA-256;
@@ -147,9 +150,26 @@ Both work orders use `boris-semantic-work-order/0.3` and bind:
   hashed view;
 - issue and expiry times.
 
-Submission is size-limited and single-use. An invalid calculation consumes
-that attempt; a fresh work order is required. The submitted object receives
-the same strict validation and gate constraints as an API-provider result.
+The calculation order also carries
+`boris-phase-output-contract/1.0`. Its semantic output is derived from the
+phase capsule's canonical `primary_object` and matching full
+`required_object_schemas` entry. The gate-context schema is listed separately
+as Runtime-owned and cannot replace the semantic output. Thus C04 accepts a
+canonical `Question`, not a final recommendation or the shorter future
+`GateContextC04` projection.
+
+Submission is size-limited and single-use. An invalid first calculation
+returns exactly one new signed calculation work order with `gate=HOLD`, the
+unchanged semantic bindings, the parent work-order ID, and structured
+code/path/received/expected/instruction diagnostics. If that submission is
+still invalid, Runtime preserves `HOLD` without generating a third work order.
+The correction is not canonical `REPAIR`: Core requires `REPAIR` to create a
+new revision and a new cycle returning to `C00`. This closes host submission
+compliance without pretending to implement C00-C11 state transitions,
+Independent Reviewer, or Policy Kernel.
+
+An accepted object receives the same strict validation and gate constraints as
+an API-provider result.
 ChatGPT cannot alter a formal result, omit a selected norm, fabricate a Core
 reference, claim execution, or redirect Runtime-owned uncertainty without
 rejection.

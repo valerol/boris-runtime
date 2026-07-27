@@ -12,6 +12,10 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import uuid4
 
+from application.phase_output import (
+    PhaseOutputContract,
+    PhaseOutputContractError,
+)
 from semantic_executor import SemanticInput
 from semantic_executor.calculator import (
     MAX_SEMANTIC_PROMPT_CHARACTERS,
@@ -20,8 +24,8 @@ from semantic_executor.calculator import (
 from semantic_executor.models import SemanticView, thaw_value
 
 
-HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.3"
-HOST_WORK_ORDER_TOKEN_VERSION = "boris-host-work-order-token/0.2"
+HOST_WORK_ORDER_VERSION = "boris-semantic-work-order/0.4"
+HOST_WORK_ORDER_TOKEN_VERSION = "boris-host-work-order-token/0.3"
 HOST_WORK_ORDER_SECRET_ENV = "BORIS_HOST_EXECUTOR_SECRET"
 HOST_WORK_ORDER_TTL_ENV = "BORIS_HOST_WORK_ORDER_TTL_SECONDS"
 DEFAULT_HOST_WORK_ORDER_TTL_SECONDS = 900
@@ -83,6 +87,9 @@ class HostWorkOrderState:
     semantic_input: SemanticInput | None = None
     source_material: Mapping[str, Any] | None = None
     compiler_catalog: Mapping[str, Any] | None = None
+    correction_count: int = 0
+    parent_work_order_id: str | None = None
+    correction_issues: tuple[Mapping[str, Any], ...] = ()
     consumed: bool = False
 
 
@@ -425,16 +432,52 @@ def build_host_work_order(
     resume_count: int,
     resumed: bool,
     attestation_sha256: str,
+    correction_count: int = 0,
+    parent_work_order_id: str | None = None,
+    correction_issues: tuple[Mapping[str, Any], ...] = (),
 ) -> dict[str, Any]:
-    semantic_prompt = build_semantic_calculation_prompt(
+    if correction_count not in {0, 1}:
+        raise HostExecutorUnavailable(
+            "Host semantic submission permits at most one correction."
+        )
+    if correction_count == 0 and (
+        parent_work_order_id is not None or correction_issues
+    ):
+        raise HostExecutorUnavailable(
+            "Initial calculation work order cannot contain correction state."
+        )
+    if correction_count == 1 and (
+        not parent_work_order_id or not correction_issues
+    ):
+        raise HostExecutorUnavailable(
+            "Correction work order requires one parent and explicit issues."
+        )
+    base_semantic_prompt = build_semantic_calculation_prompt(
         view,
         semantic_input,
+    )
+    try:
+        phase_output_contract = PhaseOutputContract.from_view(view)
+    except PhaseOutputContractError as exc:
+        raise HostExecutorUnavailable(
+            "The verified Core does not expose an unambiguous phase output "
+            f"contract for {view.phase}."
+        ) from exc
+    semantic_prompt = _calculation_prompt(
+        base_semantic_prompt,
+        phase_output_contract=phase_output_contract,
+        correction_count=correction_count,
+        parent_work_order_id=parent_work_order_id,
+        correction_issues=correction_issues,
     )
     if len(semantic_prompt) > MAX_SEMANTIC_PROMPT_CHARACTERS:
         raise HostExecutorUnavailable(
             "Semantic calculation prompt exceeds the Phase 4F size limit."
         )
-    response_schema = semantic_calculation_response_schema(view)
+    response_schema = semantic_calculation_response_schema(
+        view,
+        phase_output_contract=phase_output_contract,
+    )
     core_ref = view.core_ref.to_dict()
     semantic_input_sha256 = canonical_sha256(
         semantic_input.to_prompt_dict()
@@ -462,7 +505,10 @@ def build_host_work_order(
         "semantic_view_sha256": semantic_view_sha256,
         "semantic_prompt_sha256": semantic_prompt_sha256,
         "response_schema_sha256": response_schema_sha256,
+        "correction_count": correction_count,
     }
+    if parent_work_order_id is not None:
+        claims["parent_work_order_id"] = parent_work_order_id
     token, signed_claims = codec.issue(claims)
     registry.register(HostWorkOrderState(
         work_order_id=work_order_id,
@@ -481,6 +527,12 @@ def build_host_work_order(
         semantic_view_sha256=semantic_view_sha256,
         expires_at=signed_claims["expires_at"],
         semantic_input=semantic_input,
+        correction_count=correction_count,
+        parent_work_order_id=parent_work_order_id,
+        correction_issues=tuple(
+            dict(issue)
+            for issue in correction_issues
+        ),
     ))
     return _host_work_order_envelope(
         work_order_id=work_order_id,
@@ -503,6 +555,10 @@ def build_host_work_order(
         minimum_context_window_tokens=signed_claims[
             "minimum_context_window_tokens"
         ],
+        phase_output_contract=phase_output_contract.to_dict(),
+        correction_count=correction_count,
+        parent_work_order_id=parent_work_order_id,
+        correction_issues=correction_issues,
     )
 
 
@@ -520,6 +576,10 @@ def _host_work_order_envelope(
     submission_field: str,
     phase: str | None = None,
     minimum_context_window_tokens: int = 0,
+    phase_output_contract: Mapping[str, Any] | None = None,
+    correction_count: int = 0,
+    parent_work_order_id: str | None = None,
+    correction_issues: tuple[Mapping[str, Any], ...] = (),
 ) -> dict[str, Any]:
     envelope = {
         "work_order_version": HOST_WORK_ORDER_VERSION,
@@ -554,6 +614,28 @@ def _host_work_order_envelope(
     }
     if phase is not None:
         envelope["phase"] = phase
+    if phase_output_contract is not None:
+        envelope["phase_output_contract"] = dict(
+            phase_output_contract
+        )
+    if correction_count:
+        envelope["gate"] = "HOLD"
+        envelope["correction"] = {
+            "correction_count": correction_count,
+            "previous_work_order_id": parent_work_order_id,
+            "return_state": phase,
+            "issues": [
+                dict(issue)
+                for issue in correction_issues
+            ],
+            "instruction": (
+                "Correct the submitted semantic_result against the unchanged "
+                "Core, phase, SemanticInput, response_schema, and "
+                "phase_output_contract. This correction remains under HOLD "
+                "and is not canonical REPAIR. Submit this signed work order "
+                "once."
+            ),
+        }
     return envelope
 
 
@@ -604,7 +686,12 @@ def consume_host_work_order(
             "phase": state.semantic_input.phase,
             "semantic_input_sha256": state.semantic_input_sha256,
             "semantic_view_sha256": state.semantic_view_sha256,
+            "correction_count": state.correction_count,
         })
+        if state.parent_work_order_id is not None:
+            expected["parent_work_order_id"] = (
+                state.parent_work_order_id
+            )
     else:
         raise HostWorkOrderStateMismatch(
             "Pending host work-order state has an unsupported type."
@@ -633,6 +720,17 @@ def require_current_host_scope(
         raise HostWorkOrderStateMismatch(
             "Host work order is not a calculation order."
         )
+    try:
+        phase_output_contract = PhaseOutputContract.from_view(view)
+    except PhaseOutputContractError as exc:
+        raise HostWorkOrderStateMismatch(
+            "Current Core no longer exposes the prepared phase output "
+            "contract."
+        ) from exc
+    base_semantic_prompt = build_semantic_calculation_prompt(
+        view,
+        state.semantic_input,
+    )
     current = {
         "core_ref": view.core_ref.to_dict(),
         "attestation_sha256": attestation_sha256,
@@ -640,14 +738,18 @@ def require_current_host_scope(
             state.semantic_input.to_prompt_dict()
         ),
         "semantic_view_sha256": canonical_sha256(view.to_prompt_dict()),
-        "semantic_prompt_sha256": text_sha256(
-            build_semantic_calculation_prompt(
-                view,
-                state.semantic_input,
-            )
-        ),
+        "semantic_prompt_sha256": text_sha256(_calculation_prompt(
+            base_semantic_prompt,
+            phase_output_contract=phase_output_contract,
+            correction_count=state.correction_count,
+            parent_work_order_id=state.parent_work_order_id,
+            correction_issues=state.correction_issues,
+        )),
         "response_schema_sha256": canonical_sha256(
-            semantic_calculation_response_schema(view)
+            semantic_calculation_response_schema(
+                view,
+                phase_output_contract=phase_output_contract,
+            )
         ),
     }
     expected = {
@@ -704,7 +806,18 @@ def require_current_compilation_scope(
 
 def semantic_calculation_response_schema(
     view: SemanticView,
+    *,
+    phase_output_contract: PhaseOutputContract | None = None,
 ) -> dict[str, Any]:
+    try:
+        output_contract = (
+            phase_output_contract
+            or PhaseOutputContract.from_view(view)
+        )
+    except PhaseOutputContractError as exc:
+        raise HostExecutorUnavailable(
+            "The verified Core phase output contract is unresolved."
+        ) from exc
     norm_refs = [candidate.norm_ref for candidate in view.candidates]
     layers = sorted({
         candidate.layer
@@ -876,14 +989,61 @@ def semantic_calculation_response_schema(
             "suggested_gate": {
                 "enum": ["PASS", "HOLD", "STOP", "REPAIR"],
             },
-            "candidate_result": {"type": "object"},
+            "candidate_result": thaw_value(
+                output_contract.schema
+            ),
         },
+        "x-boris-phase-output-contract": (
+            output_contract.to_dict()
+        ),
         "x-runtime-validation": (
             "SemanticCalculationValidator is authoritative and additionally "
             "checks exact norm coverage, copied formal results, ownership, "
             "unknown coverage, and forbidden execution claims."
         ),
     }
+
+
+def _calculation_prompt(
+    base_prompt: str,
+    *,
+    phase_output_contract: PhaseOutputContract,
+    correction_count: int,
+    parent_work_order_id: str | None,
+    correction_issues: tuple[Mapping[str, Any], ...],
+) -> str:
+    contract_payload = phase_output_contract.to_dict()
+    prompt = (
+        f"{base_prompt}\n\n"
+        "PHASE_OUTPUT_CONTRACT:\n"
+        f"{json.dumps(contract_payload, ensure_ascii=False, sort_keys=True)}"
+        "\n\ncandidate_result must be exactly the semantic_output.primary_object "
+        "described by PHASE_OUTPUT_CONTRACT. Do not submit the gate context, "
+        "a final answer from another phase, or free-form replacement fields."
+    )
+    if correction_count == 0:
+        return prompt
+    correction_payload = {
+        "gate": "HOLD",
+        "return_state": phase_output_contract.phase,
+        "correction_count": correction_count,
+        "previous_work_order_id": parent_work_order_id,
+        "issues": [
+            dict(issue)
+            for issue in correction_issues
+        ],
+    }
+    return (
+        f"{prompt}\n\n"
+        "HOLD_CORRECTION:\n"
+        f"{json.dumps(correction_payload, ensure_ascii=False, sort_keys=True)}"
+        "\n\nThe previous submission was not accepted. Correct every listed "
+        "path while preserving the signed Core identity, phase, SemanticInput, "
+        "selected norms, formal predicate results, and provenance. This is the "
+        "single requested correction under HOLD. It is not canonical REPAIR, "
+        "which requires a new revision and new cycle. Return only the corrected "
+        "object matching response_schema."
+    )
 
 
 def canonical_sha256(value: Any) -> str:

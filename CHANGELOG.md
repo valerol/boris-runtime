@@ -4,13 +4,26 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added `boris-phase-output-contract/1.0`. Every host `CALCULATION`
+  work order now derives `candidate_result` from the current phase capsule's
+  canonical `primary_object` and full `required_object_schemas` projection.
+  The future Runtime-owned gate context remains explicitly separate.
+- Closed host semantic-submission compliance with exactly one signed
+  correction work order under `HOLD`. It preserves the Core, phase,
+  `SemanticInput`, Semantic View, and provenance while returning structured
+  code/path/received/expected/instruction diagnostics. A second invalid
+  submission preserves `HOLD` and issues no third automatic work order.
+  This same-phase correction is explicitly not canonical `REPAIR`, which Core
+  requires to create a new revision and a new cycle returning to `C00`.
+- Versioned the phase-bound public submission contract as
+  `boris-semantic-work-order/0.4` and its signed token as
+  `boris-host-work-order-token/0.3`.
 - Locked the sole public MCP `boris.execute` route to
   `CHATGPT_HOST_ONLY`. The public schema no longer exposes `operation`; initial
   input and signed HOLD resume always become `prepare`, while exact work-order
   submissions become `submit`. Legacy `OPENAI_API execute` remains available
   only through the private HTTP API.
-- Versioned the corrected public submission contract as
-  `boris-semantic-work-order/0.3`. It no longer instructs ChatGPT to send an
+- The public submission contract no longer instructs ChatGPT to send an
   `operation` argument. A stale cached client that still sends
   `operation=execute` cannot select the legacy route: MCP binding discards the
   obsolete argument and the adapter forwards the request as `prepare`.

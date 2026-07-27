@@ -47,6 +47,10 @@ from application.host_executor import (
     require_current_host_scope,
     validate_host_submission_payload,
 )
+from application.phase_output import (
+    PhaseOutputContract,
+    PhaseOutputValidationError,
+)
 from application.runtime_mode import developer_mode_enabled
 from llm.config import build_lazy_llm_adapter
 from runtime_compatibility import (
@@ -588,13 +592,50 @@ class ExecutionService:
             view=view,
             attestation_sha256=compatibility.attestation_sha256,
         )
-        executor = SemanticExecutor(
-            surface,
-            calculator,
-            compatibility,
-        )
         stage_started = perf_counter()
-        candidate = executor.execute(state.semantic_input)
+        try:
+            PhaseOutputContract.from_view(view).validate(
+                submitted_result.get("candidate_result")
+            )
+            executor = SemanticExecutor(
+                surface,
+                calculator,
+                compatibility,
+            )
+            candidate = executor.execute(state.semantic_input)
+        except (
+            PhaseOutputValidationError,
+            SemanticCalculationError,
+        ) as exc:
+            timings["semantic_executor"] = _elapsed_ms(stage_started)
+            issues = _host_submission_issues(
+                exc,
+                submitted_result,
+            )
+            if state.correction_count == 0:
+                return build_host_work_order(
+                    codec=codec,
+                    registry=self.host_work_order_registry,
+                    semantic_input=state.semantic_input,
+                    view=view,
+                    session_id=state.session_id,
+                    source_text=state.source_text,
+                    resume_count=state.resume_count,
+                    resumed=state.resumed,
+                    attestation_sha256=(
+                        compatibility.attestation_sha256
+                    ),
+                    correction_count=1,
+                    parent_work_order_id=state.work_order_id,
+                    correction_issues=tuple(issues),
+                )
+            return self._host_compliance_hold(
+                state=state,
+                semantic_input=state.semantic_input,
+                issues=issues,
+                timings=timings,
+                started=started,
+            )
         timings["semantic_executor"] = _elapsed_ms(stage_started)
         return self._candidate_envelope(
             candidate=candidate,
@@ -609,6 +650,87 @@ class ExecutionService:
             host_work_order_id=state.work_order_id,
             started=started,
         )
+
+    @staticmethod
+    def _host_compliance_hold(
+        *,
+        state,
+        semantic_input,
+        issues,
+        timings,
+        started,
+    ) -> dict:
+        reason = (
+            "The single correction submission remained invalid for the "
+            f"canonical {semantic_input.phase} output contract. Runtime "
+            "preserved HOLD and ended automatic submission."
+        )
+        result = {
+            "execution_version": EXECUTION_VERSION,
+            "session_id": state.session_id,
+            "status": "semantic_candidate",
+            "semantic_provider": HOST_SEMANTIC_PROVIDER,
+            "host_work_order_id": state.work_order_id,
+            "phase": semantic_input.phase,
+            "gate": "HOLD",
+            "candidate_result": None,
+            "candidate_unavailable_reason": reason,
+            "norm_results": [],
+            "unknowns": list(semantic_input.unknowns),
+            "uncertainties": [],
+            "conflicts": [],
+            "alternatives": [],
+            "limitations": [
+                *HOST_EXECUTOR_LIMITATIONS,
+                *PUBLIC_LIMITATIONS,
+            ],
+            "hold": {
+                "handoff_version": "boris-hold-handoff/1.2",
+                "status": "resolution_not_operator_owned",
+                "reason": reason,
+                "required_operator_input": None,
+                "resolution_summary": {
+                    "MODEL_UNCERTAINTY": [{
+                        "uncertainty_id": (
+                            "host-semantic-submission-compliance"
+                        ),
+                        "description": reason,
+                        "resolution_action": (
+                            "OPERATOR_DECISION_REQUIRED"
+                        ),
+                        "issues": [dict(issue) for issue in issues],
+                    }],
+                },
+                "resume_count": state.resume_count,
+            },
+        }
+        if developer_mode_enabled():
+            result["developer_trace"] = {
+                "semantic_submission": {
+                    "status": "HOLD",
+                    "correction_count": state.correction_count,
+                    "previous_work_order_id": (
+                        state.parent_work_order_id
+                    ),
+                    "issues": [dict(issue) for issue in issues],
+                },
+                "stages": {
+                    "semantic_input_compiler": (
+                        "not_invoked_repair_submission"
+                    ),
+                    "semantic_executor": (
+                        "rejected_before_candidate"
+                    ),
+                    "independent_reviewer": "not_implemented",
+                    "policy_kernel": "not_implemented",
+                    "state_event": "not_implemented",
+                },
+                "stage_timings_ms": {
+                    **dict(timings),
+                    "total": _elapsed_ms(started),
+                },
+            }
+        return sanitize_public_value(result)
 
     def execute(
         self,
@@ -1175,6 +1297,27 @@ def _contains_literal(text: str, value: str) -> bool:
         rf"(?<![A-Za-z0-9_-]){re.escape(value)}(?![A-Za-z0-9_-])",
         text,
     ) is not None
+
+
+def _host_submission_issues(exc, submitted_result) -> list[dict]:
+    if isinstance(exc, PhaseOutputValidationError):
+        return [
+            issue.to_dict()
+            for issue in exc.issues
+        ]
+    return [{
+        "code": "SEMANTIC_RESULT_CONTRACT_INVALID",
+        "path": "$.semantic_result",
+        "received": {
+            "fields": sorted(submitted_result),
+        },
+        "expected": (
+            "one semantic_result object matching the signed response_schema"
+        ),
+        "instruction": (
+            f"Correct the semantic_result contract error: {exc}"
+        ),
+    }]
 
 
 def _normalize_key(value) -> str:

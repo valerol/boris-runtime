@@ -12,7 +12,6 @@ from application.host_executor import (
     InvalidHostWorkOrder,
 )
 from semantic_executor import (
-    SemanticCalculationError,
     SemanticInput,
     SemanticViewBuilder,
 )
@@ -49,7 +48,7 @@ def test_host_prepare_and_submit_use_two_signed_validated_work_orders(
     )
 
     assert compilation_order["work_order_version"] == (
-        "boris-semantic-work-order/0.3"
+        "boris-semantic-work-order/0.4"
     )
     assert compilation_order["work_order_type"] == "COMPILATION"
     assert compilation_order["status"] == "semantic_work_order"
@@ -102,6 +101,12 @@ def test_host_prepare_and_submit_use_two_signed_validated_work_orders(
     )
     assert work_order["work_order_type"] == "CALCULATION"
     assert work_order["phase"] == "C03"
+    assert work_order["phase_output_contract"][
+        "semantic_output"
+    ]["primary_object"] == "CandidateResult"
+    assert work_order["response_schema"]["properties"][
+        "candidate_result"
+    ]["required"] == ["status"]
     assert "SEMANTIC_CALCULATION_DATA" in work_order["semantic_prompt"]
     assert "semantic_result" in work_order["submission_contract"][
         "required_arguments"
@@ -274,7 +279,9 @@ def test_host_submission_rejects_wrong_session_and_current_scope(
         )
 
 
-def test_malformed_host_result_is_rejected_and_consumes_attempt(monkeypatch):
+def test_invalid_phase_output_receives_one_hold_correction_and_can_be_accepted(
+    monkeypatch,
+):
     monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
     surface = build_surface()
     source = compiler_payload("Explain the runtime.")
@@ -297,20 +304,93 @@ def test_malformed_host_result_is_rejected_and_consumes_attempt(monkeypatch):
         "session_id": "invalid-result",
     }
 
-    with pytest.raises(
-        SemanticCalculationError,
-        match="fields mismatch",
-    ):
-        service.submit_host(
-            semantic_result={"candidate_result": {}},
-            **arguments,
-        )
+    correction = service.submit_host(
+        semantic_result={"candidate_result": {}},
+        **arguments,
+    )
+
+    assert correction["gate"] == "HOLD"
+    assert correction["work_order_type"] == "CALCULATION"
+    assert correction["correction"]["correction_count"] == 1
+    assert correction["correction"]["previous_work_order_id"] == (
+        work_order["work_order_id"]
+    )
+    assert correction["correction"]["return_state"] == "C03"
+    assert correction["correction"]["issues"] == [{
+        "code": "PHASE_OUTPUT_REQUIRED_FIELDS_MISSING",
+        "path": "$.candidate_result",
+        "received": [],
+        "expected": "required fields ['status']",
+        "instruction": (
+            "Add the missing canonical CandidateResult fields: ['status']."
+        ),
+    }]
+    assert "HOLD_CORRECTION" in correction["semantic_prompt"]
+    assert "not canonical REPAIR" in correction["semantic_prompt"]
+
+    result = service.submit_host(
+        work_order_id=correction["work_order_id"],
+        work_order_token=correction["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_result=valid_semantic_result(surface, source),
+        session_id="invalid-result",
+    )
+    assert result["gate"] == "PASS"
 
     with pytest.raises(HostWorkOrderAlreadyConsumed):
         service.submit_host(
             semantic_result=valid_semantic_result(surface, source),
             **arguments,
         )
+
+
+def test_invalid_hold_correction_preserves_hold_without_third_attempt(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    surface = build_surface()
+    source = compiler_payload("Explain the runtime.")
+    service, _adapter, _api_calculator, _events = build_service(
+        source,
+        surface=surface,
+    )
+    configure_host_executor(service)
+    work_order = prepare_calculation_work_order(
+        service,
+        source,
+        "Explain the runtime.",
+        session_id="invalid-correction",
+    )
+    correction = service.submit_host(
+        work_order_id=work_order["work_order_id"],
+        work_order_token=work_order["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_result={"candidate_result": {}},
+        session_id="invalid-correction",
+    )
+
+    hold = service.submit_host(
+        work_order_id=correction["work_order_id"],
+        work_order_token=correction["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_result={"candidate_result": {}},
+        session_id="invalid-correction",
+    )
+
+    assert hold["gate"] == "HOLD"
+    assert hold["candidate_result"] is None
+    assert hold["hold"]["status"] == "resolution_not_operator_owned"
+    assert hold["hold"]["required_operator_input"] is None
+    assert hold["hold"]["resolution_summary"][
+        "MODEL_UNCERTAINTY"
+    ][0]["issues"][0]["code"] == (
+        "PHASE_OUTPUT_REQUIRED_FIELDS_MISSING"
+    )
+    assert "work_order_id" not in hold
+    assert "submission_contract" not in hold
 
 
 def test_malformed_host_compilation_is_rejected_and_consumes_attempt(

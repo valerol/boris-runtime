@@ -141,7 +141,7 @@ class RuntimeHostSubmissionContract(BaseModel):
 
 
 class RuntimeHostWorkOrderResponse(BaseModel):
-    work_order_version: Literal["boris-semantic-work-order/0.3"]
+    work_order_version: Literal["boris-semantic-work-order/0.4"]
     work_order_id: str
     work_order_type: Literal["COMPILATION", "CALCULATION"]
     session_id: str
@@ -151,12 +151,24 @@ class RuntimeHostWorkOrderResponse(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    gate: Literal["HOLD"] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     minimum_context_window_tokens: int = Field(ge=0)
     core_ref: dict[str, str]
     issued_at: str
     expires_at: str
     semantic_prompt: str
     response_schema: dict[str, Any]
+    phase_output_contract: dict[str, Any] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    correction: dict[str, Any] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     bindings: RuntimeHostWorkOrderBindings
     submission_contract: RuntimeHostSubmissionContract
     limitations: list[str] = Field(default_factory=list)
@@ -165,9 +177,15 @@ class RuntimeHostWorkOrderResponse(BaseModel):
     def validate_work_order_type(self):
         bindings = self.bindings
         if self.work_order_type == "COMPILATION":
-            if self.phase is not None:
+            if (
+                self.phase is not None
+                or self.phase_output_contract is not None
+                or self.gate is not None
+                or self.correction is not None
+            ):
                 raise ValueError(
-                    "Compilation work order cannot preselect a phase."
+                    "Compilation work order cannot contain phase or correction "
+                    "state."
                 )
             if (
                 bindings.semantic_source_sha256 is None
@@ -182,6 +200,7 @@ class RuntimeHostWorkOrderResponse(BaseModel):
         else:
             if (
                 self.phase is None
+                or self.phase_output_contract is None
                 or bindings.semantic_input_sha256 is None
                 or bindings.semantic_view_sha256 is None
                 or bindings.semantic_source_sha256 is not None
@@ -189,6 +208,12 @@ class RuntimeHostWorkOrderResponse(BaseModel):
             ):
                 raise ValueError(
                     "Calculation work-order bindings are invalid."
+                )
+            if (self.gate is None) != (self.correction is None):
+                raise ValueError(
+                    "Calculation HOLD gate and correction contract must be "
+                    "present "
+                    "together."
                 )
             submission_field = "semantic_result"
         if submission_field not in self.submission_contract.required_arguments:

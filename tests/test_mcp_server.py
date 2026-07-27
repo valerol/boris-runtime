@@ -298,7 +298,7 @@ def _execution_packet():
 
 def _host_work_order_packet():
     return {
-        "work_order_version": "boris-semantic-work-order/0.3",
+        "work_order_version": "boris-semantic-work-order/0.4",
         "work_order_id": "work-order-1",
         "work_order_type": "COMPILATION",
         "session_id": "host-mcp",

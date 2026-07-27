@@ -22,6 +22,10 @@ Current implemented boundary:
   the same `boris.execute`, with no public provider selector, zero API calls on
   that route, and the autonomous API provider retained only behind private
   HTTP;
+- phase-bound `candidate_result` validation from the canonical primary object,
+  followed by one signed diagnostic correction under `HOLD`, with `HOLD`
+  preserved if the corrected submission remains invalid; canonical `REPAIR`
+  remains deferred until new-revision/new-cycle transitions exist;
 - developer-only visual MCP surface v2 with model-hidden safe trace;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;

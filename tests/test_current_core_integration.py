@@ -11,6 +11,10 @@ from application.host_executor import (
     InMemoryHostWorkOrderRegistry,
     build_host_work_order,
 )
+from application.phase_output import (
+    PhaseOutputContract,
+    PhaseOutputValidationError,
+)
 from core_surface import load_core_surface
 from runtime_compatibility import (
     OperatorAcceptance,
@@ -128,6 +132,11 @@ def test_current_core_builds_host_work_order_for_every_phase(
             view,
             semantic_input,
         )
+        semantic_result["candidate_result"] = _schema_value(
+            work_order["response_schema"]["properties"][
+                "candidate_result"
+            ]
+        )
 
         jsonschema.validate(
             semantic_result,
@@ -136,6 +145,48 @@ def test_current_core_builds_host_work_order_for_every_phase(
         assert work_order["phase"] == phase
         assert work_order["semantic_prompt"]
         assert "operation" not in work_order["submission_contract"]
+
+
+def test_current_core_c04_rejects_late_phase_free_form_result(
+    current_core_surface,
+):
+    view = SemanticViewBuilder().build(
+        current_core_surface,
+        SemanticInput(
+            phenomenon="Qualify the current question.",
+            phase="C04",
+        ),
+    )
+    contract = PhaseOutputContract.from_view(view)
+
+    assert contract.primary_object == "Question"
+    assert contract.schema["required"] == [
+        "question_id",
+        "unknown",
+        "scope",
+        "provenance",
+        "significance",
+        "answer_classes",
+        "discriminating_power",
+        "cost",
+        "risk",
+        "research_route",
+        "lifecycle_state",
+    ]
+    with pytest.raises(PhaseOutputValidationError) as exc_info:
+        contract.validate({
+            "central_judgment": "The law should be narrowed.",
+            "recommendation": "Adopt a limited emergency regime.",
+        })
+
+    codes = {
+        issue.code
+        for issue in exc_info.value.issues
+    }
+    assert codes == {
+        "PHASE_OUTPUT_REQUIRED_FIELDS_MISSING",
+        "PHASE_OUTPUT_UNDECLARED_FIELDS",
+    }
 
 
 def test_current_core_runtime_compatibility_attestation(
@@ -553,6 +604,11 @@ def test_current_core_host_only_route_uses_no_api_adapter(
     semantic_result = AutoCalculator(
         suggested_gate="HOLD",
     ).calculate(view, state.semantic_input)
+    semantic_result["candidate_result"] = _schema_value(
+        calculation_order["response_schema"]["properties"][
+            "candidate_result"
+        ]
+    )
     result = service.submit_host(
         work_order_id=calculation_order["work_order_id"],
         work_order_token=calculation_order["submission_contract"][
@@ -601,3 +657,31 @@ def test_current_core_repository_route_needs_no_acceptance_sidecar(
         "semantic_input_compiler",
         "semantic_executor",
     ]
+
+
+def _schema_value(schema):
+    if "enum" in schema:
+        return schema["enum"][0]
+    branches = schema.get("oneOf") or schema.get("anyOf")
+    if branches:
+        return _schema_value(branches[0])
+    value_type = schema.get("type")
+    if value_type == "object":
+        properties = schema.get("properties", {})
+        return {
+            name: _schema_value(properties[name])
+            for name in schema.get("required", [])
+        }
+    if value_type == "array":
+        minimum = int(schema.get("minItems", 0))
+        return [
+            _schema_value(schema.get("items", {"type": "string"}))
+            for _index in range(minimum)
+        ]
+    if value_type == "boolean":
+        return False
+    if value_type == "integer":
+        return 0
+    if value_type == "number":
+        return 0
+    return "X"

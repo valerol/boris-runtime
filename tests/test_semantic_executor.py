@@ -1114,6 +1114,55 @@ def build_surface():
         _payloads={
             "assurance/NORM_PHASE_APPLICABILITY.tsv": applicability,
         },
+        phase_contexts={
+            "C03": {
+                "phase_capsule": {
+                    "phase_id": "C03",
+                    "required_object_schemas": [{
+                        "object_type": "CandidateResult",
+                        "required_fields": ["status"],
+                        "field_types": {
+                            "status": ["CANDIDATE_ONLY"],
+                        },
+                        "allowed_states": [],
+                    }],
+                    "gate_contract": {
+                        "canonical_object_projection": {
+                            "assessment_objects": ["CandidateResult"],
+                            "output_objects": ["CandidateResult"],
+                            "primary_object": "CandidateResult",
+                        },
+                        "input_schema_ref": (
+                            "schema/test.json#/$defs/GateContextC03"
+                        ),
+                    },
+                },
+            },
+            "PACKAGE_VALIDATION": {
+                "phase_capsule": {
+                    "phase_id": "PACKAGE_VALIDATION",
+                    "required_object_schemas": [{
+                        "object_type": "CandidateResult",
+                        "required_fields": ["status"],
+                        "field_types": {
+                            "status": ["CANDIDATE_ONLY"],
+                        },
+                        "allowed_states": [],
+                    }],
+                    "gate_contract": {
+                        "canonical_object_projection": {
+                            "assessment_objects": ["CandidateResult"],
+                            "output_objects": ["CandidateResult"],
+                            "primary_object": "CandidateResult",
+                        },
+                        "input_schema_ref": (
+                            "schema/test.json#/$defs/"
+                            "GateContextPackageValidation"
+                        ),
+                    },
+                },
+            },
+        },
     )
 
 

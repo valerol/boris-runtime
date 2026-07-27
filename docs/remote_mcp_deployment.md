@@ -115,10 +115,14 @@ Available public MCP tools:
 - `boris.execute`: calls private `/runtime/execute`; Runtime verifies
   compatibility and returns a signed `CHATGPT_HOST_ONLY` compilation work
   order. ChatGPT submits the strict `SemanticInput`, receives the calculation
-  work order, submits the semantic result, and receives the non-mutating
-  `ExecutionCandidate`. A HOLD returns a signed operator handoff; resume calls
-  the same tool and bypasses repeated input compilation. The public schema has
-  no `operation` field and cannot select the API calculator.
+  work order with the exact phase output contract, submits the semantic
+  result, and receives the non-mutating `ExecutionCandidate`. One invalid
+  result receives one signed diagnostic correction under `HOLD`; a second
+  invalid submission preserves `HOLD` without another automatic call. An
+  operator-owned HOLD
+  returns a signed handoff; resume calls the same tool and bypasses repeated
+  input compilation. The public schema has no `operation` field and cannot
+  select the API calculator.
 
 There is no public `boris.frame` alias. Frame diagnostics and answer validation
 remain available through the private Runtime API and are not registered as
@@ -196,6 +200,11 @@ same worker for prepare and both submits. A multi-worker or restart-safe deploym
 requires the deferred persistent atomic registry. This transaction registry is
 not BORIS memory and does not admit a state transition.
 
+The first invalid calculation may add one correction submit under `HOLD` to
+the transaction. Runtime never creates a further automatic work order after
+an invalid correction. This is not canonical `REPAIR`, which requires a new
+revision and a new cycle.
+
 The work order exposes the Core minimum context-window requirement, but the MCP
 server cannot attest the exact ChatGPT model or effective window. Host results
 therefore retain `host_model_identity_not_attested` and
@@ -271,7 +280,7 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS through the sole host-only boris.execute tool. Preserve every ExecutionCandidate gate. Send the initial input, submit semantic_input with the exact ID and token from the signed COMPILATION work order, then submit semantic_result with the new exact ID and token from CALCULATION; do not answer between calls. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
+Connects ChatGPT to BORIS through the sole host-only boris.execute tool. Preserve every gate. Send the initial input, submit semantic_input with the exact signed COMPILATION ID and token, then semantic_result with the signed CALCULATION ID and token. If one HOLD correction is returned, correct its listed paths and submit it once; if HOLD remains, stop. Do not answer between work orders. For an operator-owned HOLD, request only the declared input and resume through its signed continuation.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.

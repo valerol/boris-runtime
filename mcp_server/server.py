@@ -10,12 +10,12 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS exposes one public tool: boris.execute. Preserve every candidate "
-    "gate and ask only for declared operator input. Every initial or resumed "
-    "request returns a CHATGPT_HOST_ONLY work order. Complete it and submit the "
-    "exact ID, token, and semantic_input for COMPILATION, then semantic_result "
-    "for CALCULATION. Do not answer between calls or alter Core identity, scope, "
-    "or formal results. No result is independently reviewed, policy-admitted, "
+    "BORIS exposes one public tool: boris.execute. Initial and resumed requests "
+    "return signed CHATGPT_HOST_ONLY work orders. Submit the exact ID, token, "
+    "and semantic_input for COMPILATION, then semantic_result for CALCULATION. "
+    "For one HOLD correction, fix listed paths and submit once; if HOLD remains, "
+    "stop. Never answer between calls or alter Core identity, phase, scope, or "
+    "formal results. Preserve every gate. Results are not reviewed, admitted, "
     "state-mutating, or executed."
 )
 
@@ -251,6 +251,17 @@ def _host_work_order_instruction(payload):
         if work_order_type == "COMPILATION"
         else "semantic_result"
     )
+    correction_instruction = ""
+    if payload.get("gate") == "HOLD" and isinstance(
+        payload.get("correction"),
+        dict,
+    ):
+        correction_instruction = (
+            " This is the single correction requested under HOLD. Correct every "
+            "path in correction.issues against phase_output_contract and do not "
+            "answer the user before submitting it. This is not canonical REPAIR. "
+            "If Runtime preserves HOLD afterward, stop the automatic loop."
+        )
     return (
         "BORIS returned a signed CHATGPT_HOST_ONLY "
         f"{work_order_type} SemanticWorkOrder. Do not answer "
@@ -263,7 +274,8 @@ def _host_work_order_instruction(payload):
         "to that JSON object. Do not use another tool or independent source to "
         "change the work-order facts, Core identity, phase, or scope. A "
         "COMPILATION submission returns the next CALCULATION work order; do "
-        "not answer until the final ExecutionCandidate is returned."
+        "not answer until the final ExecutionCandidate or terminal HOLD is "
+        f"returned.{correction_instruction}"
     )
 
 
@@ -276,6 +288,15 @@ def _candidate_instruction(payload, candidate_json):
             else None
         )
         if not isinstance(required, dict):
+            if payload.get("candidate_result") is None:
+                return (
+                    "BORIS preserved HOLD and did not accept a semantic "
+                    "candidate. Do not generate a replacement answer and do "
+                    "not call boris.execute again automatically. Present the "
+                    "HOLD reason and await an explicit operator decision.\n\n"
+                    "Runtime HOLD:\n"
+                    f"{candidate_json}"
+                )
             return (
                 "BORIS returned HOLD without an operator-owned resolution "
                 "target. Do not ask the operator to supply Runtime objects, "

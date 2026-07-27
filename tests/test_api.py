@@ -678,7 +678,7 @@ def execution_packet(session_id, gate="HOLD"):
 def host_work_order_packet(session_id, work_order_type="COMPILATION"):
     is_compilation = work_order_type == "COMPILATION"
     packet = {
-        "work_order_version": "boris-semantic-work-order/0.3",
+        "work_order_version": "boris-semantic-work-order/0.4",
         "work_order_id": "work-order-1",
         "work_order_type": work_order_type,
         "session_id": session_id,
@@ -735,4 +735,21 @@ def host_work_order_packet(session_id, work_order_type="COMPILATION"):
     }
     if not is_compilation:
         packet["phase"] = "C03"
+        packet["phase_output_contract"] = {
+            "contract_version": "boris-phase-output-contract/1.0",
+            "phase": "C03",
+            "semantic_output": {
+                "primary_object": "CandidateResult",
+                "output_objects": ["CandidateResult"],
+                "schema_source": (
+                    "phase_capsule.required_object_schemas"
+                ),
+                "schema": {"type": "object"},
+            },
+            "gate_context": {
+                "schema_ref": "schema/test.json#/$defs/C03",
+                "runtime_owned": True,
+                "included_in_semantic_submission": False,
+            },
+        }
     return packet

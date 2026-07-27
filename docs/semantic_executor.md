@@ -195,6 +195,13 @@ returns a signed `CALCULATION` work order. HMAC tokens and the in-memory
 registry bind the exact source, compiler catalog, compiled input, view, prompts,
 schemas, Core identity, attestation, session, phase, scope, and expiry.
 
+Every calculation work order includes
+`boris-phase-output-contract/1.0`. Runtime resolves the current capsule's
+canonical primary output object against its full `required_object_schemas`
+entry and installs that schema at
+`response_schema.properties.candidate_result`. The future gate context remains
+a separate Runtime-owned contract.
+
 Public MCP submission never calls an LLM. Runtime consumes each work order
 once, rebuilds its scope against the current Core, verifies all hashes, and
 gives the calculation submission to the ordinary
@@ -202,6 +209,17 @@ gives the calculation submission to the ordinary
 checks, candidate-result guards, and deterministic gate constraints therefore
 remain provider-independent. Direct private HTTP clients use explicit
 `operation=prepare` and `operation=submit` values for the same protocol.
+
+A phase-output or semantic-result contract violation on the first submission
+returns one new signed calculation work order with `gate=HOLD`, unchanged
+semantic bindings, and structured diagnostics for every violated path. The
+correction order is also single-use. If it remains invalid, Runtime preserves
+`HOLD`, exposes no candidate, and ends automatic submission. No third attempt,
+automatic `STOP`, or additional Runtime state is introduced.
+
+This correction is a return under the existing phase `HOLD`, not canonical
+`REPAIR`. Core reserves `REPAIR` for creating a new revision, invalidating
+affected descendants, retesting dependencies, and beginning a new cycle.
 
 This proof of concept moves both semantic compilation and phase-complete
 calculation into the current ChatGPT host, so the host-only route never

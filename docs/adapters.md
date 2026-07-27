@@ -35,6 +35,12 @@ or `semantic_result` is always forwarded as `submit`. The MCP adapter cannot
 select the private legacy `execute` operation or the configured API
 calculator.
 
+A Runtime-issued correction remains a `CALCULATION` work order with
+`gate=HOLD`, the phase output contract, and structured issues. The adapter
+forwards its one corrected submission exactly like the initial calculation.
+It does not create retries; an ensuing `HOLD` ends the automatic route. This
+transport correction is not canonical `REPAIR`.
+
 In developer mode the tool descriptor links one versioned MCP Apps resource.
 The adapter moves Runtime `developer_trace` from the HTTP payload into
 tool-result `_meta`, while keeping the candidate and handoff in
