@@ -18,7 +18,7 @@ def test_mcp_config_defaults(monkeypatch):
     config = load_config()
 
     assert config.runtime_api_url == "http://127.0.0.1:8000"
-    assert config.timeout_seconds == 30.0
+    assert config.timeout_seconds == 420.0
     assert config.transport == "stdio"
     assert config.host == "127.0.0.1"
     assert config.port == 9000

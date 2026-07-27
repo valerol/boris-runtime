@@ -4,6 +4,7 @@ __all__ = [
     "ChatGPTHostProvider",
     "SemanticProvider",
     "ServerLLMProvider",
+    "LLMIndependentReviewer",
     "ValidationEngine",
 ]
 
@@ -36,4 +37,8 @@ def __getattr__(name):
             "SemanticProvider": SemanticProvider,
             "ServerLLMProvider": ServerLLMProvider,
         }[name]
+    if name == "LLMIndependentReviewer":
+        from independent_reviewer import LLMIndependentReviewer
+
+        return LLMIndependentReviewer
     raise AttributeError(name)

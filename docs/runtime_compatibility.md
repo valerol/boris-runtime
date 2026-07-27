@@ -103,12 +103,12 @@ The Phase 4R profile declares capabilities for:
 - deontic operation checks;
 - GateDecision semantics;
 - structured semantic calculation;
+- separate IND2 independent review;
 - no direct Runtime state mutation.
 
 Its limitations are explicit:
 
 - semantic evaluation only;
-- no Independent Reviewer;
 - no Policy Kernel transition;
 - no external action;
 - no stateful orchestration-cycle integration.

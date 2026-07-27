@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 
@@ -16,6 +17,8 @@ from application.execution import (
     SemanticInputCompilationError,
     SemanticInputCompiler,
 )
+from independent_reviewer import LLMIndependentReviewer
+from tests.review_fixtures import review_llm_payload
 from tests.test_semantic_executor import (
     AutoCalculator,
     build_accepted_compatibility,
@@ -80,6 +83,32 @@ class RecordingCalculator(AutoCalculator):
         return super().calculate(view, semantic_input)
 
 
+class ReviewAdapter:
+    def __init__(self, events=None, output=None):
+        self.events = events if events is not None else []
+        self.output = output or review_llm_payload()
+        self.calls = []
+
+    def call_structured(self, prompt, system_message):
+        self.events.append("independent_reviewer")
+        self.calls.append((prompt, system_message))
+        return json.dumps(self.output)
+
+
+def reviewer_factory(events, output=None):
+    adapter = ReviewAdapter(events, output=output)
+    return lambda: LLMIndependentReviewer(
+        adapter,
+        now=lambda: datetime(
+            2026,
+            7,
+            27,
+            tzinfo=timezone.utc,
+        ),
+        id_factory=lambda: "IR-test",
+    )
+
+
 def test_execution_service_runs_one_semantic_candidate_route(monkeypatch):
     monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
     service, adapter, calculator, events = build_service(
@@ -91,6 +120,7 @@ def test_execution_service_runs_one_semantic_candidate_route(monkeypatch):
         session_id="execution-test",
     )
 
+    review = result.pop("independent_review")
     assert result == {
         "execution_version": "boris-execution/1.0",
         "session_id": "execution-test",
@@ -115,18 +145,26 @@ def test_execution_service_runs_one_semantic_candidate_route(monkeypatch):
         "conflicts": [],
         "alternatives": [],
         "limitations": [
-            "not_independently_reviewed",
             "not_policy_admitted",
             "no_state_mutation",
             "no_external_action",
         ],
     }
+    assert review["review_version"] == "boris-independent-review/1.0"
+    assert review["decision"] == "PASS"
+    assert review["independence_level"] == "IND2"
+    assert review["candidate_gate_assessment"] == "SUPPORTED"
+    assert review["state_mutation"] is False
+    assert len(
+        review["bindings"]["execution_candidate_sha256"]
+    ) == 64
     assert events == [
         "core_surface",
         "operator_acceptance",
         "runtime_compatibility",
         "semantic_input_compiler",
         "semantic_executor",
+        "independent_reviewer",
     ]
     assert len(adapter.calls) == 1
     assert calculator.calls == 1
@@ -1173,9 +1211,23 @@ def test_developer_runtime_mode_adds_safe_combined_trace_only(monkeypatch):
     candidate_without_trace = {
         key: value
         for key, value in developer_result.items()
-        if key != "developer_trace"
+        if key not in {"developer_trace", "independent_review"}
     }
-    assert candidate_without_trace == production_result
+    production_without_review = {
+        key: value
+        for key, value in production_result.items()
+        if key != "independent_review"
+    }
+    assert candidate_without_trace == production_without_review
+    production_review = production_result["independent_review"]
+    developer_review = developer_result["independent_review"]
+    assert developer_review["decision"] == production_review["decision"]
+    assert developer_review["bindings"][
+        "semantic_input_sha256"
+    ] == production_review["bindings"]["semantic_input_sha256"]
+    assert developer_review["bindings"][
+        "semantic_calculation_sha256"
+    ] == production_review["bindings"]["semantic_calculation_sha256"]
     trace = developer_result["developer_trace"]
     assert trace["trace_version"] == "boris-execution-trace/1.0"
     assert trace["semantic_input"]["phase"] == "C03"
@@ -1185,7 +1237,8 @@ def test_developer_runtime_mode_adds_safe_combined_trace_only(monkeypatch):
     )
     assert trace["semantic_execution"]["suggested_gate"] == "PASS"
     assert trace["semantic_execution"]["constrained_gate"] == "PASS"
-    assert trace["stages"]["independent_reviewer"] == "not_implemented"
+    assert trace["stages"]["independent_reviewer"] == "invoked"
+    assert trace["independent_review"]["decision"] == "PASS"
     assert trace["stages"]["policy_kernel"] == "not_implemented"
     assert trace["stages"]["external_action"] == "not_invoked"
     assert set(trace["stage_timings_ms"]) >= {
@@ -1194,12 +1247,14 @@ def test_developer_runtime_mode_adds_safe_combined_trace_only(monkeypatch):
         "runtime_compatibility",
         "semantic_input_compile",
         "semantic_executor",
+        "independent_reviewer",
         "context_projection",
         "total",
     }
     serialized = json.dumps(trace)
     assert "SEMANTIC_INPUT_COMPILER_DATA" not in serialized
     assert "Return only the Phase 4F" not in serialized
+    assert "adversarially test" not in serialized
 
 
 def build_service(compiler_output, surface=None):
@@ -1222,6 +1277,7 @@ def build_service(compiler_output, surface=None):
         ),
         llm_adapter_factory=lambda: adapter,
         calculator_factory=lambda _adapter: calculator,
+        reviewer_factory=reviewer_factory(events),
     )
     return service, adapter, calculator, events
 

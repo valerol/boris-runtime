@@ -3,6 +3,7 @@ from pathlib import Path
 from mcp_server.models import BorisExecuteRequest
 from mcp_server.server import run_boris_execute
 from mcp_server.runtime_client import RuntimeAPIError
+from tests.review_fixtures import independent_review_packet
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -96,7 +97,7 @@ def test_developer_execute_moves_trace_to_component_only_metadata():
     assert response["_meta"]["developer_trace"] == packet[
         "developer_trace"
     ]
-    assert response["_meta"]["developer_surface_version"] == "2.4"
+    assert response["_meta"]["developer_surface_version"] == "2.5"
 
 
 def test_boris_execute_forwards_resume_to_runtime():
@@ -224,12 +225,12 @@ def _execution_packet():
         "gate": "HOLD",
         "candidate_result": {"summary": "Candidate only."},
         "norm_results": [],
-        "unknowns": ["Independent review is absent."],
+        "unknowns": ["Material authority remains unresolved."],
         "uncertainties": [],
         "conflicts": [],
         "alternatives": [],
+        "independent_review": independent_review_packet(),
         "limitations": [
-            "not_independently_reviewed",
             "not_policy_admitted",
             "no_state_mutation",
             "no_external_action",
@@ -259,7 +260,7 @@ def _execution_packet():
                 }],
                 "semantic_unknowns": [{
                     "unknown_id": "unknown-001",
-                    "description": "Independent review is absent.",
+                    "description": "Material authority remains unresolved.",
                     "target_path": None,
                     "resolution_kind": "operator_statement",
                     "expected_type": "text",
@@ -267,13 +268,13 @@ def _execution_packet():
                     "core_refs": [],
                     "source_resolution_class": "OPERATOR_INPUT",
                     "resolution_owner": "OPERATOR",
-                    "question": "Resolve: Independent review is absent.",
+                    "question": "Resolve the missing material authority.",
                 }],
                 "predicate_inputs": [],
                 "system_targets": [{
                     "target_id": "semantic_unknown:unknown-001",
                     "kind": "SEMANTIC_UNKNOWN",
-                    "description": "Independent review is absent.",
+                    "description": "Material authority remains unresolved.",
                     "target_path": None,
                     "norm_refs": [],
                     "source_resolution_class": "OPERATOR_INPUT",
@@ -297,7 +298,7 @@ def _hold_record():
         "hold_reason": "Material information remains unresolved.",
         "scope": ["C03"],
         "source_refs": [],
-        "unknowns": ["Independent review is absent."],
+        "unknowns": ["Material authority remains unresolved."],
         "evidence_refs": [],
         "open_debts": ["uncertainty:unknown-001"],
         "state_hash": "a" * 64,

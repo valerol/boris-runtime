@@ -11,10 +11,10 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 SERVER_INSTRUCTIONS = (
     "BORIS exposes one public tool: boris.execute. One call performs the canonical "
-    "server-side semantic route and returns an ExecutionCandidate or a fail-closed "
+    "server-side semantic route and an IND2 IndependentReview, or a fail-closed "
     "Runtime error. Never choose an operator HOLD mode or alter Core, phase, scope, "
-    "formal results, or gate. Results are candidates, not reviewed, admitted, "
-    "mutated, or executed."
+    "formal results, gate, or review decision. Results remain candidates: they are "
+    "not Policy Kernel-admitted, state-mutating, or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -22,7 +22,7 @@ TOOL_ANNOTATIONS = {
     "openWorldHint": False,
     "destructiveHint": False,
 }
-DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2-4.html"
+DEVELOPER_SURFACE_URI = "ui://boris/developer-surface-v2-5.html"
 DEVELOPER_SURFACE_MIME_TYPE = "text/html;profile=mcp-app"
 DEVELOPER_SURFACE_PATH = (
     Path(__file__).resolve().parent
@@ -48,8 +48,8 @@ DEVELOPER_RESOURCE_META = {
         },
     },
     "openai/widgetDescription": (
-        "BORIS Developer Surface showing the constrained gate, HOLD handoff, "
-        "candidate, and complete safe developer trace."
+        "BORIS Developer Surface showing the constrained gate, IND2 review, "
+        "HOLD handoff, candidate, and complete safe developer trace."
     ),
     "openai/widgetPrefersBorder": True,
     "openai/widgetCSP": {
@@ -190,13 +190,25 @@ def normalize_execution_tool_result(payload):
     }
     if developer_trace is not None:
         result["_meta"] = {
-            "developer_surface_version": "2.4",
+            "developer_surface_version": "2.5",
             "developer_trace": developer_trace,
         }
     return result
 
 
 def _candidate_instruction(payload, candidate_json):
+    review = payload.get("independent_review")
+    review_decision = (
+        review.get("decision")
+        if isinstance(review, dict)
+        else None
+    )
+    review_instruction = (
+        " Preserve and present the IndependentReview decision "
+        f"{review_decision}; it does not alter the semantic gate."
+        if review_decision
+        else ""
+    )
     if payload.get("gate") == "HOLD":
         hold = payload.get("hold")
         if (
@@ -206,7 +218,8 @@ def _candidate_instruction(payload, candidate_json):
             return (
                 "BORIS confirms that the operator terminated this cycle. Do "
                 "not call boris.execute again, do not generate a replacement "
-                "answer, and do not describe the result as PASS or STOP.\n\n"
+                "answer, and do not describe the result as PASS or STOP."
+                f"{review_instruction}\n\n"
                 "Terminal operator decision:\n"
                 f"{candidate_json}"
             )
@@ -221,13 +234,15 @@ def _candidate_instruction(payload, candidate_json):
                     "BORIS preserved HOLD and did not accept a semantic "
                     "candidate. Do not generate a replacement answer and do "
                     "not call boris.execute again automatically. Present the "
-                    "HOLD reason and await an explicit operator decision.\n\n"
+                    "HOLD reason and await an explicit operator decision."
+                    f"{review_instruction}\n\n"
                     "Runtime HOLD:\n"
                     f"{candidate_json}"
                 )
             return (
                 "BORIS returned a terminal HOLD without continuation. Present "
-                "the preserved result and do not call boris.execute again.\n\n"
+                "the preserved result and do not call boris.execute again."
+                f"{review_instruction}\n\n"
                 "ExecutionCandidate:\n"
                 f"{candidate_json}"
             )
@@ -251,13 +266,14 @@ def _candidate_instruction(payload, candidate_json):
             "PROVIDE_INFORMATION and CONFIRM_ASSUMPTION require all signed "
             "formal values; ALLOW_CONDITIONAL_PROCEEDING preserves unknowns; "
             "CHANGE_SCOPE requires scope; TERMINATE_CYCLE ends the cycle.\n\n"
+            f"{review_instruction}\n\n"
             "ExecutionCandidate:\n"
             f"{candidate_json}"
         )
     return (
-        "Present the Runtime ExecutionCandidate below as the result. "
+        "Present the Runtime ExecutionCandidate and IndependentReview below. "
         "Do not replace it with an independently generated answer, do "
-        "not weaken its gate, and do not claim review, policy admission, "
+        "not weaken its gate or review decision, and do not claim policy admission, "
         "state mutation, tool use, or external action.\n\n"
         "ExecutionCandidate:\n"
         f"{candidate_json}"
@@ -335,10 +351,10 @@ def create_mcp_server(config: MCPServerConfig | None = None):
         """Run the read-only BORIS semantic route.
 
         Initial input and signed HOLD resume use the canonical SERVER_LLM
-        SemanticProvider inside Runtime and return one ExecutionCandidate. Server
-        developer mode adds a safe visual projection and semantic trace. The
-        result is not independently reviewed, policy-admitted, state-mutating,
-        or executed.
+        SemanticProvider inside Runtime, form one ExecutionCandidate, then run
+        one IND2 IndependentReview bound to that exact candidate. Server developer
+        mode adds a safe visual projection and semantic trace. The result is not
+        Policy Kernel-admitted, state-mutating, or executed.
         """
         try:
             envelope = boris_execute(

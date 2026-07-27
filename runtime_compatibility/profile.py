@@ -77,7 +77,7 @@ SUPPORTED_SOURCE_NORM_TYPES = frozenset({
 
 @dataclass(frozen=True, slots=True)
 class RuntimeProfile:
-    substrate_id: str = "boris-runtime/phase-4r-semantic-evaluation"
+    substrate_id: str = "boris-runtime/phase-4s-independent-review"
     capabilities: tuple[str, ...] = (
         "archive_hash_binding",
         "component_hash_verification",
@@ -87,6 +87,7 @@ class RuntimeProfile:
         "draft_2020_12_schema_validation",
         "gate_decision_semantics",
         "immutable_passive_core_surface",
+        "independent_review_ind2",
         "no_direct_state_mutation",
         "structured_semantic_calculation",
         "four_valued_predicate_dsl",
@@ -94,7 +95,6 @@ class RuntimeProfile:
     )
     limitations: tuple[str, ...] = (
         "semantic_evaluation_only",
-        "no_independent_reviewer",
         "no_policy_kernel_transition",
         "no_external_action",
         "no_runtime_session_integration",
@@ -102,12 +102,14 @@ class RuntimeProfile:
     data_locations: tuple[str, ...] = (
         "in_process_immutable_core_surface",
         "in_process_execution_trace",
+        "in_process_independent_review",
     )
     failure_modes: tuple[str, ...] = (
         "invalid_package_rejected",
         "unsupported_contract_rejected",
         "material_unknown_holds",
         "provider_failure_rejected",
+        "review_failure_rejected",
     )
     supported_predicate_operators: frozenset[str] = SUPPORTED_PREDICATE_OPERATORS
     supported_deontic_operations: frozenset[str] = SUPPORTED_DEONTIC_OPERATIONS

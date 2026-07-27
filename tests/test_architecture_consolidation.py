@@ -17,6 +17,7 @@ ACTIVE_PACKAGES = {
     "application",
     "cli",
     "core_surface",
+    "independent_reviewer",
     "llm",
     "mcp_server",
     "runtime_compatibility",
@@ -80,6 +81,25 @@ def test_core_surface_remains_query_independent():
                 "mcp_server",
                 "runtime_compatibility",
                 "semantic_executor",
+                "independent_reviewer",
+            }:
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT)} imports {imported}"
+                )
+
+    assert violations == []
+
+
+def test_independent_reviewer_cannot_import_application_or_transports():
+    violations = []
+    for path in (PROJECT_ROOT / "independent_reviewer").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            imported = _imported_top_level(node)
+            if imported in {
+                "api",
+                "application",
+                "mcp_server",
             }:
                 violations.append(
                     f"{path.relative_to(PROJECT_ROOT)} imports {imported}"

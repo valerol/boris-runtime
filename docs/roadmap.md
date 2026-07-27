@@ -60,6 +60,20 @@
 - signed HOLD resume reuses the token-bound `SemanticInput` and invokes the same
   server provider without a second compilation.
 
+### Independent Reviewer
+
+- stable `boris-independent-review/1.0` contract;
+- separate logical owner and adversarial counterexample/gate-cross-check method;
+- new reviewer LLM adapter instance for every canonical execution;
+- honest `IND2` claim from Core v2.31, without claiming `IND3` or `IND4`;
+- strict `PASS`, `HOLD`, and `REJECTED` review validation;
+- SHA-256 binding to exact Semantic Input, validated semantic calculation,
+  ExecutionCandidate, Core reference, and RuntimeAttestation;
+- Core-aligned `IndependentReview` Evidence projection and schema validation;
+- review decision kept separate from the immutable semantic gate;
+- fail-closed provider, binding, schema, and output errors;
+- no Policy Kernel admission, state mutation, memory, or external action.
+
 ### Closed HOLD handoff and Developer Surface
 
 - typed uncertainty ownership and resolution classes;
@@ -91,8 +105,8 @@
 - no automatic suggestion of the predicate-matching value as an operator
   decision;
 - developer-only MCP Apps resource
-  `ui://boris/developer-surface-v2-4.html`, including validated direct
-  server-side operator resume and fail-closed Runtime errors;
+  `ui://boris/developer-surface-v2-5.html`, including the separate review,
+  validated direct server-side operator resume, and fail-closed Runtime errors;
 - no `ui/message`, `ui/update-model-context`, ChatGPT follow-up, or model wake-up
   in the continuation path;
 - complete safe trace delivered to the component through model-hidden `_meta`;
@@ -158,10 +172,9 @@
 
 ## Current execution limit
 
-The public route now reaches Runtime Compatibility and Semantic Executor, but
-every result remains:
+The public route now reaches Runtime Compatibility, Semantic Executor, and
+Independent Reviewer, but every result remains:
 
-- not independently reviewed;
 - not admitted by Policy Kernel;
 - non-mutating;
 - unable to execute external actions.
@@ -177,19 +190,11 @@ classified as `OPERATOR_INPUT`. Runtime-owned derivations, future
 contingencies, model uncertainty, downstream preconditions, and unresolvable
 limitations remain visible without being reassigned to the operator. This
 closes the clarification handoff only; it
-does not implement Independent Review, Policy Kernel admission, durable cycle
-state, memory, or action authorization. Tokens are replayable until expiry and
+does not implement Policy Kernel admission, durable cycle state, memory, or
+action authorization. Tokens are replayable until expiry and
 are globally invalidated by continuation-secret rotation.
 
 ## Next architectural stages
-
-### Independent Reviewer
-
-- define `IndependentReview` contract;
-- require a genuinely independent evaluation path;
-- bind review to the exact `SemanticCalculation`, Core reference, and
-  attestation;
-- produce no state mutation.
 
 ### Typed Semantic Input
 

@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILES = (".env", ".env.local")
 SERVER_LLM_TIMEOUT_ENV = "BORIS_SERVER_LLM_TIMEOUT_SECONDS"
 DEFAULT_SERVER_LLM_TIMEOUT_SECONDS = 120.0
+REVIEWER_LLM_ENV = "BORIS_REVIEWER_LLM"
+REVIEWER_MODEL_ENV = "BORIS_REVIEWER_MODEL"
 
 
 class LazyLLMAdapter:
@@ -113,6 +115,43 @@ def build_validator_llm_adapter():
 
 def build_lazy_validator_llm_adapter():
     return LazyLLMAdapter(build_validator_llm_adapter)
+
+
+def build_reviewer_llm_adapter():
+    mode = os.getenv(
+        REVIEWER_LLM_ENV,
+        os.getenv("BOIS_LLM", ""),
+    ).strip().lower()
+
+    if mode == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise LLMConfigurationError(
+                f"{REVIEWER_LLM_ENV}=openai requires OPENAI_API_KEY"
+            )
+        model = (
+            os.getenv(REVIEWER_MODEL_ENV)
+            or os.getenv("OPENAI_MODEL")
+        )
+        return OpenAIAdapter(
+            model=model,
+            debug_prompt_enabled=prompt_debug_enabled(),
+            timeout=server_llm_timeout_seconds(),
+        )
+
+    if mode in {"", "mock"}:
+        return MockLLMAdapter(
+            debug_prompt_enabled=prompt_debug_enabled()
+        )
+
+    raise LLMConfigurationError(
+        f"Unsupported {REVIEWER_LLM_ENV} mode: {mode}"
+    )
+
+
+def build_lazy_reviewer_llm_adapter():
+    # A new adapter instance prevents provider-call state from being shared
+    # with Semantic Input compilation or Semantic Executor calculation.
+    return LazyLLMAdapter(build_reviewer_llm_adapter)
 
 
 def server_llm_timeout_seconds():

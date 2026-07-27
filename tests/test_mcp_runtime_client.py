@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
+from tests.review_fixtures import independent_review_packet
 
 
 def test_runtime_error_json_is_available_on_runtime_api_error():
@@ -96,8 +97,8 @@ def test_execute_posts_to_runtime_execute_with_expected_body():
         "unknowns": [],
         "conflicts": [],
         "alternatives": [],
+        "independent_review": independent_review_packet(),
         "limitations": [
-            "not_independently_reviewed",
             "not_policy_admitted",
             "no_state_mutation",
             "no_external_action",

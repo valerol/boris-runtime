@@ -56,7 +56,11 @@ from application.semantic_provider import (
     SERVER_LLM_PROVIDER,
     ServerLLMProvider,
 )
-from llm.config import build_lazy_llm_adapter
+from independent_reviewer import LLMIndependentReviewer
+from llm.config import (
+    build_lazy_llm_adapter,
+    build_lazy_reviewer_llm_adapter,
+)
 from runtime_compatibility import (
     OperatorAcceptance,
     RuntimeCompatibilityVerifier,
@@ -90,11 +94,11 @@ SEMANTIC_INPUT_FIELDS = {
     "evaluate_inactive",
 }
 PUBLIC_LIMITATIONS = (
-    "not_independently_reviewed",
     "not_policy_admitted",
     "no_state_mutation",
     "no_external_action",
 )
+UNREVIEWED_LIMITATION = "not_independently_reviewed"
 PHASE_CROSSWALK_PATH = "assurance/CYCLE_CROSSWALK.json"
 
 
@@ -353,6 +357,7 @@ class ExecutionService:
         compiler_factory=None,
         calculator_factory=None,
         semantic_provider_factory=None,
+        reviewer_factory=None,
         context_provider=None,
         continuation_codec_factory=None,
         host_work_order_codec_factory=None,
@@ -383,6 +388,14 @@ class ExecutionService:
                     llm_adapter_factory=self.llm_adapter_factory,
                     compiler_factory=self.compiler_factory,
                     calculator_factory=self.calculator_factory,
+                )
+            )
+        )
+        self.reviewer_factory = (
+            reviewer_factory
+            or (
+                lambda: LLMIndependentReviewer(
+                    build_lazy_reviewer_llm_adapter()
                 )
             )
         )
@@ -773,6 +786,7 @@ class ExecutionService:
             "alternatives": [],
             "limitations": [
                 *HOST_EXECUTOR_LIMITATIONS,
+                UNREVIEWED_LIMITATION,
                 *PUBLIC_LIMITATIONS,
             ],
             "hold": build_system_issue_handoff(
@@ -804,7 +818,9 @@ class ExecutionService:
                     "semantic_executor": (
                         "rejected_before_candidate"
                     ),
-                    "independent_reviewer": "not_implemented",
+                    "independent_reviewer": (
+                        "not_invoked_no_candidate"
+                    ),
                     "policy_kernel": "not_implemented",
                     "state_event": "not_implemented",
                 },
@@ -909,6 +925,18 @@ class ExecutionService:
         timings.update(provider_result.stage_timings_ms)
         semantic_input = provider_result.semantic_input
         candidate = provider_result.candidate
+        stage_started = perf_counter()
+        reviewer = self.reviewer_factory()
+        independent_review = reviewer.review(
+            surface=surface,
+            compatibility=compatibility,
+            semantic_input=semantic_input,
+            candidate=candidate,
+            operator_decision=operator_decision,
+        )
+        timings["independent_reviewer"] = _elapsed_ms(
+            stage_started
+        )
         return self._candidate_envelope(
             candidate=candidate,
             semantic_input=semantic_input,
@@ -919,6 +947,7 @@ class ExecutionService:
             resume_count=resume_count,
             resumed=continuation_state is not None,
             semantic_provider=provider.provider_id,
+            independent_review=independent_review,
             continuation_cycle_id=(
                 continuation_resume.cycle_id
                 if continuation_resume is not None
@@ -949,6 +978,7 @@ class ExecutionService:
         resume_count,
         resumed,
         semantic_provider,
+        independent_review=None,
         started,
         host_work_order_id=None,
         continuation_cycle_id=None,
@@ -993,6 +1023,15 @@ class ExecutionService:
             "alternatives": candidate.to_dict()["alternatives"],
             "limitations": list(PUBLIC_LIMITATIONS),
         }
+        if independent_review is not None:
+            envelope["independent_review"] = (
+                independent_review.to_dict()
+            )
+        else:
+            envelope["limitations"].insert(
+                0,
+                UNREVIEWED_LIMITATION,
+            )
         if semantic_provider == HOST_SEMANTIC_PROVIDER:
             envelope["host_work_order_id"] = host_work_order_id
             envelope["limitations"] = list(dict.fromkeys((
@@ -1046,6 +1085,7 @@ class ExecutionService:
                 },
                 semantic_provider=semantic_provider,
                 host_work_order_id=host_work_order_id,
+                independent_review=independent_review,
             )
         return envelope
 
@@ -1084,7 +1124,10 @@ def _operator_termination_envelope(
         "uncertainties": [],
         "conflicts": [],
         "alternatives": [],
-        "limitations": list(PUBLIC_LIMITATIONS),
+        "limitations": [
+            UNREVIEWED_LIMITATION,
+            *PUBLIC_LIMITATIONS,
+        ],
         "hold": {
             "handoff_version": "boris-hold-handoff/1.4",
             "status": "operator_terminated",
@@ -1122,7 +1165,9 @@ def _operator_termination_envelope(
             "stages": {
                 "semantic_input_compiler": "not_invoked_resume",
                 "semantic_executor": "not_invoked_operator_termination",
-                "independent_reviewer": "not_implemented",
+                "independent_reviewer": (
+                    "not_invoked_operator_termination"
+                ),
                 "policy_kernel": "not_implemented",
                 "state_event": "not_implemented",
             },
@@ -1341,6 +1386,7 @@ def _build_execution_trace(
     continuation=None,
     semantic_provider=SERVER_LLM_PROVIDER,
     host_work_order_id=None,
+    independent_review=None,
 ):
     trace = {
         "trace_version": "boris-execution-trace/1.0",
@@ -1384,6 +1430,11 @@ def _build_execution_trace(
             ],
             "execution_trace": candidate.trace.to_dict(),
         },
+        "independent_review": (
+            independent_review.to_dict()
+            if independent_review is not None
+            else None
+        ),
         "stages": {
             "core_surface": "invoked",
             "runtime_compatibility": "invoked",
@@ -1416,7 +1467,11 @@ def _build_execution_trace(
                 if semantic_provider == HOST_SEMANTIC_PROVIDER
                 else "invoked"
             ),
-            "independent_reviewer": "not_implemented",
+            "independent_reviewer": (
+                "invoked"
+                if independent_review is not None
+                else "not_invoked_experimental_provider"
+            ),
             "policy_kernel": "not_implemented",
             "state_event": "not_implemented",
             "cycle_guard": "not_implemented",

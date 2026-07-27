@@ -34,6 +34,7 @@ from tests.test_execution import (
     StaticAcceptanceProvider,
     StaticSurfaceProvider,
     compiler_payload,
+    reviewer_factory,
 )
 from tests.test_semantic_executor import AutoCalculator, uncertainty
 
@@ -535,6 +536,7 @@ def test_current_core_application_execution_route_returns_semantic_candidate(
         compatibility_verifier=RecordingCompatibilityVerifier(events),
         llm_adapter_factory=lambda: adapter,
         calculator_factory=lambda _adapter: calculator,
+        reviewer_factory=reviewer_factory(events),
     )
 
     result = service.execute(
@@ -549,17 +551,18 @@ def test_current_core_application_execution_route_returns_semantic_candidate(
     assert result["gate"] == "HOLD"
     assert result["norm_results"]
     assert result["limitations"] == [
-        "not_independently_reviewed",
         "not_policy_admitted",
         "no_state_mutation",
         "no_external_action",
     ]
-    assert events[:5] == [
+    assert result["independent_review"]["decision"] == "PASS"
+    assert events[:6] == [
         "core_surface",
         "operator_acceptance",
         "runtime_compatibility",
         "semantic_input_compiler",
         "semantic_executor",
+        "independent_reviewer",
     ]
 
 
@@ -643,6 +646,7 @@ def test_current_core_repository_route_needs_no_acceptance_sidecar(
         compatibility_verifier=RecordingCompatibilityVerifier(events),
         llm_adapter_factory=lambda: adapter,
         calculator_factory=lambda _adapter: calculator,
+        reviewer_factory=reviewer_factory(events),
     )
 
     result = service.execute(
@@ -652,11 +656,13 @@ def test_current_core_repository_route_needs_no_acceptance_sidecar(
 
     assert result["status"] == "semantic_candidate"
     assert result["gate"] == "HOLD"
-    assert events[:4] == [
+    assert result["independent_review"]["decision"] == "PASS"
+    assert events[:5] == [
         "core_surface",
         "runtime_compatibility",
         "semantic_input_compiler",
         "semantic_executor",
+        "independent_reviewer",
     ]
 
 

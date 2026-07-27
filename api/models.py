@@ -412,6 +412,59 @@ class RuntimeHoldHandoff(BaseModel):
         return self
 
 
+class RuntimeReviewBindings(BaseModel):
+    semantic_input_sha256: str
+    semantic_calculation_sha256: str
+    execution_candidate_sha256: str
+    core_ref: dict[str, Any]
+    runtime_attestation: dict[str, Any]
+
+
+class RuntimeReviewEvidence(BaseModel):
+    evidence_id: str
+    source: str
+    observed_object: str
+    method: str
+    time: str
+    scope: str
+    resolution: Literal["PASS", "HOLD", "REJECTED"]
+    completeness: str | list[str]
+    distortions: str | list[str]
+    independence: Literal["IND2", "IND3", "IND4"]
+    supported_or_refuted_objects: str | list[str]
+    lifecycle_state: Literal[
+        "CAPTURED",
+        "PROVENANCE_VERIFIED",
+        "RELEVANCE_ASSESSED",
+        "ACCEPTED",
+        "REJECTED",
+        "SUPERSEDED",
+    ]
+
+
+class RuntimeIndependentReview(BaseModel):
+    review_version: Literal["boris-independent-review/1.0"]
+    review_id: str
+    reviewer_ref: str
+    producer_ref: str
+    independence_level: Literal["IND2", "IND3", "IND4"]
+    method: str
+    decision: Literal["PASS", "HOLD", "REJECTED"]
+    candidate_gate_assessment: Literal[
+        "SUPPORTED",
+        "INDETERMINATE",
+        "UNSUPPORTED",
+    ]
+    summary: str
+    supported_claims: list[str] = Field(default_factory=list)
+    refuted_claims: list[str] = Field(default_factory=list)
+    unresolved_issues: list[str] = Field(default_factory=list)
+    distortions: list[str] = Field(default_factory=list)
+    bindings: RuntimeReviewBindings
+    evidence: RuntimeReviewEvidence
+    state_mutation: Literal[False]
+
+
 class RuntimeExecutionResponse(BaseModel):
     execution_version: Literal["boris-execution/1.0"]
     session_id: str
@@ -436,6 +489,10 @@ class RuntimeExecutionResponse(BaseModel):
     uncertainties: list[dict[str, Any]] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     alternatives: list[dict[str, Any]] = Field(default_factory=list)
+    independent_review: RuntimeIndependentReview | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     limitations: list[str] = Field(default_factory=list)
     hold: RuntimeHoldHandoff | None = Field(
         default=None,
@@ -466,6 +523,37 @@ class RuntimeExecutionResponse(BaseModel):
         ):
             raise ValueError(
                 "Canonical server provider cannot contain a host work-order ID."
+            )
+        operator_terminated = (
+            self.gate == "HOLD"
+            and self.hold is not None
+            and self.hold.status == "operator_terminated"
+        )
+        if (
+            self.semantic_provider == "SERVER_LLM"
+            and self.independent_review is None
+            and not operator_terminated
+        ):
+            raise ValueError(
+                "Canonical server provider requires IndependentReview."
+            )
+        if operator_terminated and self.independent_review is not None:
+            raise ValueError(
+                "Operator termination has no new candidate to review."
+            )
+        if (
+            self.semantic_provider == "CHATGPT_HOST_ONLY"
+            and self.independent_review is not None
+        ):
+            raise ValueError(
+                "Experimental ChatGPT host results are not independently reviewed."
+            )
+        if (
+            self.independent_review is not None
+            and "not_independently_reviewed" in self.limitations
+        ):
+            raise ValueError(
+                "A reviewed result cannot retain the unreviewed limitation."
             )
         if self.candidate_result == {}:
             raise ValueError("candidate_result must not be an empty object.")

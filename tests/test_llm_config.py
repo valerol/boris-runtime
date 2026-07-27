@@ -12,6 +12,9 @@ ENV_NAMES = (
     "OPENAI_MODEL",
     "OPENAI_REASONING_EFFORT",
     "BORIS_SERVER_LLM_TIMEOUT_SECONDS",
+    "BORIS_REVIEWER_LLM",
+    "BORIS_REVIEWER_MODEL",
+    "BORIS_RUNTIME_MODE",
 )
 
 
@@ -98,3 +101,33 @@ def test_server_llm_timeout_has_bounded_positive_configuration(monkeypatch):
         match="must be a positive number",
     ):
         config.server_llm_timeout_seconds()
+
+
+def test_reviewer_adapter_has_separate_configuration_and_timeout(
+    monkeypatch,
+):
+    _clear_test_environment(monkeypatch)
+    calls = []
+
+    class FakeOpenAIAdapter:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(config, "OpenAIAdapter", FakeOpenAIAdapter)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("BOIS_LLM", "mock")
+    monkeypatch.setenv("BORIS_REVIEWER_LLM", "openai")
+    monkeypatch.setenv("BORIS_REVIEWER_MODEL", "review-model")
+    monkeypatch.setenv(
+        "BORIS_SERVER_LLM_TIMEOUT_SECONDS",
+        "75",
+    )
+
+    adapter = config.build_reviewer_llm_adapter()
+
+    assert isinstance(adapter, FakeOpenAIAdapter)
+    assert calls == [{
+        "model": "review-model",
+        "debug_prompt_enabled": False,
+        "timeout": 75.0,
+    }]

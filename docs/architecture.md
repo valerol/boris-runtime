@@ -21,6 +21,8 @@ immutable CoreSurface + trusted server Core selection
   -> SemanticInputCompiler + server LLM calculator
   -> SemanticExecutor validation and gate constraints
   -> ExecutionCandidate
+  -> Independent Reviewer
+  -> IndependentReview
 ```
 
 The loader validates package layout, inventory, hashes, identity, dependency
@@ -35,7 +37,8 @@ unverified machine JSON directly.
 | `core_surface` | Verify and expose the passive, query-independent canonical package | Query selection, semantic calculation, state mutation, activation |
 | `runtime_compatibility` | Declare substrate capabilities, execute package-required checks, create attestation | Meaning creation, activation, external action |
 | `semantic_executor` | Produce a non-executing `ExecutionCandidate` | Independent review, state admission, tools, memory |
-| `application` | Compile raw requests, orchestrate semantic candidates, build diagnostic frames, and validate supplied answers | Independent review, policy admission, state mutation, tool execution |
+| `independent_reviewer` | Adversarially review the exact candidate through an IND2 path and produce Core-aligned evidence | Gate mutation, policy admission, state mutation, tools |
+| `application` | Compile raw requests, orchestrate semantic candidates and review, build diagnostic frames, and validate supplied answers | Policy admission, state mutation, tool execution |
 | `llm` | Canonical structured/unstructured inference port | Policy decisions |
 | `api` | Private HTTP transport | Core or semantic logic |
 | `mcp_server` | Public read-only `boris.execute` transport | Direct Core access, LLM calls, memory |
@@ -54,11 +57,15 @@ server boris-core checkout
   -> semantic calculator
   -> deterministic validation and gate constraints
   -> ExecutionCandidate
+  -> IND2 adversarial review
+  -> IndependentReview
 ```
 
 Semantic execution requires an accepted attestation for
-`semantic_evaluation`. The result is candidate material only. It cannot mutate
-Runtime or Core state.
+`semantic_evaluation`. The result is candidate material plus separate review
+evidence. Neither can mutate Runtime or Core state. A review `PASS` supports the
+candidate and its own constrained gate; it does not replace a semantic `HOLD`,
+`STOP`, or `REPAIR`.
 
 The receiving profile supports both the legacy three-valued Predicate DSL and
 the current Core v2.23 four-valued contract. `UNKNOWN` constrains material
@@ -82,6 +89,8 @@ ChatGPT
   -> ExecutionService
   -> ServerLLMProvider
   -> ExecutionCandidate envelope
+  -> LLMIndependentReviewer
+  -> IndependentReview envelope
   -> signed HOLD handoff when operator input is required
 ```
 
@@ -91,8 +100,8 @@ The MCP tool list is exactly `{"boris.execute"}`. There is no public
 tool or API argument. The public
 envelope uses `boris-execution/1.0`, marks the result as
 `status=semantic_candidate` and `semantic_provider=SERVER_LLM`, and exposes the
-final constrained gate, norm results, unknowns, conflicts, alternatives, and
-explicit limitations.
+final constrained gate, norm results, unknowns, conflicts, alternatives, the
+separate review, and explicit limitations.
 
 `HOLD`, `STOP`, and `REPAIR` remain normal Runtime results. The MCP presentation
 layer must not weaken them or substitute a separate ChatGPT answer.
@@ -110,6 +119,8 @@ public MCP boris.execute
   -> ServerLLMProvider
   -> server LLM semantic calculator
   -> validated ExecutionCandidate
+  -> separate reviewer LLM adapter and method
+  -> validated IndependentReview
 ```
 
 The public schema contains only initial input/context or a signed HOLD resume.
@@ -117,10 +128,33 @@ It has no provider selector and no host work-order submission fields. The MCP
 adapter always forwards `operation=execute`, so one tool call owns the complete
 server-side semantic route.
 
-Provider, compilation, validation, and calculation failures are controlled
-fail-closed Runtime errors. The low-level provider request timeout is configured
-through `BORIS_SERVER_LLM_TIMEOUT_SECONDS`; the MCP and reverse-proxy timeouts
-must remain long enough for both structured calls.
+Provider, compilation, validation, calculation, and review failures are
+controlled fail-closed Runtime errors. The low-level request timeout is
+configured through `BORIS_SERVER_LLM_TIMEOUT_SECONDS`; the MCP and reverse-proxy
+timeouts must remain long enough for compilation, calculation, and review.
+
+## Independent Reviewer boundary
+
+`LLMIndependentReviewer` receives only immutable, already validated material:
+the exact `SemanticInput`, rebuilt Semantic View, `ExecutionCandidate`, Core
+reference, and RuntimeAttestation. It runs through a new LLM adapter instance
+and uses an adversarial counterexample/gate-cross-check method rather than the
+Semantic Executor calculation prompt.
+
+The stable `boris-independent-review/1.0` result contains:
+
+- `decision: PASS | HOLD | REJECTED`;
+- an independent assessment of the candidate's declared gate;
+- supported, refuted, unresolved, and distorted claims;
+- a Core `IndependentReview` evidence object;
+- SHA-256 bindings to Semantic Input, semantic calculation,
+  ExecutionCandidate, Core, and RuntimeAttestation;
+- `independence_level: IND2` and `state_mutation: false`.
+
+Core v2.31 defines `IND2` as a distinct method. Runtime does not claim `IND3`
+because the executor/substrate may be the same model provider, and it never
+claims `IND4` without external human or organizational verification. A review
+decision does not mutate the semantic candidate or admit policy.
 
 ## Experimental ChatGPT host executor
 
@@ -259,8 +293,8 @@ candidate. The LLM contract requires candidate material, while Semantic
 Executor provides a deterministic `boris-candidate-projection/1.0` fallback
 from the validated calculation if the provider returns `{}` anyway. The
 fallback preserves the constrained gate, is identified by
-`CANDIDATE_RESULT_PROJECTED` in the trace, and does not implement review,
-policy admission, state mutation, memory, or external action.
+`CANDIDATE_RESULT_PROJECTED` in the trace, and does not implement policy
+admission, state mutation, memory, or external action.
 
 This mechanism is stateless: Runtime stores no unfinished cycle. Consequently,
 an unexpired token can be replayed and cannot be individually revoked. Short
@@ -271,20 +305,22 @@ write long-term memory, or authorize an external action.
 ## MCP Developer Surface
 
 In `BORIS_RUNTIME_MODE=dev`, the sole `boris.execute` descriptor links to the
-versioned MCP Apps resource `ui://boris/developer-surface-v2-4.html`. The
+versioned MCP Apps resource `ui://boris/developer-surface-v2-5.html`. The
 component receives:
 
-- the candidate and handoff through model-visible `structuredContent`;
+- the candidate, independent review, and handoff through model-visible
+  `structuredContent`;
 - concise gate-preserving instructions through `content`;
 - the full sanitized `boris-execution-trace/1.0` only through tool-result
   `_meta`.
 
-The component renders the constrained gate, phase, candidate, structured
-operator form, semantic summary, and expandable complete trace. Its Resume
+The component renders the constrained gate, phase, candidate, independent
+review, structured operator form, semantic summary, and expandable complete
+trace. Its Resume
 action uses MCP Apps `tools/call` to validate the exact operator decision
 through the same `boris.execute`. A non-terminal resume is recalculated inside
-Runtime by `ServerLLMProvider` and returns the next `ExecutionCandidate`
-directly. The component does not call `ui/message`,
+Runtime by `ServerLLMProvider`, independently reviewed, and returned directly.
+The component does not call `ui/message`,
 `ui/update-model-context`, or a ChatGPT follow-up compatibility API. There is
 no second debug or continuation tool. Runtime errors remain fail-closed. The
 component displays `resume_count` and Runtime error details, has no external
@@ -364,9 +400,9 @@ caller-supplied answer and complete context packet through:
 3. optional semantic validation;
 4. deterministic/semantic merge in hybrid mode.
 
-This service is not the future Independent Reviewer. It does not establish
-packet authenticity, retain packets, rewrite answers, admit state changes, or
-apply an `ExecutionCandidate`.
+This service is not the execution-path Independent Reviewer. It does not
+establish packet authenticity, retain packets, rewrite answers, admit state
+changes, or apply an `ExecutionCandidate`.
 
 ## Removed architecture
 
@@ -390,9 +426,8 @@ semantic-calculation portion now belongs to `semantic_executor`; its passive
 registry belongs to `core_surface`.
 
 The following responsibilities remain intentionally unimplemented and must not
-be absorbed by the Semantic Executor:
+be absorbed by the Semantic Executor or Independent Reviewer:
 
-- `IndependentReviewer`;
 - deterministic `PolicyKernel`;
 - authority and operator-decision enforcement beyond compatibility acceptance;
 - state-event admission;
@@ -410,8 +445,8 @@ ExecutionCandidate
   -> StateEvent
 ```
 
-Only `ExecutionCandidate` is implemented. It packages its result for later
-review; it is not an `IndependentReview` or `KernelDecision`.
+`ExecutionCandidate` and `IndependentReview` are implemented. Neither is a
+`KernelDecision`, and review does not admit a state event.
 
 ## Dependency rules
 
@@ -419,8 +454,10 @@ review; it is not an `IndependentReview` or `KernelDecision`.
   executor code.
 - `runtime_compatibility` may read immutable Core Surface data.
 - `semantic_executor` may consume Core Surface and compatibility records.
+- `independent_reviewer` may consume immutable Semantic Executor contracts and
+  Core-aligned schemas but cannot import application, API, or MCP code.
 - `application` may consume Core Surface, Runtime compatibility, the LLM port,
-  and the public Semantic Executor contracts.
+  the public Semantic Executor contracts, and Independent Reviewer.
 - `api` may import `application`, never the inverse.
 - `mcp_server` communicates with `api` only through HTTP.
 - no active module may import a removed top-level package.

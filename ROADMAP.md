@@ -23,6 +23,9 @@ Current implemented boundary:
 - canonical `SemanticProvider` port and `ServerLLMProvider`, with strict
   compilation and semantic calculation completed inside Runtime by one public
   `boris.execute` call;
+- `boris-independent-review/1.0` with a separate O027-owned adversarial method,
+  honest Core v2.31 `IND2`, strict review decisions, and exact SHA-256 bindings
+  to Semantic Input, calculation, candidate, Core, and RuntimeAttestation;
 - public MCP schema limited to `input`, correlation/context, and signed HOLD
   resume; no provider selector or host work-order submission fields;
 - non-canonical `ChatGPTHostProvider` with signed `CHATGPT_HOST_ONLY`
@@ -32,29 +35,35 @@ Current implemented boundary:
   followed by one signed diagnostic correction under `HOLD`, with `HOLD`
   preserved if the corrected submission remains invalid; canonical `REPAIR`
   remains deferred until new-revision/new-cycle transitions exist;
-- developer-only visual MCP surface v2.4 with model-hidden safe trace and
-  direct server-side signed operator continuation; no host wake-up or
-  ChatGPT-internal orchestration;
+- developer-only visual MCP surface v2.5 with separate review, model-hidden safe
+  trace, and direct server-side signed operator continuation; no host wake-up
+  or ChatGPT-internal orchestration;
 - internal stateless CoreSurface-based `/runtime/frame`;
 - compact production projection and safe developer projection trace;
 - stateless answer validation;
 - consolidated architecture with earlier middleware generations removed.
 
-Immediate validation target:
+Accepted validation boundary:
 
 - production E2E of one public `boris.execute` call returning
-  `semantic_provider: SERVER_LLM` and `C00 / HOLD`, followed by
-  `HOLD → OperatorDecision → same-phase server recalculation` with
-  `resume_count: 1`, without `COMPILATION`, `CALCULATION`, or `ui/message`.
+  `semantic_provider: SERVER_LLM` and a substantive semantic candidate was
+  observed; full developer trace was unavailable after host model limits were
+  exhausted, so the route is accepted with an observability gap rather than
+  reopening ChatGPT-host orchestration.
+
+Immediate validation target:
+
+- production E2E returns both the unchanged semantic gate and
+  `independent_review.review_version: boris-independent-review/1.0`;
+- Review `PASS` on a semantic `HOLD` leaves the semantic gate at `HOLD`;
+- no Policy Kernel admission, state mutation, or external action is claimed.
 
 Following stages:
 
-- Independent Reviewer;
+- typed Semantic Input with provenance-bearing facts, evidence, and authority;
 - Policy Kernel;
 - admitted State Events and Cycle Guard;
 - domain physiology and memory;
-- typed `facts`, `evidence`, and domain `authority`, backed by that physiology
-  and memory rather than unverified LLM promotion;
 - delegated `OPERATOR_MACHINE` resolution after a signed authority registry
   exists;
 - authorized external actions.

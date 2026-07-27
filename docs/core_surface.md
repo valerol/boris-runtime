@@ -140,5 +140,6 @@ contract and creates an accepted RuntimeAttestation. The stateless
 `application.context_projection` service selects bounded records from the same
 surface for internal frame diagnostics and developer execution observability;
 this request-specific projection is outside `core_surface` and is not semantic
-routing.
-Independent Review and Policy Kernel admission remain absent.
+routing. Independent Review is a downstream consumer of immutable Core
+contracts; Core Surface itself performs neither review nor Policy Kernel
+admission.

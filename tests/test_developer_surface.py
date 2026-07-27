@@ -11,7 +11,9 @@ SURFACE_PATH = (
 def test_operator_resume_uses_direct_server_semantic_route():
     source = SURFACE_PATH.read_text(encoding="utf-8")
 
-    assert 'data-surface-version="2.4"' in source
+    assert 'data-surface-version="2.5"' in source
+    assert 'id="review-json"' in source
+    assert "payload.independent_review" in source
     assert 'sendRequest("tools/call"' in source
     assert 'name: "boris.execute"' in source
     assert "continuation_token: hold.continuation_token" in source

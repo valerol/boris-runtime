@@ -4,10 +4,10 @@ BORIS Runtime is an experimental BOIS/SIMA/BORIS orchestration substrate. The
 repository currently implements a verified passive Core Surface, compatibility
 attestation, a strict Semantic Input compiler, an application-level execution
 service, a non-mutating Semantic Executor, an internal diagnostic context
-provider, and transport adapters.
+provider, an IND2 Independent Reviewer, and transport adapters.
 
-It does not yet implement Independent Review, Policy Kernel state admission,
-external actions, domain physiology, or long-term memory.
+It does not yet implement Policy Kernel state admission, external actions,
+domain physiology, or long-term memory.
 
 ## Active architecture
 
@@ -19,6 +19,8 @@ Core release package
   -> canonical ServerLLMProvider
   -> semantic_executor validation and gate constraints
   -> ExecutionCandidate
+  -> independent_reviewer
+  -> IndependentReview
   -> HOLD handoff / signed stateless continuation
   -> private HTTP /runtime/execute
   -> public MCP boris.execute
@@ -31,10 +33,10 @@ Core release package
 ```
 
 Both paths share the same verified `CoreSurface`. The public execution path
-returns `status: "semantic_candidate"`; it does not claim Independent Review,
-Policy Kernel admission, state mutation, or external action. The frame path
-remains read-only lexical observability and does not determine semantic
-applicability.
+returns `status: "semantic_candidate"` plus a separate `IndependentReview`; it
+does not claim Policy Kernel admission, state mutation, or external action.
+The frame path remains read-only lexical observability and does not determine
+semantic applicability.
 
 ## Repository layout
 
@@ -43,6 +45,7 @@ application/            execution service, compiler, projection, validation
 api/                    private FastAPI adapter
 cli/                    local context-frame adapter
 core_surface/           package loading, integrity, immutable canonical data
+independent_reviewer/   IND2 review and exact calculation bindings
 llm/                    canonical LLM port and configuration
 mcp_server/             public boris.execute adapter
 runtime_compatibility/  substrate checks and RuntimeAttestation
@@ -95,9 +98,9 @@ current package. Older releases are used only for an explicit compatibility
 test.
 
 LLM settings are used by the canonical `ServerLLMProvider`, which owns the
-Semantic Input compiler and Semantic Executor calculator, and by optional
-semantic answer validation. Non-secret provider selection and model settings
-belong in tracked `.env`:
+Semantic Input compiler and Semantic Executor calculator, by the separate
+Independent Reviewer call, and by optional semantic answer validation.
+Non-secret provider selection and model settings belong in tracked `.env`:
 
 ```bash
 BOIS_LLM=openai
@@ -105,21 +108,28 @@ OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=medium
 BORIS_SERVER_LLM_TIMEOUT_SECONDS=120
 BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
+# Optional independent reviewer override:
+BORIS_REVIEWER_LLM=openai
+BORIS_REVIEWER_MODEL=gpt-5.6-terra
 ```
 
 GPT-5.6 Terra supplies a 1,050,000-token context window and supports the
 structured Chat Completions contract used by the Runtime. Core v2.31 requires
 at least `524288`. Runtime fails closed when the capacity declaration is
 absent or insufficient; it does not silently narrow the phase-complete norm
-set. Keep the model, reasoning effort, timeout, and capacity declaration aligned
-when overriding these settings.
+set. The reviewer uses a new adapter instance and a distinct adversarial method,
+so Runtime declares `IND2`, not `IND3` or `IND4`. It inherits `BOIS_LLM` and
+`OPENAI_MODEL` unless the reviewer overrides are set. Keep the model, reasoning
+effort, timeout, capacity declaration, MCP timeout, and reverse-proxy timeout
+aligned when overriding these settings.
 
 The public MCP route always invokes the canonical `SERVER_LLM` provider inside
 Runtime. One `boris.execute` call compiles the strict `SemanticInput`, selects
 the exact phase-complete Semantic View, runs the semantic calculator, validates
-the calculation, constrains the gate, and returns one `ExecutionCandidate`.
+the calculation, constrains the gate, independently reviews the exact immutable
+candidate, and returns both `ExecutionCandidate` and `IndependentReview`.
 ChatGPT is the external client and presentation layer; Runtime does not ask it
-to perform or resume an internal semantic work order.
+to perform, review, or resume an internal semantic work order.
 
 The explicit `ChatGPTHostProvider` keeps the signed `CHATGPT_HOST_ONLY`
 `prepare`/`submit` protocol available only through the private HTTP API as an
@@ -157,7 +167,11 @@ The response uses `execution_version: "boris-execution/1.0"`,
 `status: "semantic_candidate"`, and `semantic_provider: "SERVER_LLM"`. It
 includes the constrained gate, candidate
 result, norm results, unknowns, conflicts, alternatives, and explicit
-typed uncertainties, and limitations. `HOLD`, `STOP`, and `REPAIR` are normal
+typed uncertainties, `boris-independent-review/1.0`, and limitations. The
+review is bound by SHA-256 to the exact Semantic Input, validated semantic
+calculation, ExecutionCandidate, Core reference, and RuntimeAttestation.
+Review `PASS` supports the candidate and its declared gate; it never changes a
+semantic `HOLD`, `STOP`, or `REPAIR` into `PASS`. These gates remain normal
 HTTP 200 Runtime results.
 Every unresolved item also has a typed source classification and resolution
 route. `boris-hold-handoff/1.4` assigns every recoverable system `HOLD` to the
@@ -311,6 +325,7 @@ BORIS_MCP_HOST=127.0.0.1 \
 BORIS_MCP_PORT=9000 \
 BORIS_MCP_PATH=/mcp \
 BORIS_RUNTIME_API_URL=http://127.0.0.1:8000 \
+BORIS_MCP_TIMEOUT_SECONDS=420 \
 python -m mcp_server.server
 ```
 
@@ -324,12 +339,13 @@ provider selectors do not exist. A stale extra `operation` argument cannot
 select another provider.
 
 When `BORIS_RUNTIME_MODE=dev`, `boris.execute` is linked to
-`ui://boris/developer-surface-v2-4.html`. The MCP Apps component displays the
-phase, constrained gate, candidate, path-aware HOLD form, and complete safe
-trace. The trace is delivered only through tool-result `_meta`; it is absent from
-model-visible `content` and `structuredContent`. The component validates an
-operator resume by calling the same `boris.execute` tool and receives the
-recalculated `ExecutionCandidate` directly. It does not call `ui/message`,
+`ui://boris/developer-surface-v2-5.html`. The MCP Apps component displays the
+phase, constrained gate, candidate, separate IND2 review, path-aware HOLD form,
+and complete safe trace. The trace is delivered only through tool-result
+`_meta`; it is absent from model-visible `content` and `structuredContent`.
+The component validates an operator resume by calling the same `boris.execute`
+tool and receives the recalculated and reviewed `ExecutionCandidate` directly.
+It does not call `ui/message`,
 `ui/update-model-context`, or a ChatGPT compatibility follow-up API. A Runtime
 error remains fail-closed. Production mode publishes no Developer Surface
 resource. No public `boris.frame` alias is registered.

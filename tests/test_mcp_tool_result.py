@@ -2,6 +2,7 @@ from mcp_server.server import (
     normalize_error_result,
     normalize_execution_tool_result,
 )
+from tests.review_fixtures import independent_review_packet
 
 
 def test_runtime_error_payload_becomes_error_result():
@@ -35,7 +36,8 @@ def test_execution_payload_becomes_candidate_tool_result():
         "unknowns": [],
         "conflicts": [],
         "alternatives": [],
-        "limitations": ["not_independently_reviewed"],
+        "independent_review": independent_review_packet(),
+        "limitations": ["not_policy_admitted"],
         "hold": {
             "required_operator_input": {
                 "question": "Provide the missing information.",

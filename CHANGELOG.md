@@ -4,6 +4,28 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Added `independent_reviewer` and the additive
+  `boris-independent-review/1.0` execution result. Canonical
+  `ServerLLMProvider` candidates are now reviewed in the same Runtime call
+  through a new adapter instance, a distinct O027-owned adversarial
+  counterexample/gate-cross-check method, and strict `PASS`, `HOLD`, or
+  `REJECTED` validation.
+- Bound every review by SHA-256 to the exact Semantic Input, validated semantic
+  calculation, ExecutionCandidate, Core reference, and RuntimeAttestation.
+  The generated evidence conforms to the Core `IndependentReview` alias and
+  declares only `IND2`; Runtime does not claim a distinct executor/substrate or
+  external human validation.
+- Advanced the receiving-substrate profile to
+  `boris-runtime/phase-4s-independent-review`, declared
+  `independent_review_ind2`, and removed the obsolete
+  `no_independent_reviewer` attestation limitation.
+- Kept review decision and semantic gate as separate axes. Review never mutates
+  or weakens the candidate gate, admits policy, writes state or memory, or
+  performs an external action. Review binding, provider, schema, and output
+  failures return controlled `independent_review_error`.
+- Added optional `BORIS_REVIEWER_LLM` and `BORIS_REVIEWER_MODEL` selection,
+  raised the cumulative MCP timeout default to 420 seconds, and updated
+  Developer Surface to v2.5 with a dedicated Independent Review panel.
 - Added the canonical server-side semantic provider boundary. `SemanticProvider`
   now has a synchronous `ServerLLMProvider` implementation that owns strict
   `SemanticInput` compilation and phase-complete Semantic Executor calculation

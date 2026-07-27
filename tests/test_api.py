@@ -9,6 +9,8 @@ from application.execution import (
     SemanticInputCompilationError,
 )
 from application.host_executor import HostWorkOrderAlreadyConsumed
+from independent_reviewer import IndependentReviewOutputError
+from tests.review_fixtures import independent_review_packet
 
 
 client = TestClient(app_module.app)
@@ -106,6 +108,11 @@ class FakeExecutionService:
         packet = execution_packet(session_id, gate="PASS")
         packet["semantic_provider"] = "CHATGPT_HOST_ONLY"
         packet["host_work_order_id"] = work_order_id
+        packet.pop("independent_review", None)
+        packet["limitations"].insert(
+            0,
+            "not_independently_reviewed",
+        )
         return packet
 
 
@@ -418,6 +425,11 @@ def test_runtime_execute_accepts_operator_terminated_hold_without_token(
     class TerminatedHoldService(FakeExecutionService):
         def execute(self, *args, **kwargs):
             packet = super().execute(*args, **kwargs)
+            packet.pop("independent_review", None)
+            packet["limitations"].insert(
+                0,
+                "not_independently_reviewed",
+            )
             packet["hold"] = {
                 "handoff_version": "boris-hold-handoff/1.4",
                 "status": "operator_terminated",
@@ -604,6 +616,34 @@ def test_runtime_execute_invalid_semantic_input_is_controlled(monkeypatch):
     }
 
 
+def test_runtime_execute_invalid_independent_review_is_controlled(
+    monkeypatch,
+):
+    service = FakeExecutionService(
+        error=IndependentReviewOutputError(
+            "Independent review output fields do not match the contract."
+        )
+    )
+    monkeypatch.setattr(app_module, "execution_service", service)
+
+    response = client.post(
+        "/runtime/execute",
+        json={
+            "session_id": "review-invalid",
+            "input": "Explain BOIS Runtime",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": "independent_review_error",
+        "detail": (
+            "Independent review output fields do not match the contract."
+        ),
+        "session_id": "review-invalid",
+    }
+
+
 def test_runtime_execute_unexpected_error_does_not_leak_detail(monkeypatch):
     service = FakeExecutionService(
         error=RuntimeError(
@@ -698,8 +738,8 @@ def execution_packet(session_id, gate="HOLD"):
         "uncertainties": [],
         "conflicts": [],
         "alternatives": [],
+        "independent_review": independent_review_packet(),
         "limitations": [
-            "not_independently_reviewed",
             "not_policy_admitted",
             "no_state_mutation",
             "no_external_action",

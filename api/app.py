@@ -35,6 +35,7 @@ from application.host_executor import (
 )
 from application.semantic_validation import SemanticValidationOutputError
 from application.validation import ValidationEngine
+from independent_reviewer import IndependentReviewerError
 from llm.config import build_lazy_validator_llm_adapter, load_env_file
 from llm.errors import LLMConfigurationError
 from runtime_compatibility import RuntimeCompatibilityError
@@ -237,6 +238,13 @@ def execute_runtime(request: RuntimeExecutionRequest):
         return _error_response(
             502,
             "semantic_input_error",
+            exc,
+            session_id=session_id,
+        )
+    except IndependentReviewerError as exc:
+        return _error_response(
+            502,
+            "independent_review_error",
             exc,
             session_id=session_id,
         )

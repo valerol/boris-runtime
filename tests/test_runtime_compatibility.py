@@ -26,6 +26,13 @@ def test_compatible_contract_produces_exact_accepted_attestation():
     assert result.attestation.activation_status == "ACCEPTED_IN_SCOPE"
     assert result.attestation.archive_sha256 == surface.archive_sha256
     assert dict(result.attestation.loaded_component_hashes) == {}
+    assert result.attestation.substrate_id == (
+        "boris-runtime/phase-4s-independent-review"
+    )
+    assert "independent_review_ind2" in result.declaration.capabilities
+    assert "no_independent_reviewer" not in (
+        result.attestation.limitations
+    )
     result.require_semantic_evaluation(surface)
 
 

@@ -27,6 +27,9 @@ OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=medium
 BORIS_SERVER_LLM_TIMEOUT_SECONDS=120
 BORIS_SEMANTIC_CONTEXT_WINDOW_TOKENS=1050000
+BORIS_REVIEWER_LLM=openai
+BORIS_REVIEWER_MODEL=gpt-5.6-terra
+BORIS_MCP_TIMEOUT_SECONDS=420
 ```
 
 Tracked `.env` also declares `OPENAI_API_KEY=` and
@@ -116,7 +119,8 @@ Available public MCP tools:
 - `boris.execute`: calls private `/runtime/execute`; Runtime verifies
   compatibility and invokes canonical `ServerLLMProvider`. Runtime compiles the
   strict `SemanticInput`, performs phase-complete calculation and validation,
-  and returns the non-mutating `ExecutionCandidate` in the same tool call. An
+  independently reviews the exact candidate through an IND2 method, and
+  returns both objects in the same tool call. An
   operator-owned HOLD returns a signed handoff; resume calls the same tool,
   reuses the signed input, and recalculates server-side without repeated
   compilation. The public schema has no `operation`, provider selector, or host
@@ -183,8 +187,8 @@ location /mcp {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 
     proxy_buffering off;
-    proxy_read_timeout 300s;
-    proxy_send_timeout 300s;
+    proxy_read_timeout 420s;
+    proxy_send_timeout 420s;
 }
 ```
 
@@ -287,7 +291,7 @@ BORIS
 Suggested connector description:
 
 ```text
-Connects ChatGPT to BORIS through the sole read-only boris.execute tool. Runtime performs semantic compilation and calculation server-side and returns one ExecutionCandidate. Preserve every gate. For an operator-owned HOLD, request only the declared input and resume through its signed continuation. Never choose an operator resolution mode.
+Connects ChatGPT to BORIS through the sole read-only boris.execute tool. Runtime performs semantic compilation, calculation, and IND2 independent review server-side. Preserve the ExecutionCandidate gate and the separate IndependentReview decision. For an operator-owned HOLD, request only the declared input and resume through its signed continuation. Never choose an operator resolution mode.
 ```
 
 After updating tool metadata, refresh connector metadata in ChatGPT.
@@ -300,9 +304,10 @@ Use `BORIS_RUNTIME_MODE=dev` in the Runtime server `.env` to return
 `boris-execution-trace/1.0`. The execution request has no observability-mode
 selector, and the MCP schema has no calculator-provider selector.
 The MCP server reads the same non-secret mode setting and links
-`boris.execute` to `ui://boris/developer-surface-v2-4.html`. The component
+`boris.execute` to `ui://boris/developer-surface-v2-5.html`. The component
 receives the complete safe trace through tool-result `_meta`, hidden from the
-model, and displays it alongside the candidate and path-aware HOLD resume form.
+model, and displays it alongside the candidate, independent review, and
+path-aware HOLD resume form.
 After Runtime validates a non-terminal operator decision, the component calls
 the same public `boris.execute`; `ServerLLMProvider` recalculates the same phase
 inside Runtime and returns the next candidate directly. The component does not

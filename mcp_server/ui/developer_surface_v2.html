@@ -414,14 +414,14 @@
     }
   </style>
 </head>
-<body data-surface-version="2.4">
+<body data-surface-version="2.5">
   <main class="surface">
     <section class="header">
       <div class="identity">
         <div class="mark" aria-hidden="true">BR</div>
         <div>
           <h1>BORIS Developer Surface</h1>
-          <p class="subtitle">Semantic candidate · canonical HOLD resolution</p>
+          <p class="subtitle">Semantic candidate · IND2 independent review</p>
         </div>
       </div>
       <div class="chips">
@@ -487,6 +487,12 @@
     </section>
 
     <section class="panel">
+      <h2>Independent review</h2>
+      <p id="review-note" class="muted"></p>
+      <pre id="review-json">{}</pre>
+    </section>
+
+    <section class="panel">
       <details>
         <summary>Norm results and alternatives</summary>
         <pre id="semantic-json">{}</pre>
@@ -523,6 +529,8 @@
       const formError = byId("form-error");
       const candidateNote = byId("candidate-note");
       const candidateJson = byId("candidate-json");
+      const reviewNote = byId("review-note");
+      const reviewJson = byId("review-json");
       const semanticJson = byId("semantic-json");
       const traceJson = byId("trace-json");
 
@@ -611,6 +619,8 @@
             detail: payload.detail,
             session_id: payload.session_id,
           });
+          reviewNote.textContent = "Review was not completed.";
+          reviewJson.textContent = json(null);
           semanticJson.textContent = json({
             norm_results: [],
             unknowns: [],
@@ -632,6 +642,13 @@
         candidateJson.textContent = json(payload.candidate_result);
         candidateNote.textContent =
           payload.candidate_unavailable_reason || "";
+        const review = payload.independent_review || null;
+        reviewNote.textContent = review
+          ? `${review.decision || "—"} · ${
+              review.independence_level || "—"
+            } · ${review.candidate_gate_assessment || "—"}`
+          : "Independent review was not returned.";
+        reviewJson.textContent = json(review);
         semanticJson.textContent = json({
           norm_results: payload.norm_results || [],
           unknowns: payload.unknowns || [],
@@ -956,7 +973,7 @@
             protocolVersion: "2026-01-26",
             appInfo: {
               name: "BORIS Developer Surface",
-              version: "2.4.0",
+              version: "2.5.0",
             },
             appCapabilities: {},
           });

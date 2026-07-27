@@ -151,9 +151,12 @@ calculator.
 
 The default service constructs canonical `ServerLLMProvider`. The return
 envelope identifies `semantic_provider: SERVER_LLM` and contains an
-`ExecutionCandidate`, not an executed action or `KernelDecision`. The provider
-uses one low-level adapter instance for compilation and calculation; a signed
-resume skips compilation and recalculates through the same provider contract.
+`ExecutionCandidate` plus `boris-independent-review/1.0`, not an executed
+action or `KernelDecision`. Review `PASS` supports the candidate's existing
+gate and does not replace it. The semantic provider uses one low-level adapter
+instance for compilation and calculation; Independent Reviewer uses a new
+adapter instance and distinct IND2 method. A signed resume skips compilation,
+recalculates, and reviews the new exact candidate.
 `BORIS_SERVER_LLM_TIMEOUT_SECONDS` bounds each low-level provider request.
 
 ## Experimental `ChatGPTHostProvider`

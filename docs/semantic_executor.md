@@ -25,11 +25,12 @@ LLM semantic calculation
 Deterministic validation and guards
     |
     v
-ExecutionCandidate for operator review
+ExecutionCandidate for independent review
 ```
 
-Independent Review, Policy Kernel admission, state transitions, tools, memory
-writes, and external action are outside this phase.
+Independent Review is outside this package and is invoked next by the
+application service. Policy Kernel admission, state transitions, tools, memory
+writes, and external action remain unimplemented.
 
 ## Runtime Compatibility Boundary
 
@@ -185,7 +186,9 @@ controlled `SemanticCalculationError` rejections.
 route is owned by canonical `ServerLLMProvider`, which supplies
 `LLMSemanticCalculator` through the configured low-level LLM adapter. One
 public `boris.execute` call performs compilation and calculation inside
-Runtime. The result identifies `semantic_provider: SERVER_LLM`.
+Runtime. The result identifies `semantic_provider: SERVER_LLM`; the application
+then invokes a separate IND2 Reviewer over the exact candidate. See
+[`independent_reviewer.md`](independent_reviewer.md).
 
 The experimental private HTTP host route first returns a signed `COMPILATION`
 work order containing
