@@ -51,6 +51,10 @@ class RuntimeFrameResponse(BaseModel):
 
 
 class RuntimeOperatorInput(BaseModel):
+    resolution_mode: Literal[
+        "PROVIDE_INFORMATION",
+        "ALLOW_CONDITIONAL_PROCEEDING",
+    ]
     statement: str = ""
     values: dict[str, Any] = Field(default_factory=dict)
     resolved_unknowns: list[str] | None = None
@@ -58,7 +62,7 @@ class RuntimeOperatorInput(BaseModel):
 
 class RuntimeExecutionResume(BaseModel):
     continuation_token: constr(strip_whitespace=True, min_length=1)
-    operator_input: str | RuntimeOperatorInput
+    operator_input: RuntimeOperatorInput
 
 
 class RuntimeExecutionRequest(BaseModel):
@@ -230,6 +234,7 @@ class RuntimeSemanticUnknown(BaseModel):
     resolution_kind: str
     expected_type: str
     norm_refs: list[str] = Field(default_factory=list)
+    core_refs: list[str] = Field(default_factory=list)
     question: str
 
 
@@ -245,8 +250,21 @@ class RuntimePredicateInput(BaseModel):
     question: str
 
 
+class RuntimeHoldResolutionMode(BaseModel):
+    mode: Literal[
+        "PROVIDE_INFORMATION",
+        "ALLOW_CONDITIONAL_PROCEEDING",
+    ]
+    available: bool
+    effect: str
+    preserves_unknowns: bool
+
+
 class RuntimeRequiredOperatorInput(BaseModel):
     question: str
+    resolution_modes: list[RuntimeHoldResolutionMode] = Field(
+        default_factory=list,
+    )
     semantic_unknowns: list[RuntimeSemanticUnknown] = Field(
         default_factory=list,
     )
@@ -256,16 +274,41 @@ class RuntimeRequiredOperatorInput(BaseModel):
     response_contract: dict[str, str] = Field(default_factory=dict)
 
 
+class RuntimeHoldRecord(BaseModel):
+    cycle_id: str
+    return_state: str
+    return_gate: str
+    hold_reason: str
+    scope: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    open_debts: list[str] = Field(default_factory=list)
+    state_hash: str
+
+
+class RuntimeBlockingPrecondition(BaseModel):
+    precondition_id: str
+    condition: Literal["RECOVERABLE_PRECONDITION_UNRESOLVED"]
+    status: Literal["UNRESOLVED"]
+    description: str
+    resolution_options: list[
+        Literal[
+            "PROVIDE_INFORMATION",
+            "ALLOW_CONDITIONAL_PROCEEDING",
+        ]
+    ] = Field(default_factory=list)
+
+
 class RuntimeHoldHandoff(BaseModel):
-    handoff_version: Literal[
-        "boris-hold-handoff/1.1",
-        "boris-hold-handoff/1.2",
-    ]
+    handoff_version: Literal["boris-hold-handoff/1.3"]
     status: Literal[
         "operator_input_required",
         "resolution_not_operator_owned",
     ]
     reason: str
+    hold_record: RuntimeHoldRecord
+    blocking_precondition: RuntimeBlockingPrecondition
     required_operator_input: RuntimeRequiredOperatorInput | None
     continuation_token: str | None = Field(
         default=None,
@@ -287,9 +330,11 @@ class RuntimeHoldHandoff(BaseModel):
                 self.required_operator_input is None
                 or not self.continuation_token
                 or not self.expires_at
+                or not self.blocking_precondition.resolution_options
             ):
                 raise ValueError(
-                    "An operator handoff requires input, token, and expiry."
+                    "An operator handoff requires input, token, expiry, and a "
+                    "signed resolution mode."
                 )
         elif (
             self.required_operator_input is not None

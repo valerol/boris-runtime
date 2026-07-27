@@ -201,6 +201,11 @@ Runtime memory. The `boris-execution/1.0` envelope requires:
 
 - a non-empty conditional `candidate_result`, or `candidate_result: null` with
   `candidate_unavailable_reason`;
+- `hold.hold_record` with the Core-required `cycle_id`, return state and gate,
+  reason, scope, source/evidence references, unknowns, open debts, and
+  state hash;
+- a separate `hold.blocking_precondition` whose resolution permits a same-phase
+  gate recheck but does not itself imply `PASS`;
 - for operator-owned targets, `hold.required_operator_input` with separate
   path-aware semantic unknowns
   and Core selector inputs used by formal predicates that evaluated to
@@ -214,14 +219,16 @@ retains the conditional candidate and returns
 `resolution_not_operator_owned` without a token.
 
 Resume uses the same `/runtime/execute` and `boris.execute` entry. Runtime
-verifies the signature, expiry, session, and current Core identity before any
-semantic LLM call. It reconstructs the signed `SemanticInput`, records the
-operator statement as evidence, applies only values for paths declared in the
-signed handoff, verifies that every signed target is closed, and only then
-reruns Semantic Executor without calling `SemanticInputCompiler` again. A new
-HOLD issues a new token containing the updated semantic input. Formal predicate
-constraints remain diagnostic: Runtime never preselects the value that would
-make a predicate true.
+verifies the signature, expiry, session, current Core identity, and signed
+`HoldRecord.state_hash` before any semantic LLM call. `PROVIDE_INFORMATION`
+records operator evidence, applies only declared paths, and requires every
+signed target to close. `ALLOW_CONDITIONAL_PROCEEDING` is offered only for
+unbound, non-norm-linked and non-Core-linked semantic unknowns; it changes no
+fact or authority, preserves every unknown, and records only the operator scope
+decision. Both modes return to the same phase for a fresh gate calculation.
+Neither mode can force `PASS`, weaken `STOP`, or bypass formal predicate,
+authority, or mandatory-evidence requirements. A new `HOLD` issues a new token
+while preserving the cycle identity.
 
 After resume, a non-`HOLD` calculation cannot escape with an empty public
 candidate. The LLM contract requires candidate material, while Semantic

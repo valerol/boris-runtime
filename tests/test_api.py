@@ -377,9 +377,11 @@ def test_runtime_execute_accepts_non_operator_hold_without_token(
                 "resolution_class": "FUTURE_CONTINGENT",
             }]
             packet["hold"] = {
-                "handoff_version": "boris-hold-handoff/1.2",
+                "handoff_version": "boris-hold-handoff/1.3",
                 "status": "resolution_not_operator_owned",
                 "reason": "No unresolved target is operator-owned.",
+                "hold_record": hold_record(),
+                "blocking_precondition": blocking_precondition([]),
                 "required_operator_input": None,
                 "resolution_summary": {
                     "FUTURE_CONTINGENT": [{
@@ -437,6 +439,7 @@ def test_runtime_execute_resume_delegates_signed_handoff(monkeypatch):
     resume = {
         "continuation_token": "v1.payload.signature",
         "operator_input": {
+            "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
             "statement": "Conditional analysis is allowed.",
             "values": {},
             "resolved_unknowns": ["Permission is unknown."],
@@ -471,7 +474,12 @@ def test_runtime_execute_reports_incomplete_operator_resolution(monkeypatch):
             "session_id": "execution-test",
             "resume": {
                 "continuation_token": "v1.payload.signature",
-                "operator_input": "Continue.",
+                "operator_input": {
+                    "resolution_mode": "PROVIDE_INFORMATION",
+                    "statement": "Continue.",
+                    "values": {},
+                    "resolved_unknowns": [],
+                },
             },
         },
     )
@@ -494,7 +502,12 @@ def test_runtime_execute_requires_input_xor_resume():
             "input": "Initial input",
             "resume": {
                 "continuation_token": "v1.payload.signature",
-                "operator_input": "Continue.",
+                "operator_input": {
+                    "resolution_mode": "PROVIDE_INFORMATION",
+                    "statement": "Continue.",
+                    "values": {},
+                    "resolved_unknowns": [],
+                },
             },
         },
     )
@@ -647,11 +660,27 @@ def execution_packet(session_id, gate="HOLD"):
     }
     if gate == "HOLD":
         packet["hold"] = {
-            "handoff_version": "boris-hold-handoff/1.1",
+            "handoff_version": "boris-hold-handoff/1.3",
             "status": "operator_input_required",
             "reason": "Material information remains unresolved.",
+            "hold_record": hold_record(),
+            "blocking_precondition": blocking_precondition([
+                "PROVIDE_INFORMATION",
+                "ALLOW_CONDITIONAL_PROCEEDING",
+            ]),
             "required_operator_input": {
                 "question": "Provide the missing information.",
+                "resolution_modes": [{
+                    "mode": "PROVIDE_INFORMATION",
+                    "available": True,
+                    "effect": "Provide every signed target.",
+                    "preserves_unknowns": False,
+                }, {
+                    "mode": "ALLOW_CONDITIONAL_PROCEEDING",
+                    "available": True,
+                    "effect": "Preserve unknowns and recalculate.",
+                    "preserves_unknowns": True,
+                }],
                 "semantic_unknowns": [{
                     "unknown_id": "unknown-001",
                     "description": "Permission is unknown.",
@@ -659,10 +688,12 @@ def execution_packet(session_id, gate="HOLD"):
                     "resolution_kind": "operator_statement",
                     "expected_type": "text",
                     "norm_refs": [],
+                    "core_refs": [],
                     "question": "Resolve: Permission is unknown.",
                 }],
                 "predicate_inputs": [],
                 "response_contract": {
+                    "resolution_mode": "Required mode.",
                     "statement": "Plain text.",
                     "values": "Optional object.",
                     "resolved_unknowns": "Optional array.",
@@ -673,6 +704,31 @@ def execution_packet(session_id, gate="HOLD"):
             "resume_count": 0,
         }
     return packet
+
+
+def hold_record():
+    return {
+        "cycle_id": "cycle-1",
+        "return_state": "C03",
+        "return_gate": "C03",
+        "hold_reason": "Material information remains unresolved.",
+        "scope": ["C03"],
+        "source_refs": [],
+        "unknowns": ["Permission is unknown."],
+        "evidence_refs": [],
+        "open_debts": ["uncertainty:unknown-001"],
+        "state_hash": "a" * 64,
+    }
+
+
+def blocking_precondition(options):
+    return {
+        "precondition_id": "hold-precondition-1",
+        "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
+        "status": "UNRESOLVED",
+        "description": "Material information remains unresolved.",
+        "resolution_options": options,
+    }
 
 
 def host_work_order_packet(session_id, work_order_type="COMPILATION"):

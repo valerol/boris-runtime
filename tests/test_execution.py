@@ -150,11 +150,28 @@ def test_hold_returns_signed_operator_handoff_and_no_empty_candidate(
     assert result["candidate_result"] is None
     assert result["candidate_unavailable_reason"]
     assert result["hold"]["handoff_version"] == (
-        "boris-hold-handoff/1.2"
+        "boris-hold-handoff/1.3"
     )
     assert result["hold"]["status"] == "operator_input_required"
     assert result["hold"]["continuation_token"].startswith("v1.")
     assert result["hold"]["expires_at"]
+    assert set(result["hold"]["hold_record"]) == {
+        "cycle_id",
+        "return_state",
+        "return_gate",
+        "hold_reason",
+        "scope",
+        "source_refs",
+        "unknowns",
+        "evidence_refs",
+        "open_debts",
+        "state_hash",
+    }
+    assert result["hold"]["hold_record"]["return_state"] == "C03"
+    assert result["hold"]["hold_record"]["return_gate"] == "C03"
+    assert result["hold"]["blocking_precondition"][
+        "resolution_options"
+    ] == ["PROVIDE_INFORMATION"]
     required = result["hold"]["required_operator_input"]
     assert required["semantic_unknowns"] == []
     assert required["predicate_inputs"] == [
@@ -253,6 +270,7 @@ def test_hold_maps_semantic_unknown_path_without_conflating_predicate_input(
             "resolution_kind": "operator_value",
             "expected_type": "json",
             "norm_refs": ["N-ACTION"],
+            "core_refs": [],
             "question": (
                 "Provide the operator-confirmed value for "
                 "authorization.status."
@@ -331,6 +349,7 @@ def test_resume_reuses_signed_semantic_input_and_closes_formal_unknown(
         resume={
             "continuation_token": first["hold"]["continuation_token"],
             "operator_input": {
+                "resolution_mode": "PROVIDE_INFORMATION",
                 "statement": "I authorize this semantic evaluation.",
                 "values": {"authorization.granted": True},
                 "resolved_unknowns": [],
@@ -386,6 +405,7 @@ def test_resume_projects_non_hold_candidate_when_calculator_returns_empty(
         resume={
             "continuation_token": first["hold"]["continuation_token"],
             "operator_input": {
+                "resolution_mode": "PROVIDE_INFORMATION",
                 "statement": "I authorize this semantic evaluation.",
                 "values": {"authorization.granted": True},
                 "resolved_unknowns": [],
@@ -433,7 +453,135 @@ def test_resume_requires_every_signed_hold_target_before_recalculation(
                 "continuation_token": first["hold"][
                     "continuation_token"
                 ],
-                "operator_input": "Continue.",
+                "operator_input": {
+                    "resolution_mode": "PROVIDE_INFORMATION",
+                    "statement": "Continue.",
+                    "values": {},
+                    "resolved_unknowns": [],
+                },
+            },
+        )
+
+    assert calculator.calls == 1
+
+
+def test_conditional_resume_preserves_unknowns_and_rechecks_same_phase(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "dev")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "b" * 32)
+    text = "Evaluate a bounded policy question."
+    description = "A material historical fact is not available."
+    context = {"unknowns": [description]}
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, context),
+    )
+
+    def classify_uncertainty(_view, semantic_input):
+        conditionally_bounded = any(
+            item.get("kind") == "hold_precondition_resolution"
+            for item in semantic_input.evidence
+        )
+        if conditionally_bounded:
+            return [
+                uncertainty(
+                    description,
+                    resolution_class="UNRESOLVABLE_LIMITATION",
+                    uncertainty_id="historical-fact",
+                )
+            ]
+        return [
+            uncertainty(
+                description,
+                resolution_class="OPERATOR_INPUT",
+                operator_question=(
+                    "Provide the historical fact if it is available."
+                ),
+                uncertainty_id="historical-fact",
+            )
+        ]
+
+    calculator.uncertainties = classify_uncertainty
+    first = service.execute(
+        text,
+        session_id="conditional-resume",
+        context=context,
+    )
+
+    assert first["gate"] == "HOLD"
+    assert first["hold"]["blocking_precondition"][
+        "resolution_options"
+    ] == [
+        "PROVIDE_INFORMATION",
+        "ALLOW_CONDITIONAL_PROCEEDING",
+    ]
+    first_record = first["hold"]["hold_record"]
+
+    second = service.execute(
+        session_id="conditional-resume",
+        resume={
+            "continuation_token": first["hold"]["continuation_token"],
+            "operator_input": {
+                "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
+                "statement": (
+                    "Recalculate conditionally and preserve the missing fact "
+                    "as a limitation."
+                ),
+                "values": {},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    assert second["gate"] == "PASS"
+    assert second["phase"] == first_record["return_state"] == "C03"
+    assert second["unknowns"] == [description]
+    semantic_input = second["developer_trace"]["semantic_input"]
+    assert semantic_input["unknowns"] == [description]
+    assert semantic_input["facts"] == {}
+    assert semantic_input["authority"] == {}
+    decision = semantic_input["evidence"][-1]
+    assert decision["kind"] == "hold_precondition_resolution"
+    assert decision["resolution_mode"] == (
+        "ALLOW_CONDITIONAL_PROCEEDING"
+    )
+    assert decision["does_not_establish_facts"] is True
+    continuation = second["developer_trace"]["continuation"]
+    assert continuation["cycle_id"] == first_record["cycle_id"]
+    assert continuation["precondition_resolution"][
+        "gate_recheck_required"
+    ] is True
+    assert continuation["precondition_resolution"][
+        "gate_forced"
+    ] is False
+
+
+def test_conditional_resume_cannot_bypass_predicate_input(monkeypatch):
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "d" * 32)
+    text = "Evaluate an action."
+    service, _adapter, calculator, _events = build_service(
+        compiler_payload(text, triggers=["action"]),
+    )
+    first = service.execute(text, session_id="conditional-blocked")
+
+    with pytest.raises(
+        IncompleteOperatorResolution,
+        match="is not available",
+    ):
+        service.execute(
+            session_id="conditional-blocked",
+            resume={
+                "continuation_token": first["hold"][
+                    "continuation_token"
+                ],
+                "operator_input": {
+                    "resolution_mode": (
+                        "ALLOW_CONDITIONAL_PROCEEDING"
+                    ),
+                    "statement": "Proceed without authorization.",
+                    "values": {},
+                    "resolved_unknowns": [],
+                },
             },
         )
 
@@ -455,7 +603,12 @@ def test_resume_rejects_tampered_token(monkeypatch):
             session_id="tamper-route",
             resume={
                 "continuation_token": token[:-1] + replacement,
-                "operator_input": "Continue.",
+                "operator_input": {
+                    "resolution_mode": "PROVIDE_INFORMATION",
+                    "statement": "Continue.",
+                    "values": {},
+                    "resolved_unknowns": [],
+                },
             },
         )
 
@@ -478,7 +631,12 @@ def test_resume_is_bound_to_signed_session(monkeypatch):
                 "continuation_token": first["hold"][
                     "continuation_token"
                 ],
-                "operator_input": "Continue.",
+                "operator_input": {
+                    "resolution_mode": "PROVIDE_INFORMATION",
+                    "statement": "Continue.",
+                    "values": {},
+                    "resolved_unknowns": [],
+                },
             },
         )
 

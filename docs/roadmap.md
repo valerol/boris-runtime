@@ -63,6 +63,15 @@
 - path-aware semantic unknowns kept separate from signed formal-predicate
   input paths;
 - explicit completeness check before semantic recalculation;
+- Core-compatible `HoldRecord` projection with `cycle_id`, return state/gate,
+  scope, source/evidence references, unknowns, open debts, and state hash;
+- blocking-precondition resolution kept separate from resolution of unknowns;
+- distinct `PROVIDE_INFORMATION` and
+  `ALLOW_CONDITIONAL_PROCEEDING` modes, with conditional recalculation available
+  only when no path, authority, norm-linked, Core-linked, or predicate
+  requirement can be bypassed;
+- preservation of unknowns and open debts during conditional recalculation,
+  with a fresh same-phase gate calculation and no automatic `PASS`;
 - guaranteed non-empty candidate material after a completed non-`HOLD`
   resume, with a trace-marked deterministic projection of the validated
   calculation when the provider returns an empty object;
@@ -159,6 +168,15 @@ state, memory, or action authorization. Tokens are replayable until expiry and
 are globally invalidated by continuation-secret rotation.
 
 ## Next architectural stages
+
+### Typed Semantic Input
+
+- compile established source material into explicit `facts`, `evidence`, and
+  `authority` objects;
+- preserve provenance, source identity, reliability, and claim linkage;
+- distinguish supplied facts from proposals and model-generated design choices;
+- trace source material through semantic claims and applied norm results;
+- fail closed when a typed promotion cannot be justified.
 
 ### Independent Reviewer
 

@@ -218,9 +218,15 @@ also reports missing or mismatched explicit acceptance through a controlled
 error.
 Production output omits diagnostic trace data.
 
-An operator-owned `HOLD` contains `hold.required_operator_input` and a signed
-`continuation_token`. A `HOLD` caused only by Runtime-owned, future, model,
-downstream, or unresolvable uncertainty returns
+Every `HOLD` contains a Core-compatible `hold_record` and a separate
+`blocking_precondition`. An operator-owned `HOLD` additionally contains
+`hold.required_operator_input`, the available `resolution_modes`, and a signed
+`continuation_token`. `PROVIDE_INFORMATION` closes declared targets;
+`ALLOW_CONDITIONAL_PROCEEDING` preserves every unknown and merely permits the
+same phase to be recalculated. The latter is not offered for formal predicate,
+authority, norm-linked, or Core-linked requirements and never forces `PASS`.
+A `HOLD` caused only by Runtime-owned, future, model, downstream, or
+unresolvable uncertainty returns
 `resolution_not_operator_owned`, preserves the conditional candidate, and
 contains no token. A token contains the exact semantic continuation state but
 no server secret. It is replayable until expiry because this stage has no

@@ -395,7 +395,7 @@
         <div class="mark" aria-hidden="true">BR</div>
         <div>
           <h1>BORIS Developer Surface</h1>
-          <p class="subtitle">Semantic candidate · path-aware HOLD projection</p>
+          <p class="subtitle">Semantic candidate · canonical HOLD resolution</p>
         </div>
       </div>
       <div class="chips">
@@ -422,6 +422,10 @@
     <section id="hold-panel" class="panel hold-panel hidden">
       <h2>Operator handoff</h2>
       <p id="hold-question" class="question"></p>
+      <label for="resolution-mode" class="muted">
+        Resolution mode
+      </label>
+      <select id="resolution-mode"></select>
       <h3>Semantic unknowns</h3>
       <ul id="unknown-list" class="unknown-list"></ul>
       <h3>Formal predicate inputs</h3>
@@ -474,6 +478,7 @@
       const resumeValue = byId("resume-value");
       const holdPanel = byId("hold-panel");
       const holdQuestion = byId("hold-question");
+      const resolutionMode = byId("resolution-mode");
       const unknownList = byId("unknown-list");
       const fieldGrid = byId("field-grid");
       const operatorStatement = byId("operator-statement");
@@ -615,6 +620,7 @@
         fieldControls = [];
         unknownList.replaceChildren();
         fieldGrid.replaceChildren();
+        resolutionMode.replaceChildren();
         operatorStatement.value = "";
         formError.textContent = "";
 
@@ -626,6 +632,17 @@
         const required = hold.required_operator_input || {};
         holdQuestion.textContent =
           required.question || "Operator input is required.";
+        for (const mode of required.resolution_modes || []) {
+          if (!mode.available) continue;
+          const option = new Option(
+            mode.mode === "ALLOW_CONDITIONAL_PROCEEDING"
+              ? "Allow bounded conditional recalculation"
+              : "Provide missing information",
+            mode.mode
+          );
+          option.title = mode.effect || "";
+          resolutionMode.append(option);
+        }
 
         for (const unknown of required.semantic_unknowns || []) {
           const item = document.createElement("li");
@@ -686,6 +703,25 @@
           fieldGrid.append(card);
           fieldControls.push(control);
         }
+        updateResolutionMode();
+      }
+
+      function updateResolutionMode() {
+        const conditional =
+          resolutionMode.value === "ALLOW_CONDITIONAL_PROCEEDING";
+        for (const checkbox of unknownList.querySelectorAll(
+          "input[type=checkbox]"
+        )) {
+          checkbox.disabled = conditional;
+          if (conditional) checkbox.checked = false;
+        }
+        for (const control of fieldControls) {
+          control.element.disabled = conditional;
+          if (conditional) control.element.value = "";
+        }
+        operatorStatement.placeholder = conditional
+          ? "Explicitly authorize bounded recalculation with all unknowns preserved."
+          : "Provide the missing fact, decision, or authorization.";
       }
 
       function constraintLabel(constraints) {
@@ -757,17 +793,26 @@
         }
       }
 
+      resolutionMode.addEventListener("change", updateResolutionMode);
+
       resumeButton.addEventListener("click", async () => {
         const hold = currentResult?.hold;
         if (!hold?.continuation_token) {
           formError.textContent = "No continuation token is available.";
           return;
         }
+        const selectedMode = resolutionMode.value;
+        if (!selectedMode) {
+          formError.textContent = "Select an available resolution mode.";
+          return;
+        }
+        const conditional =
+          selectedMode === "ALLOW_CONDITIONAL_PROCEEDING";
         const values = {};
         const resolvedUnknowns = new Set(Array.from(
           unknownList.querySelectorAll("input[type=checkbox]:checked")
         ).map((item) => item.dataset.unknown));
-        for (const control of fieldControls) {
+        for (const control of conditional ? [] : fieldControls) {
           const value = control.read();
           if (value !== undefined) {
             values[control.path] = value;
@@ -777,7 +822,19 @@
           }
         }
         const statement = operatorStatement.value.trim();
-        if (!statement && !Object.keys(values).length) {
+        if (
+          conditional
+          && !statement
+        ) {
+          formError.textContent =
+            "Conditional recalculation requires an explicit operator statement.";
+          return;
+        }
+        if (
+          !conditional
+          && !statement
+          && !Object.keys(values).length
+        ) {
           formError.textContent =
             "Provide a clarification or confirm at least one field.";
           return;
@@ -792,9 +849,12 @@
             resume: {
               continuation_token: hold.continuation_token,
               operator_input: {
+                resolution_mode: selectedMode,
                 statement,
                 values,
-                resolved_unknowns: Array.from(resolvedUnknowns),
+                resolved_unknowns: conditional
+                  ? []
+                  : Array.from(resolvedUnknowns),
               },
             },
           });

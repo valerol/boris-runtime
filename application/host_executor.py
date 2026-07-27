@@ -90,6 +90,8 @@ class HostWorkOrderState:
     correction_count: int = 0
     parent_work_order_id: str | None = None
     correction_issues: tuple[Mapping[str, Any], ...] = ()
+    continuation_cycle_id: str | None = None
+    continuation_resolution: Mapping[str, Any] | None = None
     consumed: bool = False
 
 
@@ -435,6 +437,8 @@ def build_host_work_order(
     correction_count: int = 0,
     parent_work_order_id: str | None = None,
     correction_issues: tuple[Mapping[str, Any], ...] = (),
+    continuation_cycle_id: str | None = None,
+    continuation_resolution: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if correction_count not in {0, 1}:
         raise HostExecutorUnavailable(
@@ -532,6 +536,12 @@ def build_host_work_order(
         correction_issues=tuple(
             dict(issue)
             for issue in correction_issues
+        ),
+        continuation_cycle_id=continuation_cycle_id,
+        continuation_resolution=(
+            dict(continuation_resolution)
+            if continuation_resolution is not None
+            else None
         ),
     ))
     return _host_work_order_envelope(

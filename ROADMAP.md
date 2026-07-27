@@ -12,8 +12,10 @@ Current implemented boundary:
 - Semantic Input compilation and the `boris-execution/1.0` candidate envelope;
 - sole public MCP entry `boris.execute`;
 - ownership-aware uncertainty resolution derived from Core phase capsules;
-- signed path-aware HOLD handoff only for operator-owned targets and
-  complete-target resume through the same tool;
+- Core-compatible `HoldRecord` projection for every `HOLD`, with the blocking
+  precondition separated from unknowns and open debts;
+- signed path-aware HOLD handoff with distinct complete-information and bounded
+  conditional-proceeding resolution modes through the same tool;
 - non-operator HOLD disclosure that preserves the conditional candidate
   without issuing a continuation token;
 - deterministic non-empty candidate projection for any non-`HOLD` route,
@@ -34,14 +36,16 @@ Current implemented boundary:
 
 Immediate next stage:
 
-- Independent Reviewer:
-  - define an immutable `IndependentReview` contract;
-  - bind review to the exact candidate, Core reference, and attestation;
-  - require a genuinely independent evaluation path;
-  - keep review non-mutating and separate from Policy Kernel admission.
+- typed Semantic Input:
+  - compile established material into explicit `facts`, `evidence`, and
+    `authority` objects rather than retaining it only in `phenomenon.input`;
+  - preserve source identity, reliability, provenance, and claim linkage;
+  - reject unsupported fact/evidence/authority promotion fail-closed;
+  - add trace links from source material to semantic claims and norm results.
 
 Following stages:
 
+- Independent Reviewer;
 - durable multi-worker work-order registry;
 - Policy Kernel;
 - admitted State Events and Cycle Guard;

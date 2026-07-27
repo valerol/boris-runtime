@@ -313,11 +313,44 @@ def execution_packet():
             "no_external_action",
         ],
         "hold": {
-            "handoff_version": "boris-hold-handoff/1.1",
+            "handoff_version": "boris-hold-handoff/1.3",
             "status": "operator_input_required",
             "reason": "Material information remains unresolved.",
+            "hold_record": {
+                "cycle_id": "cycle-1",
+                "return_state": "C03",
+                "return_gate": "C03",
+                "hold_reason": "Material information remains unresolved.",
+                "scope": ["C03"],
+                "source_refs": [],
+                "unknowns": ["Independent review is absent."],
+                "evidence_refs": [],
+                "open_debts": ["uncertainty:unknown-001"],
+                "state_hash": "a" * 64,
+            },
+            "blocking_precondition": {
+                "precondition_id": "hold-precondition-1",
+                "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
+                "status": "UNRESOLVED",
+                "description": "Material information remains unresolved.",
+                "resolution_options": [
+                    "PROVIDE_INFORMATION",
+                    "ALLOW_CONDITIONAL_PROCEEDING",
+                ],
+            },
             "required_operator_input": {
                 "question": "Provide the missing information.",
+                "resolution_modes": [{
+                    "mode": "PROVIDE_INFORMATION",
+                    "available": True,
+                    "effect": "Provide every signed target.",
+                    "preserves_unknowns": False,
+                }, {
+                    "mode": "ALLOW_CONDITIONAL_PROCEEDING",
+                    "available": True,
+                    "effect": "Preserve unknowns and recalculate.",
+                    "preserves_unknowns": True,
+                }],
                 "semantic_unknowns": [{
                     "unknown_id": "unknown-001",
                     "description": "Independent review is absent.",
@@ -325,6 +358,7 @@ def execution_packet():
                     "resolution_kind": "operator_statement",
                     "expected_type": "text",
                     "norm_refs": [],
+                    "core_refs": [],
                     "question": "Resolve: Independent review is absent.",
                 }],
                 "predicate_inputs": [],

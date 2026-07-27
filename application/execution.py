@@ -12,6 +12,7 @@ from uuid import uuid4
 from application.continuation import (
     ContinuationCodec,
     ContinuationStateMismatch,
+    build_hold_record,
     build_hold_handoff,
     build_non_operator_hold,
     continuation_count,
@@ -19,7 +20,7 @@ from application.continuation import (
     continuation_text,
     hold_requires_operator_input,
     require_continuation_core,
-    resume_semantic_input,
+    resume_hold,
     resume_token,
     trace_handoff,
 )
@@ -403,6 +404,7 @@ class ExecutionService:
                 raise ValueError("Execution context must be an object.")
             resolved_session_id = session_id or str(uuid4())
             continuation_state = None
+            continuation_resume = None
             resume_count = 0
         else:
             if user_input is not None or context:
@@ -459,10 +461,11 @@ class ExecutionService:
             )
 
         require_continuation_core(continuation_state, surface)
-        semantic_input = resume_semantic_input(
+        continuation_resume = resume_hold(
             continuation_state,
             resume,
         )
+        semantic_input = continuation_resume.semantic_input
         view = SemanticViewBuilder().build(surface, semantic_input)
         return build_host_work_order(
             codec=codec,
@@ -474,6 +477,10 @@ class ExecutionService:
             resume_count=resume_count,
             resumed=continuation_state is not None,
             attestation_sha256=compatibility.attestation_sha256,
+            continuation_cycle_id=continuation_resume.cycle_id,
+            continuation_resolution=dict(
+                continuation_resume.precondition_resolution
+            ),
         )
 
     def submit_host(
@@ -628,6 +635,12 @@ class ExecutionService:
                     correction_count=1,
                     parent_work_order_id=state.work_order_id,
                     correction_issues=tuple(issues),
+                    continuation_cycle_id=(
+                        state.continuation_cycle_id
+                    ),
+                    continuation_resolution=(
+                        state.continuation_resolution
+                    ),
                 )
             return self._host_compliance_hold(
                 state=state,
@@ -648,6 +661,8 @@ class ExecutionService:
             resumed=state.resumed,
             semantic_provider=HOST_SEMANTIC_PROVIDER,
             host_work_order_id=state.work_order_id,
+            continuation_cycle_id=state.continuation_cycle_id,
+            continuation_resolution=state.continuation_resolution,
             started=started,
         )
 
@@ -685,9 +700,21 @@ class ExecutionService:
                 *PUBLIC_LIMITATIONS,
             ],
             "hold": {
-                "handoff_version": "boris-hold-handoff/1.2",
+                "handoff_version": "boris-hold-handoff/1.3",
                 "status": "resolution_not_operator_owned",
                 "reason": reason,
+                "hold_record": build_hold_record(
+                    semantic_input=semantic_input,
+                    core_ref=state.core_ref,
+                    session_id=state.session_id,
+                    hold_reason=reason,
+                    unknowns=semantic_input.unknowns,
+                    open_debts=(
+                        "host-semantic-submission-compliance",
+                    ),
+                    cycle_id=state.continuation_cycle_id,
+                ),
+                "blocking_precondition": {},
                 "required_operator_input": None,
                 "resolution_summary": {
                     "MODEL_UNCERTAINTY": [{
@@ -703,6 +730,17 @@ class ExecutionService:
                 },
                 "resume_count": state.resume_count,
             },
+        }
+        hold_record = result["hold"]["hold_record"]
+        result["hold"]["blocking_precondition"] = {
+            "precondition_id": (
+                "hold-precondition-"
+                + hold_record["state_hash"][:24]
+            ),
+            "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
+            "status": "UNRESOLVED",
+            "description": reason,
+            "resolution_options": [],
         }
         if developer_mode_enabled():
             result["developer_trace"] = {
@@ -747,6 +785,7 @@ class ExecutionService:
                 raise ValueError("Execution context must be an object.")
             resolved_session_id = session_id or str(uuid4())
             continuation_state = None
+            continuation_resume = None
             resume_count = 0
         else:
             if user_input is not None or context:
@@ -796,10 +835,11 @@ class ExecutionService:
         else:
             require_continuation_core(continuation_state, surface)
             stage_started = perf_counter()
-            semantic_input = resume_semantic_input(
+            continuation_resume = resume_hold(
                 continuation_state,
                 resume,
             )
+            semantic_input = continuation_resume.semantic_input
             timings["continuation_resume"] = _elapsed_ms(stage_started)
 
         calculator = self.calculator_factory(adapter)
@@ -821,6 +861,16 @@ class ExecutionService:
             resume_count=resume_count,
             resumed=continuation_state is not None,
             semantic_provider="OPENAI_API",
+            continuation_cycle_id=(
+                continuation_resume.cycle_id
+                if continuation_resume is not None
+                else None
+            ),
+            continuation_resolution=(
+                continuation_resume.precondition_resolution
+                if continuation_resume is not None
+                else None
+            ),
             started=started,
         )
 
@@ -838,6 +888,8 @@ class ExecutionService:
         semantic_provider,
         started,
         host_work_order_id=None,
+        continuation_cycle_id=None,
+        continuation_resolution=None,
     ):
         candidate_result = candidate.to_dict()["candidate_result"]
         candidate_unavailable_reason = None
@@ -896,11 +948,15 @@ class ExecutionService:
                     candidate,
                     session_id,
                     resume_count,
+                    cycle_id=continuation_cycle_id,
                 )
             else:
                 envelope["hold"] = build_non_operator_hold(
                     candidate,
+                    semantic_input,
+                    session_id,
                     resume_count,
+                    cycle_id=continuation_cycle_id,
                 )
         if developer_mode_enabled():
             stage_started = perf_counter()
@@ -919,6 +975,17 @@ class ExecutionService:
                 continuation={
                     "resumed": resumed,
                     "resume_count": resume_count,
+                    "cycle_id": (
+                        envelope.get("hold", {})
+                        .get("hold_record", {})
+                        .get("cycle_id")
+                        or continuation_cycle_id
+                    ),
+                    "precondition_resolution": (
+                        dict(continuation_resolution)
+                        if continuation_resolution is not None
+                        else None
+                    ),
                     "handoff": trace_handoff(envelope.get("hold")),
                 },
                 semantic_provider=semantic_provider,

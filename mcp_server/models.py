@@ -4,6 +4,10 @@ from pydantic import BaseModel, ConfigDict, Field, constr, model_validator
 
 
 class BorisOperatorInput(BaseModel):
+    resolution_mode: Literal[
+        "PROVIDE_INFORMATION",
+        "ALLOW_CONDITIONAL_PROCEEDING",
+    ]
     statement: str = ""
     values: dict[str, Any] = Field(default_factory=dict)
     resolved_unknowns: list[str] | None = None
@@ -11,7 +15,7 @@ class BorisOperatorInput(BaseModel):
 
 class BorisExecuteResume(BaseModel):
     continuation_token: constr(strip_whitespace=True, min_length=1)
-    operator_input: str | BorisOperatorInput
+    operator_input: BorisOperatorInput
 
 
 class BorisExecuteRequest(BaseModel):

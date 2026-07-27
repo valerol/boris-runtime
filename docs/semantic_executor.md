@@ -249,9 +249,10 @@ the exact `SemanticInput` and later reconstructs it for resume; this does not
 change the isolated executor contract, write memory, or admit a state
 transition.
 
-`boris-hold-handoff/1.2` exposes operator resolution only when the typed
-calculation contains an `OPERATOR_INPUT`. It preserves two separate operator
-surfaces:
+`boris-hold-handoff/1.3` exposes operator resolution only when the typed
+calculation contains an `OPERATOR_INPUT`. Every `HOLD` projects the Core
+`HoldRecord` fields and keeps the blocking precondition separate from unknowns
+and open debts. It preserves two separate operator surfaces:
 
 - `semantic_unknowns` contain the unresolved semantic statements, an
   `unknown_id`, and a `target_path` only when exactly one valid path is stated;
@@ -260,9 +261,13 @@ surfaces:
 
 Validation-issue summaries are not presented as operator unknowns. Predicate
 constraints describe the Core expression but do not suggest its matching value
-as the operator answer. Resume requires explicit closure of every signed
-semantic unknown and every signed predicate input before another semantic
-calculation is allowed.
+as the operator answer. `PROVIDE_INFORMATION` requires explicit closure of every
+signed semantic unknown and predicate input. A separate
+`ALLOW_CONDITIONAL_PROCEEDING` mode may resolve only the operator scope decision
+when every signed semantic unknown has no target path, norm reference, or Core
+reference and no predicate input remains. That mode preserves all unknowns,
+establishes no fact or authority, and triggers a same-phase gate recheck without
+forcing `PASS`.
 
 The Semantic View derives an uncertainty-resolution catalog from the current
 phase capsule:

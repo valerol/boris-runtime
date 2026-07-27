@@ -4,6 +4,20 @@ All notable changes to BOIS / SIMA / BORIS Middleware SDK are tracked here.
 
 ## [Unreleased]
 
+- Replaced the ambiguous HOLD-resume semantics with
+  `boris-hold-handoff/1.3` and `boris-continuation/1.3`. Every `HOLD` now
+  projects the Core-required `HoldRecord` fields and a separate signed blocking
+  precondition.
+- Added explicit `PROVIDE_INFORMATION` and
+  `ALLOW_CONDITIONAL_PROCEEDING` resume modes. The information route still
+  requires complete closure of every signed target. Conditional proceeding is
+  available only for unbound semantic unknowns without path, norm, Core, or
+  predicate requirements; it preserves all unknowns and open debts, establishes
+  no fact or authority, and triggers a same-phase gate recalculation without
+  forcing `PASS`.
+- Updated the Developer Surface to expose only signed available resolution
+  modes and to disable fact-resolution controls during conditional proceeding.
+  Old 1.2 continuation tokens are rejected by the new versioned codec.
 - Added `boris-phase-output-contract/1.0`. Every host `CALCULATION`
   work order now derives `candidate_result` from the current phase capsule's
   canonical `primary_object` and full `required_object_schemas` projection.

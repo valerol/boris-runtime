@@ -125,6 +125,7 @@ if result["gate"] == "HOLD":
                     "continuation_token"
                 ],
                 "operator_input": {
+                    "resolution_mode": "PROVIDE_INFORMATION",
                     "statement": "The operator clarification.",
                     "values": operator_values,
                     "resolved_unknowns": [
@@ -142,7 +143,10 @@ token. A valid resume reconstructs the signed
 `SemanticInput`, verifies the current Core identity and session, records
 operator evidence, applies only signed input paths, and skips
 `SemanticInputCompiler`. `semantic_unknowns` and `predicate_inputs` are
-separate; every signed target must be closed before recalculation. It does not
+separate. `PROVIDE_INFORMATION` must close every signed target.
+`ALLOW_CONDITIONAL_PROCEEDING` is available only for unbound unknowns; it
+preserves them and records no fact, authority, or automatic gate decision. It
+does not
 create persistent Runtime state.
 
 The return value is an `ExecutionCandidate`, not an executed action or

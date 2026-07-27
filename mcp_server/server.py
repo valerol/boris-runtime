@@ -10,13 +10,13 @@ from mcp_server.runtime_client import RuntimeAPIClient, RuntimeAPIError
 
 
 SERVER_INSTRUCTIONS = (
-    "BORIS exposes one public tool: boris.execute. Initial and resumed requests "
-    "return signed CHATGPT_HOST_ONLY work orders. Submit the exact ID, token, "
-    "and semantic_input for COMPILATION, then semantic_result for CALCULATION. "
-    "For one HOLD correction, fix listed paths and submit once; if HOLD remains, "
-    "stop. Never answer between calls or alter Core identity, phase, scope, or "
-    "formal results. Preserve every gate. Results are not reviewed, admitted, "
-    "state-mutating, or executed."
+    "BORIS exposes one public tool: boris.execute. Submit each signed host work "
+    "order with its exact ID, token, and requested semantic payload. Apply at "
+    "most one declared HOLD correction. For operator HOLD, use only an available "
+    "resolution_mode; conditional proceeding preserves unknowns and never forces "
+    "PASS. Never answer between calls or alter Core, phase, scope, formal results, "
+    "or gate. Results are candidates only: not reviewed, admitted, state-mutating, "
+    "or executed."
 )
 
 TOOL_ANNOTATIONS = {
@@ -311,12 +311,20 @@ def _candidate_instruction(payload, candidate_json):
             "question",
             "Operator input is required before this route can continue.",
         )
+        modes = [
+            item.get("mode")
+            for item in required.get("resolution_modes", [])
+            if isinstance(item, dict) and item.get("available")
+        ]
         return (
             "BORIS returned HOLD. Do not replace it with an independently "
             "generated answer and do not weaken the gate. Present the operator "
-            f"question exactly: {question} Continue only by calling the same "
+            f"question exactly: {question} Available signed resolution modes: "
+            f"{modes}. Continue only by calling the same "
             "boris.execute tool with resume.continuation_token and "
-            "resume.operator_input from the operator.\n\n"
+            "resume.operator_input from the operator, including one exact "
+            "resolution_mode. ALLOW_CONDITIONAL_PROCEEDING must not include "
+            "values or resolved_unknowns and does not resolve any fact.\n\n"
             "ExecutionCandidate:\n"
             f"{candidate_json}"
         )

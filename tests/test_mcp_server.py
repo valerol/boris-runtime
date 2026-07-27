@@ -100,7 +100,12 @@ def test_boris_execute_forwards_resume_to_runtime():
     client = FakeRuntimeClient(response=_execution_packet())
     resume = {
         "continuation_token": "v1.payload.signature",
-        "operator_input": "Conditional analysis is allowed.",
+        "operator_input": {
+            "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
+            "statement": "Conditional analysis is allowed.",
+            "values": {},
+            "resolved_unknowns": [],
+        },
     }
 
     run_boris_execute(
@@ -213,9 +218,11 @@ def test_public_mcp_request_has_no_legacy_operation_selector():
 def test_non_operator_hold_is_presented_without_inventing_a_question():
     packet = _execution_packet()
     packet["hold"] = {
-        "handoff_version": "boris-hold-handoff/1.2",
+        "handoff_version": "boris-hold-handoff/1.3",
         "status": "resolution_not_operator_owned",
         "reason": "The remaining uncertainty is future-contingent.",
+        "hold_record": _hold_record(),
+        "blocking_precondition": _blocking_precondition([]),
         "required_operator_input": None,
         "resolution_summary": {
             "FUTURE_CONTINGENT": [{
@@ -272,11 +279,27 @@ def _execution_packet():
             "no_external_action",
         ],
         "hold": {
-            "handoff_version": "boris-hold-handoff/1.1",
+            "handoff_version": "boris-hold-handoff/1.3",
             "status": "operator_input_required",
             "reason": "Material information remains unresolved.",
+            "hold_record": _hold_record(),
+            "blocking_precondition": _blocking_precondition([
+                "PROVIDE_INFORMATION",
+                "ALLOW_CONDITIONAL_PROCEEDING",
+            ]),
             "required_operator_input": {
                 "question": "Provide the missing information.",
+                "resolution_modes": [{
+                    "mode": "PROVIDE_INFORMATION",
+                    "available": True,
+                    "effect": "Provide every signed target.",
+                    "preserves_unknowns": False,
+                }, {
+                    "mode": "ALLOW_CONDITIONAL_PROCEEDING",
+                    "available": True,
+                    "effect": "Preserve unknowns and recalculate.",
+                    "preserves_unknowns": True,
+                }],
                 "semantic_unknowns": [{
                     "unknown_id": "unknown-001",
                     "description": "Independent review is absent.",
@@ -284,6 +307,7 @@ def _execution_packet():
                     "resolution_kind": "operator_statement",
                     "expected_type": "text",
                     "norm_refs": [],
+                    "core_refs": [],
                     "question": "Resolve: Independent review is absent.",
                 }],
                 "predicate_inputs": [],
@@ -293,6 +317,31 @@ def _execution_packet():
             "expires_at": "2026-07-25T12:00:00+00:00",
             "resume_count": 0,
         },
+    }
+
+
+def _hold_record():
+    return {
+        "cycle_id": "cycle-1",
+        "return_state": "C03",
+        "return_gate": "C03",
+        "hold_reason": "Material information remains unresolved.",
+        "scope": ["C03"],
+        "source_refs": [],
+        "unknowns": ["Independent review is absent."],
+        "evidence_refs": [],
+        "open_debts": ["uncertainty:unknown-001"],
+        "state_hash": "a" * 64,
+    }
+
+
+def _blocking_precondition(options):
+    return {
+        "precondition_id": "hold-precondition-1",
+        "condition": "RECOVERABLE_PRECONDITION_UNRESOLVED",
+        "status": "UNRESOLVED",
+        "description": "Material information remains unresolved.",
+        "resolution_options": options,
     }
 
 

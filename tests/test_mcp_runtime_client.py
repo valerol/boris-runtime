@@ -163,7 +163,12 @@ def test_execute_resume_posts_only_signed_continuation_material():
     )
     resume = {
         "continuation_token": "v1.payload.signature",
-        "operator_input": "Conditional analysis is allowed.",
+        "operator_input": {
+            "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
+            "statement": "Conditional analysis is allowed.",
+            "values": {},
+            "resolved_unknowns": [],
+        },
     }
 
     client.execute(session_id="test", resume=resume)

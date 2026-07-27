@@ -159,12 +159,11 @@ result, norm results, unknowns, conflicts, alternatives, and explicit
 typed uncertainties, and limitations. `HOLD`, `STOP`, and `REPAIR` are normal
 HTTP 200 Runtime results.
 Every unresolved item also has a typed ownership and resolution route.
-`boris-hold-handoff/1.2` issues a signed continuation only for explicit
-operator-owned targets. It separates path-aware `semantic_unknowns` from
-Core-declared `predicate_inputs` instead of implying that a human-readable
-unknown and a formal selector are the same field. A non-operator `HOLD` keeps
-the conditional candidate and returns `resolution_not_operator_owned` without
-a token. Resume an operator-owned route without resending the original input:
+`boris-hold-handoff/1.3` adds a Core-compatible `hold_record` and separates the
+blocking precondition from retained `semantic_unknowns`, `predicate_inputs`,
+and open debts. A non-operator `HOLD` keeps the conditional candidate and
+returns `resolution_not_operator_owned` without a token. Resume an
+operator-owned route without resending the original input:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/runtime/execute \
@@ -174,6 +173,7 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
     "resume": {
       "continuation_token": "v1...",
       "operator_input": {
+        "resolution_mode": "PROVIDE_INFORMATION",
         "statement": "I confirm the supplied authorization value.",
         "values": {"authorization.granted": true},
         "resolved_unknowns": []
@@ -182,13 +182,16 @@ curl -s -X POST http://127.0.0.1:8000/runtime/execute \
   }'
 ```
 
-The token binds the exact `SemanticInput`, Core identity, session, HOLD targets,
-and expiry. Resume skips the Semantic Input compiler, applies only signed
-operator-input paths, and recalculates the same non-mutating semantic route. A
-plain-text `operator_input` is accepted only when it closes all targetless
-semantic unknowns and no typed path remains. Runtime returns
-`incomplete_operator_resolution` without recalculation when any signed target
-is missing. Empty
+The token binds the exact `SemanticInput`, Core identity, session, `HoldRecord`,
+blocking precondition, targets, and expiry. `PROVIDE_INFORMATION` skips the
+Semantic Input compiler, applies only signed operator-input paths, and requires
+complete target closure. `ALLOW_CONDITIONAL_PROCEEDING` is available only when
+no signed path, authority, Core reference, or norm-linked evidence requirement
+would be bypassed. It preserves every unknown and open debt, records only the
+operator scope decision as evidence, and recalculates the same phase without
+forcing `PASS`. Runtime returns `incomplete_operator_resolution` without
+recalculation when the selected mode cannot resolve the signed precondition.
+Empty
 `candidate_result: {}` is never exposed: `HOLD` uses `null` plus
 `candidate_unavailable_reason`; other gates require a non-empty candidate.
 If a semantic calculator nevertheless returns an empty object for a route

@@ -384,6 +384,10 @@ def test_invalid_hold_correction_preserves_hold_without_third_attempt(
     assert hold["candidate_result"] is None
     assert hold["hold"]["status"] == "resolution_not_operator_owned"
     assert hold["hold"]["required_operator_input"] is None
+    assert hold["hold"]["handoff_version"] == (
+        "boris-hold-handoff/1.3"
+    )
+    assert hold["hold"]["hold_record"]["return_state"] == "C03"
     assert hold["hold"]["resolution_summary"][
         "MODEL_UNCERTAINTY"
     ][0]["issues"][0]["code"] == (
@@ -537,6 +541,7 @@ def test_host_prepare_accepts_signed_hold_resume_without_recompiling(
                 "continuation_token"
             ],
             "operator_input": {
+                "resolution_mode": "PROVIDE_INFORMATION",
                 "statement": "Authorization is confirmed.",
                 "values": {"authorization.granted": True},
                 "resolved_unknowns": [],
@@ -567,6 +572,100 @@ def test_host_prepare_accepts_signed_hold_resume_without_recompiling(
     assert result["semantic_provider"] == "CHATGPT_HOST_ONLY"
     assert len(adapter.calls) == 1
     assert api_calculator.calls == 1
+    assert events.count("semantic_input_compiler") == 1
+
+
+def test_host_conditional_resume_preserves_hold_state_and_rechecks_gate(
+    monkeypatch,
+):
+    monkeypatch.setenv("BORIS_RUNTIME_MODE", "prod")
+    monkeypatch.setenv("BORIS_CONTINUATION_SECRET", "q" * 32)
+    surface = build_surface()
+    text = "Evaluate a bounded policy question."
+    description = "A material historical fact is not available."
+    context = {"unknowns": [description]}
+    source = compiler_payload(text, context)
+    service, _adapter, calculator, events = build_service(
+        source,
+        surface=surface,
+    )
+    calculator.uncertainties = [
+        {
+            "uncertainty_id": "historical-fact",
+            "description": description,
+            "resolution_class": "OPERATOR_INPUT",
+            "target_path": None,
+            "norm_refs": [],
+            "core_refs": [],
+            "operator_question": (
+                "Provide the historical fact if it is available."
+            ),
+        }
+    ]
+    _codec, registry = configure_host_executor(service)
+    first = service.execute(
+        text,
+        session_id="host-conditional-resume",
+        context=context,
+    )
+
+    work_order = service.prepare_host(
+        session_id="host-conditional-resume",
+        resume={
+            "continuation_token": first["hold"][
+                "continuation_token"
+            ],
+            "operator_input": {
+                "resolution_mode": "ALLOW_CONDITIONAL_PROCEEDING",
+                "statement": (
+                    "Recalculate conditionally and preserve the missing "
+                    "fact as a limitation."
+                ),
+                "values": {},
+                "resolved_unknowns": [],
+            },
+        },
+    )
+
+    state = registry._entries[work_order["work_order_id"]]
+    assert state.semantic_input.unknowns == (description,)
+    assert state.continuation_cycle_id == first["hold"][
+        "hold_record"
+    ]["cycle_id"]
+    assert state.continuation_resolution["gate_forced"] is False
+    assert state.continuation_resolution[
+        "preserved_hold_record"
+    ] == first["hold"]["hold_record"]
+    decision = state.semantic_input.evidence[-1]
+    assert decision["kind"] == "hold_precondition_resolution"
+    assert list(decision["unknowns_preserved"]) == ["historical-fact"]
+    assert decision["hold_record"]["state_hash"] == first["hold"][
+        "hold_record"
+    ]["state_hash"]
+
+    view = SemanticViewBuilder().build(
+        surface,
+        state.semantic_input,
+    )
+    semantic_result = AutoCalculator().calculate(
+        view,
+        state.semantic_input,
+    )
+    result = service.submit_host(
+        work_order_id=work_order["work_order_id"],
+        work_order_token=work_order["submission_contract"][
+            "work_order_token"
+        ],
+        semantic_result=semantic_result,
+        session_id="host-conditional-resume",
+    )
+
+    assert result["gate"] == "PASS"
+    assert result["phase"] == first["hold"]["hold_record"][
+        "return_state"
+    ]
+    assert result["unknowns"] == [description]
+    assert "developer_trace" not in result
     assert events.count("semantic_input_compiler") == 1
 
 
